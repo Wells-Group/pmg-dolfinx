@@ -8,7 +8,7 @@
 #SBATCH --gres=gpu:8
 #SBATCH --hint=nomultithread
 #SBATCH --time=00:10:00                  # Run time (d-hh:mm:ss)
-
+#SBATCH --partition=standard-g
 
 
 export MPICH_GPU_SUPPORT_ENABLED=1
