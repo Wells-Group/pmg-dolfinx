@@ -38,19 +38,24 @@ int main(int argc, char *argv[])
 
     // using DeviceVector = dolfinx::acc::Vector<T, acc::Device::HIP>;
     using HostVector = dolfinx::acc::Vector<T, acc::Device::CPP>;
+    using DeviceVector = dolfinx::acc::Vector<T, acc::Device::HIP>;
 
-    DeviceVector x(V->dofmap()->index_map, V->dofmap()->index_map_bs);
-    x.set(T{rank});
+    DeviceVector x(V->dofmap()->index_map, 1);
+    x.set(T(rank));
 
-    DeviceVector y(V->dofmap()->index_map, V->dofmap()->index_map_bs);
+    DeviceVector y(V->dofmap()->index_map, 1);
     y.set(T{1});
 
+    bool verbose = true;
     for (int i = 0; i < 100; i++)
     {
       x.scatter_fwd_begin();
       auto value = acc::norm(x, dolfinx::la::Norm::l2);
       acc::axpy(x, 1.0, x, y);
-      x.scatter_fwd_end();   
+      x.scatter_fwd_end();
+
+      if (rank == 0 and verbose)
+        std::cout << "Dot value: " << value << std::endl;
     }
   }
 
