@@ -37,7 +37,5 @@ add_executable(${PROJECT_NAME} main.cpp ${CMAKE_CURRENT_BINARY_DIR}/poisson.c)
 
 message(WARNING ${CMAKE_CURRENT_SOURCE_DIR})
 include_directories("../../")
-# include_directories(${MPI_CXX_INCLUDE_DIRS})
-# include_directories(${MPI_C_INCLUDE_DIRS})
 
 target_link_libraries(${PROJECT_NAME} dolfinx roc::rocthrust)
