@@ -27,14 +27,7 @@ public:
     _r = std::make_unique<Vector>(map, bs);
   }
 
-  public:
-    CGSolver(std::shared_ptr<const common::IndexMap> map, int bs)
-        : _map{map}, _bs{bs}
-    {
-      _r = std::make_unique<Vector>(_map, _bs);
-      _y = std::make_unique<Vector>(_map, _bs);
-      _p = std::make_unique<Vector>(_map, _bs);
-    }
+  void set_max_iterations(int max_iter) { _max_iter = max_iter; }
 
   // Set Eigenvalue range (min, max)
   void set_eig_range(std::array<T, 2> eig_range) { _eig_range = eig_range; }
@@ -46,23 +39,23 @@ public:
     T alpha, beta;
     T c = (_eig_range[1] - _eig_range[0]) / 2.0;
     T d = (_eig_range[1] + _eig_range[0]) / 2.0;
-    
+
     for (int i = 0; i < _max_iter; ++i)
     {
       // Preconditioner z = M.solve(r);
       copy(*_z, *_r);
-      
+
       if (i == 0)
       {
-	copy(*_p, *_z);
-	alpha = 2.0 / d;
+        copy(*_p, *_z);
+        alpha = 2.0 / d;
       }
       else
       {
-	beta = c * alpha / 2.0;       // calculate new beta
-	beta = beta * beta;
-	alpha = 1.0 / (d - beta);     // calculate new alpha
-	acc::axpy(*_p, beta, *_p, *_z);    // update search direction
+        beta = c * alpha / 2.0; // calculate new beta
+        beta = beta * beta;
+        alpha = 1.0 / (d - beta);       // calculate new alpha
+        acc::axpy(*_p, beta, *_p, *_z); // update search direction
       }
 
       // q = A.p;
@@ -74,16 +67,12 @@ public:
 
       // Update r (r <- r - alpha*q)
       acc::axpy(*_r, -alpha, *_q, *_r);
-
     }
+  }
 
-      // y = A.p;
-      A(x, *_y);
-    }
-
-  private:
-    /// Limit for the number of iterations the solver is allowed to do
-    int _max_iter;
+private:
+  /// Limit for the number of iterations the solver is allowed to do
+  int _max_iter;
 
   /// Eigenvalues
   std::array<T, 2> eig_range;
@@ -93,6 +82,5 @@ public:
   std::unique_ptr<Vector> _z;
   std::unique_ptr<Vector> _q;
   std::unique_ptr<Vector> _r;
-
 };
 } // namespace dolfinx::acc
