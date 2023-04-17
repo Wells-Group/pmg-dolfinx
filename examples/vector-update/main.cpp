@@ -30,7 +30,7 @@ int main(int argc, char* argv[])
 
     // Create a hexahedral mesh
     auto mesh = std::make_shared<mesh::Mesh<T>>(mesh::create_box<T>(
-        comm, {{{0, 0, 0}, {1, 1, 1}}}, {15, 15, 15}, mesh::CellType::hexahedron));
+        comm, {{{0, 0, 0}, {1, 1, 1}}}, {100, 100, 100}, mesh::CellType::hexahedron));
 
     auto V = std::make_shared<fem::FunctionSpace<T>>(
         fem::create_functionspace(functionspace_form_poisson_a, "u", mesh));
