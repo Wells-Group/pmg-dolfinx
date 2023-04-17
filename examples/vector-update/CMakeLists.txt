@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 
-set(PROJECT_NAME mg C CXX)
+set(PROJECT_NAME vector-update C CXX)
 project(${PROJECT_NAME})
 
 set(CMAKE_CXX_STANDARD 20)
