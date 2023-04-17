@@ -97,7 +97,7 @@ int main(int argc, char* argv[])
 
     // Create distributed CG solver
     dolfinx::acc::CGSolver<DeviceVector> cg(V->dofmap()->index_map, 1);
-    cg.set_max_iterations(20);
+    cg.set_max_iterations(50);
     cg.set_tolerance(1e-5);
     cg.store_coefficients(true);
 
@@ -105,7 +105,13 @@ int main(int argc, char* argv[])
     /// ...
     int its = cg.solve(op, x, y, true);
     if (rank == 0)
+    {
       std::cout << "Number of iterations" << its << std::endl;
+      //      auto a = cg.alphas();
+      //      auto b = cg.betas();
+      //      for (int i = 0; i < a.size(); ++i)
+      //        std::cout << a[i] << ", " << b[i] << "\n";
+    }
 
     std::vector<T> eign = cg.compute_eigenvalues();
     std::sort(eign.begin(), eign.end());
@@ -114,17 +120,21 @@ int main(int argc, char* argv[])
     if (rank == 0)
       std::cout << "Eigenvalues:" << eig_range[0] << "-" << eig_range[1] << std::endl;
 
+    eig_range[0] = 0.0;
+    eig_range[1] *= 1.1;
+
     dolfinx::acc::Chebyshev<DeviceVector> cheb(V->dofmap()->index_map, 1, eig_range);
+    T rs = cheb.residual(op, x, y);
     if (rank == 0)
-    {
-      std::cout << "Compute resdiual\n";
-      std::cout << "Cheb resid = " << cheb.residual(op, x, y) << std::endl;
-    }
-    
-    cheb.set_max_iterations(10);
+      std::cout << "Cheb resid = " << rs << std::endl;
+
+    for (int i = 0; i < 10; ++i){
+    cheb.set_max_iterations(1);
     cheb.solve(op, x, y, true);
+    rs = cheb.residual(op, x, y);
     if (rank == 0)
-      std::cout << "Cheb resid = " << cheb.residual(op, x, y) << std::endl;
+      std::cout << i << " Cheb resid = " << rs << std::endl;
+    }
   }
 
   PetscFinalize();

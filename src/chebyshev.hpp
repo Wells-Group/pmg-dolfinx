@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <dolfinx/common/IndexMap.h>
 #include <dolfinx/common/MPI.h>
+#include <iostream>
 
 using namespace dolfinx;
 
@@ -40,11 +41,16 @@ public:
   
   // Solve Ax = b
   template <typename Operator>
-  int solve(Operator& A, Vector& x, const Vector& b, bool verbose)
+  void solve(Operator& A, Vector& x, const Vector& b, bool verbose)
   {
     T alpha, beta;
     T c = (_eig_range[1] - _eig_range[0]) / 2.0;
     T d = (_eig_range[1] + _eig_range[0]) / 2.0;
+
+    // Compute initial residual r = b - Ax
+    A(x, *_q);
+
+    axpy(*_r, T(-1), *_q, b);
 
     for (int i = 0; i < _max_iter; ++i)
     {

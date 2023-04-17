@@ -112,6 +112,9 @@ public:
 
   void store_coefficients(bool val) { _store_coeffs = val; }
 
+  std::vector<T> alphas() { return _alphas;}
+  std::vector<T> betas() { return _betas;}
+
   std::vector<T> compute_eigenvalues()
   {
     int ne = _alphas.size();
