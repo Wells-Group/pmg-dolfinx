@@ -1,8 +1,8 @@
 #include "poisson.h"
-#include "src/cg.hpp"
-#include "src/chebyshev.hpp"
-#include "src/operators.hpp"
-#include "src/vector.hpp"
+#include "../../src/cg.hpp"
+#include "../../src/chebyshev.hpp"
+#include "../../src/operators.hpp"
+#include "../../src/vector.hpp"
 
 #include <basix/e-lagrange.h>
 #include <dolfinx.h>

@@ -16,7 +16,7 @@ template <typename Vector>
 class Chebyshev
 {
   /// The value type
-  using T = Vector::value_type;
+  using T = typename Vector::value_type;
 
 public:
   Chebyshev(std::shared_ptr<const common::IndexMap> map, int bs, std::array<T, 2> eig_range) : _eig_range(eig_range)
@@ -35,12 +35,12 @@ public:
     A(x, *_q);
     axpy(*_r, T(-1), *_q, b);
     T rnorm = squared_norm(*_r);
-    return norm;
+    return rnorm;
   }
   
   // Solve Ax = b
   template <typename Operator>
-  int solve(Operator& A, Vector& x, const Vector& b)
+  int solve(Operator& A, Vector& x, const Vector& b, bool verbose)
   {
     T alpha, beta;
     T c = (_eig_range[1] - _eig_range[0]) / 2.0;
