@@ -1,7 +1,6 @@
 #include "poisson.h"
-#include "src/cg.hpp"
-#include "src/operators.hpp"
 #include "src/vector.hpp"
+#include "src/operators.hpp"
 
 #include <basix/e-lagrange.h>
 #include <dolfinx.h>
@@ -111,8 +110,8 @@ int main(int argc, char *argv[])
     const PetscInt local_size = V->dofmap()->index_map->size_local();
     const PetscInt global_size = V->dofmap()->index_map->size_global();
     Vec _b, _x;
-    VecCreateMPIHIPWithArray(_comm, PetscInt(1), local_size, global_size, NULL, &_x);
-    VecCreateMPIHIPWithArray(_comm, PetscInt(1), local_size, global_size, NULL, &_b);
+    VecCreateMPIHIPWithArray(comm, PetscInt(1), local_size, global_size, NULL, &_x);
+    VecCreateMPIHIPWithArray(comm, PetscInt(1), local_size, global_size, NULL, &_b);
 
     VecHIPPlaceArray(_b, y.array().data());
     VecHIPPlaceArray(_x, x.array().data());
@@ -125,9 +124,9 @@ int main(int argc, char *argv[])
 
     if (rank == 0)
       std::cout << "Converged reason " << reason;
-    
-    VecHIPResetArray(_y_petsc);
-    VecHIPResetArray(_x_petsc);
+
+    VecHIPResetArray(_b);
+    VecHIPResetArray(_x);
   }
 
   PetscFinalize();
