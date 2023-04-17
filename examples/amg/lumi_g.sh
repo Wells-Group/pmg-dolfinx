@@ -1,5 +1,5 @@
 # LUMI-G environment
-export SLURM_ACCOUNT=project_465000502
+export SLURM_ACCOUNT=project_465000356
 export SLURM_PARTITION=small-g
 
 export SBATCH_ACCOUNT=${SLURM_ACCOUNT}
