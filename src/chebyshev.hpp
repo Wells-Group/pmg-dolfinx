@@ -19,7 +19,7 @@ class Chebyshev
   using T = Vector::value_type;
 
 public:
-  Chebyshev(std::shared_ptr<const common::IndexMap> map, int bs)
+  Chebyshev(std::shared_ptr<const common::IndexMap> map, int bs, std::array<T, 2> eig_range) : _eig_range(eig_range)
   {
     _p = std::make_unique<Vector>(map, bs);
     _z = std::make_unique<Vector>(map, bs);
@@ -29,9 +29,15 @@ public:
 
   void set_max_iterations(int max_iter) { _max_iter = max_iter; }
 
-  // Set Eigenvalue range (min, max)
-  void set_eig_range(std::array<T, 2> eig_range) { _eig_range = eig_range; }
-
+  template <typename Operator>
+  T residual(Operator& A, Vector& x, const Vector& b)
+  {
+    A(x, *_q);
+    axpy(*_r, T(-1), *_q, b);
+    T rnorm = squared_norm(*_r);
+    return norm;
+  }
+  
   // Solve Ax = b
   template <typename Operator>
   int solve(Operator& A, Vector& x, const Vector& b)
@@ -75,7 +81,7 @@ private:
   int _max_iter;
 
   /// Eigenvalues
-  std::array<T, 2> eig_range;
+  std::array<T, 2> _eig_range;
 
   /// Working vectors
   std::unique_ptr<Vector> _p;

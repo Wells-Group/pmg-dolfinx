@@ -1,5 +1,6 @@
 #include "poisson.h"
 #include "src/cg.hpp"
+#include "src/chebyshev.hpp"
 #include "src/operators.hpp"
 #include "src/vector.hpp"
 
@@ -12,6 +13,7 @@
 #include <dolfinx/mesh/generation.h>
 #include <iostream>
 #include <memory>
+#include <array>
 #include <mpi.h>
 #include <petscdevice.h>
 
@@ -96,15 +98,28 @@ int main(int argc, char* argv[])
 
     // Create distributed CG solver
     dolfinx::acc::CGSolver<DeviceVector> cg(V->dofmap()->index_map, 1);
-    cg.set_max_iterations(100);
+    cg.set_max_iterations(20);
     cg.set_tolerance(1e-5);
     cg.store_coefficients(true);
 
     // Solve
     int its = cg.solve(op, x, y, true);
-
     if (rank == 0)
       std::cout << "Number of iterations" << its << std::endl;
+
+    std::vector<T> eign = cg.compute_eigenvalues();
+    std::sort(eign.begin(), eign.end());
+    std::array<T, 2> eig_range = {eign.front(), eign.back()};
+
+    dolfinx::acc::Chebyshev<DeviceVector> cheb(V->dofmap()->index_map, 1, eig_range);
+    if (rank == 0)
+      std::cout << "Cheb resid = " << cheb.residual(op, x, y) << std::endl;
+    cheb.set_max_iterations(10);
+    cheb.solve(op, x, y, true);
+    if (rank == 0)
+      std::cout << "Cheb resid = " << cheb.residual(op, x, y) << std::endl;
+    
+    
   }
 
   PetscFinalize();
