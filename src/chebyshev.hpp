@@ -39,23 +39,23 @@ public:
     T alpha, beta;
     T c = (_eig_range[1] - _eig_range[0]) / 2.0;
     T d = (_eig_range[1] + _eig_range[0]) / 2.0;
-    
+
     for (int i = 0; i < _max_iter; ++i)
     {
       // Preconditioner z = M.solve(r);
       copy(*_z, *_r);
-      
+
       if (i == 0)
       {
-	copy(*_p, *_z);
-	alpha = 2.0 / d;
+        copy(*_p, *_z);
+        alpha = 2.0 / d;
       }
       else
       {
-	beta = c * alpha / 2.0;       // calculate new beta
-	beta = beta * beta;
-	alpha = 1.0 / (d - beta);     // calculate new alpha
-	acc::axpy(*_p, beta, *_p, *_z);    // update search direction
+        beta = c * alpha / 2.0; // calculate new beta
+        beta = beta * beta;
+        alpha = 1.0 / (d - beta);       // calculate new alpha
+        acc::axpy(*_p, beta, *_p, *_z); // update search direction
       }
 
       // q = A.p;
@@ -67,9 +67,7 @@ public:
 
       // Update r (r <- r - alpha*q)
       acc::axpy(*_r, -alpha, *_q, *_r);
-
     }
-
   }
 
 private:
@@ -84,6 +82,5 @@ private:
   std::unique_ptr<Vector> _z;
   std::unique_ptr<Vector> _q;
   std::unique_ptr<Vector> _r;
-
 };
 } // namespace dolfinx::acc
