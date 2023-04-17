@@ -29,9 +29,8 @@ int main(int argc, char* argv[])
     MPI_Comm_rank(comm, &rank);
 
     // Create a hexahedral mesh
-    auto mesh = std::make_shared<mesh::Mesh<T>>(
-        mesh::create_box<T>(comm, {{{0, 0, 0}, {1, 1, 1}}}, {15, 15, 15},
-                            mesh::CellType::hexahedron));
+    auto mesh = std::make_shared<mesh::Mesh<T>>(mesh::create_box<T>(
+        comm, {{{0, 0, 0}, {1, 1, 1}}}, {15, 15, 15}, mesh::CellType::hexahedron));
 
     auto V = std::make_shared<fem::FunctionSpace<T>>(
         fem::create_functionspace(functionspace_form_poisson_a, "u", mesh));
@@ -41,8 +40,8 @@ int main(int argc, char* argv[])
     auto f = std::make_shared<fem::Function<T>>(V);
 
     // Define variational forms
-    auto a = std::make_shared<fem::Form<T>>(fem::create_form<T>(
-        *form_poisson_a, {V, V}, {}, {{"kappa", kappa}}, {}));
+    auto a = std::make_shared<fem::Form<T>>(
+        fem::create_form<T>(*form_poisson_a, {V, V}, {}, {{"kappa", kappa}}, {}));
     auto L = std::make_shared<fem::Form<T>>(
         fem::create_form<T>(*form_poisson_L, {V}, {{"f", f}}, {}, {}));
 

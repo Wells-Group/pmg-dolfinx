@@ -31,8 +31,7 @@ public:
   {
     T* result = nullptr;
 
-    hipError_t e
-        = hipMallocManaged(&result, size * sizeof(T), hipMemAttachGlobal);
+    hipError_t e = hipMallocManaged(&result, size * sizeof(T), hipMemAttachGlobal);
     std::string error_msg = hipGetErrorString(e);
 
     if (e != hipSuccess)

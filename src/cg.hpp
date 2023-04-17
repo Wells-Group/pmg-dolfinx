@@ -13,7 +13,6 @@ namespace
 template <typename T>
 inline void tqli_ml(T* d, T* e, int m, int l)
 {
-
   T g = (d[l + 1] - d[l]) / (2.0 * e[l]);
   T r = sqrt(g * g + 1.0);
   if (g >= 0)
@@ -95,8 +94,7 @@ class CGSolver
   using T = typename Vector::value_type;
 
 public:
-  CGSolver(std::shared_ptr<const common::IndexMap> map, int bs)
-      : _map{map}, _bs{bs}
+  CGSolver(std::shared_ptr<const common::IndexMap> map, int bs) : _map{map}, _bs{bs}
   {
     _r = std::make_unique<Vector>(_map, _bs);
     _y = std::make_unique<Vector>(_map, _bs);
@@ -185,8 +183,7 @@ public:
 
       if (rank == 0 and verbose)
       {
-        std::cout << "Iteration " << k << " residual " << std::sqrt(rnorm)
-                  << std::endl;
+        std::cout << "Iteration " << k << " residual " << std::sqrt(rnorm) << std::endl;
       }
 
       if (rnorm / rnorm0 < rtol2)

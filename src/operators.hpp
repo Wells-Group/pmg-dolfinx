@@ -29,9 +29,8 @@ public:
    *
    * @throw std::runtime_error if the rank of the form is not 2.
    */
-  PETScOperator(
-      std::shared_ptr<fem::Form<T, T>> a,
-      const std::vector<std::shared_ptr<const fem::DirichletBC<T, T>>>& bcs)
+  PETScOperator(std::shared_ptr<fem::Form<T, T>> a,
+                const std::vector<std::shared_ptr<const fem::DirichletBC<T, T>>>& bcs)
   {
     dolfinx::common::Timer t0("~setup phase");
     static_assert(std::is_same<T, PetscScalar>(), "Type mismatch");
@@ -63,18 +62,14 @@ public:
     _comm = V->mesh()->comm();
 
     _map = pattern.index_map(1);
-    const PetscInt local_size =  _map->size_local();
-    const PetscInt global_size =  _map->size_global();
+    const PetscInt local_size = _map->size_local();
+    const PetscInt global_size = _map->size_global();
 
-    VecCreateMPIHIPWithArray(_comm, PetscInt(1), local_size, global_size, NULL,
-                             &_x_petsc);
-
-    VecCreateMPIHIPWithArray(_comm, PetscInt(1), local_size, global_size, NULL,
-                             &_y_petsc);
+    VecCreateMPIHIPWithArray(_comm, PetscInt(1), local_size, global_size, NULL, &_x_petsc);
+    VecCreateMPIHIPWithArray(_comm, PetscInt(1), local_size, global_size, NULL, &_y_petsc);
   }
 
-  PETScOperator(const fem::FunctionSpace<T>& V0,
-                const fem::FunctionSpace<T>& V1)
+  PETScOperator(const fem::FunctionSpace<T>& V0, const fem::FunctionSpace<T>& V1)
   {
     _comm = V0.mesh()->comm();
     assert(V0.mesh());
@@ -91,9 +86,8 @@ public:
     assert(dofmap0->index_map);
     assert(dofmap1->index_map);
 
-    la::SparsityPattern pattern(
-        _comm, {dofmap1->index_map, dofmap0->index_map},
-        {dofmap1->index_map_bs(), dofmap0->index_map_bs()});
+    la::SparsityPattern pattern(_comm, {dofmap1->index_map, dofmap0->index_map},
+                                {dofmap1->index_map_bs(), dofmap0->index_map_bs()});
 
     int tdim = mesh->topology()->dim();
     auto map = mesh->topology()->index_map(tdim);
@@ -113,14 +107,11 @@ public:
     MatConvert(_host_mat, MATAIJHIPSPARSE, MAT_INITIAL_MATRIX, &_hip_mat);
 
     _map = pattern.index_map(1);
-    const PetscInt local_size =  _map->size_local();
-    const PetscInt global_size =  _map->size_global();
+    const PetscInt local_size = _map->size_local();
+    const PetscInt global_size = _map->size_global();
 
-    VecCreateMPIHIPWithArray(_comm, PetscInt(1), local_size, global_size, NULL,
-                             &_x_petsc);
-
-    VecCreateMPIHIPWithArray(_comm, PetscInt(1), local_size, global_size, NULL,
-                             &_y_petsc);
+    VecCreateMPIHIPWithArray(_comm, PetscInt(1), local_size, global_size, NULL, &_x_petsc);
+    VecCreateMPIHIPWithArray(_comm, PetscInt(1), local_size, global_size, NULL, &_y_petsc);
   }
 
   /**
@@ -132,7 +123,6 @@ public:
     VecDestroy(&_y_petsc);
     MatDestroy(&_hip_mat);
     MatDestroy(&_hip_mat);
-
   }
 
   /**
@@ -172,10 +162,10 @@ public:
   }
 
 private:
-  Vec _x_petsc = nullptr;               // PETSc vector for input
-  Vec _y_petsc = nullptr;               // PETSc vector for output
-  Mat _host_mat;                        // Host PETSc matrix
-  Mat _hip_mat;                         // HIP matrix
-  MPI_Comm _comm;                       // MPI communicator
+  Vec _x_petsc = nullptr; // PETSc vector for input
+  Vec _y_petsc = nullptr; // PETSc vector for output
+  Mat _host_mat;          // Host PETSc matrix
+  Mat _hip_mat;           // HIP matrix
+  MPI_Comm _comm;         // MPI communicator
   std::shared_ptr<const common::IndexMap> _map;
 };

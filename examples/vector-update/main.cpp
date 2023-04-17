@@ -18,7 +18,7 @@
 using namespace dolfinx;
 using T = double;
 
-int main(int argc, char *argv[])
+int main(int argc, char* argv[])
 {
   init_logging(argc, argv);
   PetscInitialize(&argc, &argv, nullptr, nullptr);
@@ -29,9 +29,8 @@ int main(int argc, char *argv[])
     MPI_Comm_rank(comm, &rank);
 
     // Create a hexahedral mesh
-    auto mesh = std::make_shared<mesh::Mesh<T>>(
-        mesh::create_box<T>(comm, {{{0, 0, 0}, {1, 1, 1}}}, {15, 15, 15},
-                            mesh::CellType::hexahedron));
+    auto mesh = std::make_shared<mesh::Mesh<T>>(mesh::create_box<T>(
+        comm, {{{0, 0, 0}, {1, 1, 1}}}, {15, 15, 15}, mesh::CellType::hexahedron));
 
     auto V = std::make_shared<fem::FunctionSpace<T>>(
         fem::create_functionspace(functionspace_form_poisson_a, "u", mesh));

@@ -1,23 +1,22 @@
 #include "hip/hip_runtime.h"
 #include <dolfinx/la/MatrixCSR.h>
 
-
-#define err_check(command) {     \
-    hipError_t status = command; \
-    if (status!=hipSuccess) {     \
-        printf("(%s:%d) Error: Hip reports %s\n", __FILE__, __LINE__, hipGetErrorString(status)); \
-        exit(1); \
-    } \
-}
-
+#define err_check(command)                                                                         \
+  {                                                                                                \
+    hipError_t status = command;                                                                   \
+    if (status != hipSuccess)                                                                      \
+    {                                                                                              \
+      printf("(%s:%d) Error: Hip reports %s\n", __FILE__, __LINE__, hipGetErrorString(status));    \
+      exit(1);                                                                                     \
+    }                                                                                              \
+  }
 
 namespace dolfinx::acc
 {
 template <typename T>
 class Matrix
 {
-  public:
-  
+public:
   /// The value type
   using value_type = T;
 
@@ -27,14 +26,19 @@ class Matrix
     // Allocate data on device
     err_check(hipMalloc((void**)&row_ptr, A.row_ptr().size() * sizeof(std::int32_t)));
     err_check(hipMalloc((void**)&cols, A.cols().size() * sizeof(std::int32_t)));
-    err_check(hipMalloc((void**)&off_diag_offset, A.off_diag_offset().size() * sizeof(std::int32_t)));
+    err_check(
+        hipMalloc((void**)&off_diag_offset, A.off_diag_offset().size() * sizeof(std::int32_t)));
     err_check(hipMalloc((void**)&values, A.values().size() * sizeof(T)));
 
     // Copy data from host to device
-    err_check(hipMemcpy(row_ptr,A.row_ptr().data(),A.row_ptr().size() * sizeof(std::int32_t),hipMemcpyHostToDevice));
-    err_check(hipMemcpy(cols, A.cols().data(), A.cols().size() * sizeof(std::int32_t),hipMemcpyHostToDevice));
-    err_check(hipMemcpy(off_diag_offset, A.off_diag_offset().data(), A.off_diag_offset().size() * sizeof(std::int32_t),hipMemcpyHostToDevice));
-    err_check(hipMemcpy(values,A.values().data(),A.values().size() * sizeof(T), hipMemcpyHostToDevice));
+    err_check(hipMemcpy(row_ptr, A.row_ptr().data(), A.row_ptr().size() * sizeof(std::int32_t),
+                        hipMemcpyHostToDevice));
+    err_check(hipMemcpy(cols, A.cols().data(), A.cols().size() * sizeof(std::int32_t),
+                        hipMemcpyHostToDevice));
+    err_check(hipMemcpy(off_diag_offset, A.off_diag_offset().data(),
+                        A.off_diag_offset().size() * sizeof(std::int32_t), hipMemcpyHostToDevice));
+    err_check(
+        hipMemcpy(values, A.values().data(), A.values().size() * sizeof(T), hipMemcpyHostToDevice));
   }
 
   ~Matrix()
@@ -51,7 +55,7 @@ private:
   std::int32_t* cols;
   std::int32_t* off_diag_offset;
 };
-}
+} // namespace dolfinx::acc
 
 // // /// Computes y += A*x for a local CSR matrix A and local dense vectors x,y
 // // /// @param[in] values Nonzero values of A
@@ -263,4 +267,3 @@ private:
 //     //  ]
 //     // finalize ghost updsgnd stage:  spmv - off-diagonal
 //     //} yi[0] += Ai[1] * xi[1]
-  
