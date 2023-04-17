@@ -1,7 +1,7 @@
 #include "poisson.h"
-#include "src/cg.hpp"
-#include "src/operators.hpp"
-#include "src/vector.hpp"
+#include "cg.hpp"
+#include "operators.hpp"
+#include "vector.hpp"
 
 #include <basix/e-lagrange.h>
 #include <dolfinx.h>
