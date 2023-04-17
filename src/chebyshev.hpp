@@ -11,12 +11,21 @@ using namespace dolfinx;
 namespace dolfinx::acc
 {
 
-  /// Conjugate gradient method
-  template <typename Vector>
-  class Chebyshev
+/// Conjugate gradient method
+template <typename Vector>
+class Chebyshev
+{
+  /// The value type
+  using T = Vector::value_type;
+
+public:
+  Chebyshev(std::shared_ptr<const common::IndexMap> map, int bs)
   {
-    /// The value type
-    using T = Vector::value_type;
+    _p = std::make_unique<Vector>(map, bs);
+    _z = std::make_unique<Vector>(map, bs);
+    _q = std::make_unique<Vector>(map, bs);
+    _r = std::make_unique<Vector>(map, bs);
+  }
 
   public:
     CGSolver(std::shared_ptr<const common::IndexMap> map, int bs)
@@ -27,14 +36,46 @@ namespace dolfinx::acc
       _p = std::make_unique<Vector>(_map, _bs);
     }
 
-    void set_max_iterations(int max_iter) { _max_iter = max_iter; }
+  // Set Eigenvalue range (min, max)
+  void set_eig_range(std::array<T, 2> eig_range) { _eig_range = eig_range; }
 
-    // Solve Ax = b
-    template <typename Operator>
-    int solve(Operator &A, Vector &x, const Vector &b)
+  // Solve Ax = b
+  template <typename Operator>
+  int solve(Operator& A, Vector& x, const Vector& b)
+  {
+    T alpha, beta;
+    T c = (_eig_range[1] - _eig_range[0]) / 2.0;
+    T d = (_eig_range[1] + _eig_range[0]) / 2.0;
+    
+    for (int i = 0; i < _max_iter; ++i)
     {
-      T alpha, beta, rho, rho1;
-      T normb = squared_norm(*_r);
+      // Preconditioner z = M.solve(r);
+      copy(*_z, *_r);
+      
+      if (i == 0)
+      {
+	copy(*_p, *_z);
+	alpha = 2.0 / d;
+      }
+      else
+      {
+	beta = c * alpha / 2.0;       // calculate new beta
+	beta = beta * beta;
+	alpha = 1.0 / (d - beta);     // calculate new alpha
+	acc::axpy(*_p, beta, *_p, *_z);    // update search direction
+      }
+
+      // q = A.p;
+      A(*_p, *_q);
+
+      // Update x and r
+      // Update x (x <- x + alpha*p)
+      acc::axpy(x, alpha, *_p, x);
+
+      // Update r (r <- r - alpha*q)
+      acc::axpy(*_r, -alpha, *_q, *_r);
+
+    }
 
       // y = A.p;
       A(x, *_y);
@@ -44,24 +85,14 @@ namespace dolfinx::acc
     /// Limit for the number of iterations the solver is allowed to do
     int _max_iter;
 
-    /// Relative tolerance.
-    double _rtol;
+  /// Eigenvalues
+  std::array<T, 2> eig_range;
 
-    /// compute eigenvalues
-    bool _compute_eigenvalues = false;
+  /// Working vectors
+  std::unique_ptr<Vector> _p;
+  std::unique_ptr<Vector> _z;
+  std::unique_ptr<Vector> _q;
+  std::unique_ptr<Vector> _r;
 
-    // Map describing the data layout
-    std::shared_ptr<const common::IndexMap> _map;
-
-    // Block size
-    int _bs;
-
-    /// Working vectors
-    std::unique_ptr<Vector> _p;
-    std::unique_ptr<Vector> _z;
-    std::unique_ptr<Vector> _q;
-
-    std::vector<T> _alphas;
-    std::vector<T> _betas;
-  };
+};
 } // namespace dolfinx::acc

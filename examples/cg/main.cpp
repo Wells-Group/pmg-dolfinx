@@ -1,6 +1,7 @@
 #include "poisson.h"
-#include "src/vector.hpp"
+#include "src/cg.hpp"
 #include "src/operators.hpp"
+#include "src/vector.hpp"
 
 #include <basix/e-lagrange.h>
 #include <dolfinx.h>
@@ -17,7 +18,7 @@
 using namespace dolfinx;
 using T = double;
 
-int main(int argc, char *argv[])
+int main(int argc, char* argv[])
 {
   init_logging(argc, argv);
   PetscInitialize(&argc, &argv, nullptr, nullptr);
@@ -90,43 +91,20 @@ int main(int argc, char *argv[])
 
     // Create petsc operator
     PETScOperator op(a, {bc});
+    // x = Ay
     op(y, x);
 
-    Mat A = op.device_matrix();
+    // Create distributed CG solver
+    dolfinx::acc::CGSolver<DeviceVector> cg(V->dofmap()->index_map, 1);
+    cg.set_max_iterations(100);
+    cg.set_tolerance(1e-5);
+    cg.store_coefficients(true);
 
-    // Create PETSc KSP object
-    KSP solver;
-    PC prec;
-    KSPCreate(comm, &solver);
-    KSPSetType(solver, KSPCG);
-    KSPSetOperators(solver, A, A);
-    KSPGetPC(solver, &prec);
-    PCSetType(prec, PCGAMG);
-    PCGAMGSetType(prec, PCGAMGAGG);
-    KSPSetFromOptions(solver);
-    KSPSetUp(solver);
-
-    // SET OPTIONS????
-    const PetscInt local_size = V->dofmap()->index_map->size_local();
-    const PetscInt global_size = V->dofmap()->index_map->size_global();
-    Vec _b, _x;
-    VecCreateMPIHIPWithArray(comm, PetscInt(1), local_size, global_size, NULL, &_x);
-    VecCreateMPIHIPWithArray(comm, PetscInt(1), local_size, global_size, NULL, &_b);
-
-    VecHIPPlaceArray(_b, y.array().data());
-    VecHIPPlaceArray(_x, x.array().data());
-
-    KSPSolve(solver, _b, _x);
-    KSPView(solver, PETSC_VIEWER_STDOUT_WORLD);
-
-    KSPConvergedReason reason;
-    KSPGetConvergedReason(solver, &reason);
+    // Solve
+    int its = cg.solve(op, x, y, true);
 
     if (rank == 0)
-      std::cout << "Converged reason " << reason;
-
-    VecHIPResetArray(_b);
-    VecHIPResetArray(_x);
+      std::cout << "Number of iterations" << its << std::endl;
   }
 
   PetscFinalize();
