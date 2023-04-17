@@ -15,48 +15,50 @@
 #include <thrust/transform_reduce.h>
 #include <type_traits>
 
-
 namespace
 {
 template <typename T>
 static __global__ void pack(const int N, const std::int32_t* __restrict__ indices,
-                               const T* __restrict__ in, T* __restrict__ out) {
+                            const T* __restrict__ in, T* __restrict__ out)
+{
   int gid = blockIdx.x * blockDim.x + threadIdx.x;
-  if (gid < N) {
+  if (gid < N)
+  {
     out[gid] = in[indices[gid]];
   }
 }
 
 template <typename T>
 static __global__ void unpack(const int N, const std::int32_t* __restrict__ indices,
-                              const T* __restrict__ in, T* __restrict__ out) {
+                              const T* __restrict__ in, T* __restrict__ out)
+{
   int gid = blockIdx.x * blockDim.x + threadIdx.x;
-  if (gid < N) {
+  if (gid < N)
+  {
     out[indices[gid]] = in[gid];
   }
 }
 
-
 template <typename T>
 static __global__ void _scatter(std::int32_t N, const int32_t* __restrict__ indices,
-                                const T* __restrict__ in, T* __restrict__ out) {
+                                const T* __restrict__ in, T* __restrict__ out)
+{
   int gid = blockIdx.x * blockDim.x + threadIdx.x;
-  if (gid < N) {
+  if (gid < N)
+  {
     atomicAdd(&out[indices[gid]], in[gid]);
   }
 }
-}
+} // namespace
 
-
-#define err_check(command)                                                     \
-  {                                                                            \
-    hipError_t status = command;                                               \
-    if (status != hipSuccess)                                                  \
-    {                                                                          \
-      printf("(%s:%d) Error: Hip reports %s\n", __FILE__, __LINE__,            \
-             hipGetErrorString(status));                                       \
-      exit(1);                                                                 \
-    }                                                                          \
+#define err_check(command)                                                                         \
+  {                                                                                                \
+    hipError_t status = command;                                                                   \
+    if (status != hipSuccess)                                                                      \
+    {                                                                                              \
+      printf("(%s:%d) Error: Hip reports %s\n", __FILE__, __LINE__, hipGetErrorString(status));    \
+      exit(1);                                                                                     \
+    }                                                                                              \
   }
 
 namespace dolfinx::acc
@@ -71,8 +73,8 @@ enum class Device
 
 // Container for local data
 template <typename T, Device D>
-using container = std::conditional_t<D == Device::CPP, thrust::host_vector<T>,
-                                     thrust::device_vector<T>>;
+using container
+    = std::conditional_t<D == Device::CPP, thrust::host_vector<T>, thrust::device_vector<T>>;
 
 /// Distributed vector
 template <typename T, Device D>
@@ -94,7 +96,9 @@ public:
     _buffer_remote = container<T, D>(_scatterer->remote_buffer_size(), 0);
     _local_indices = container<std::int32_t, D>(_scatterer->local_indices());
     _remote_indices = container<std::int32_t, D>(_scatterer->remote_indices());
-    _request = _scatterer->create_request_vector(common::Scatterer<>::type::p2p);
+
+    auto scatterer_type = common::Scatterer<>::type::p2p;
+    _request = _scatterer->create_request_vector(scatterer_type);
   }
 
   // Copy constructor
@@ -122,8 +126,7 @@ public:
     auto* other_ptr = other.array().data();
     auto* this_ptr = thrust::raw_pointer_cast(_x.data());
     std::size_t size_bytes = other.array().size() * sizeof(value_type);
-    err_check(
-        hipMemcpy(this_ptr, other_ptr, size_bytes, hipMemcpyHostToDevice));
+    err_check(hipMemcpy(this_ptr, other_ptr, size_bytes, hipMemcpyHostToDevice));
   }
 
   template <typename OtherVector>
@@ -190,7 +193,7 @@ public:
 
     for (int i = 0; i < size; i++)
     {
-      if(rank == i)
+      if (rank == i)
       {
         std::cout << "Rank " << rank << " :" << std::endl;
         thrust::copy(_x.begin(), _x.end(), std::ostream_iterator<value_type>(std::cout, " "));
@@ -212,16 +215,14 @@ public:
     const std::int32_t* indices = thrust::raw_pointer_cast(_local_indices.data());
     const T* in = this->array().data();
     T* out = thrust::raw_pointer_cast(_buffer_local.data());
-    hipLaunchKernelGGL(pack<T>, dim_block, dim_grid, 0, 0,_local_indices.size(), indices, in, out);
+    hipLaunchKernelGGL(pack<T>, dim_block, dim_grid, 0, 0, _local_indices.size(), indices, in, out);
     err_check(hipDeviceSynchronize());
 
     T* remote = thrust::raw_pointer_cast(_buffer_remote.data());
     _scatterer->scatter_fwd_begin(std::span<const T>(out, _buffer_local.size()),
                                   std::span<T>(remote, _buffer_remote.size()),
-                                  std::span<MPI_Request>(_request), 
-                                  common::Scatterer<>::type::p2p);
+                                  std::span<MPI_Request>(_request), common::Scatterer<>::type::p2p);
   }
-
 
   void scatter_fwd_end(int block_size = 512)
   {
@@ -238,7 +239,8 @@ public:
     const std::int32_t* indices = thrust::raw_pointer_cast(_remote_indices.data());
     const T* in = thrust::raw_pointer_cast(_buffer_remote.data());
     T* out = x_remote.data();
-    hipLaunchKernelGGL(unpack<T>, dim_block, dim_grid, 0, 0,_remote_indices.size(), indices, in, out);
+    hipLaunchKernelGGL(unpack<T>, dim_block, dim_grid, 0, 0, _remote_indices.size(), indices, in,
+                       out);
     err_check(hipDeviceSynchronize());
   }
 
@@ -249,7 +251,6 @@ public:
     this->scatter_fwd_begin();
     this->scatter_fwd_end();
   }
-
 
 private:
   // Map describing the data layout
@@ -294,12 +295,10 @@ auto inner_product(const Vector& a, const Vector& b)
 
   T local = 0;
   if constexpr (Vector::device != Device::CPP)
-    local = thrust::inner_product(thrust::device, x_a.begin(), x_a.end(),
-                                  x_b.begin(), T{0.0});
+    local = thrust::inner_product(thrust::device, x_a.begin(), x_a.end(), x_b.begin(), T{0.0});
 
   T result;
-  MPI_Allreduce(&local, &result, 1, dolfinx::MPI::mpi_type<T>(), MPI_SUM,
-                a.map()->comm());
+  MPI_Allreduce(&local, &result, 1, dolfinx::MPI::mpi_type<T>(), MPI_SUM, a.map()->comm());
   return result;
 }
 
@@ -330,11 +329,10 @@ auto norm(const Vector& a, dolfinx::la::Norm type = dolfinx::la::Norm::l2)
   {
     const std::int32_t size_local = a.bs() * a.map()->size_local();
     std::span<const T> x_a = a.array().subspan(0, size_local);
-    auto max_pos = thrust::max_element(x_a.begin(), x_a.end());
+    auto max_pos = thrust::max_element(thrust::device, x_a.begin(), x_a.end());
     auto local_linf = std::abs(*max_pos);
     decltype(local_linf) linf = 0;
-    MPI_Allreduce(&local_linf, &linf, 1, MPI::mpi_type<decltype(linf)>(),
-                  MPI_MAX, a.map()->comm());
+    MPI_Allreduce(&local_linf, &linf, 1, MPI::mpi_type<decltype(linf)>(), MPI_MAX, a.map()->comm());
     return linf;
   }
   default:
@@ -351,10 +349,9 @@ template <typename Vector, typename S>
 void axpy(Vector& r, S alpha, const Vector& x, const Vector& y)
 {
   using T = typename Vector::value_type;
-  thrust::transform(
-      x.array().begin(), x.array().begin() + x.map()->size_local(),
-      y.array().begin(), r.mutable_array().begin(),
-      [&alpha](const T& vx, const T& vy) { return vx * alpha + vy; });
+  thrust::transform(x.array().begin(), x.array().begin() + x.map()->size_local(), y.array().begin(),
+                    r.mutable_array().begin(),
+                    [&alpha](const T& vx, const T& vy) { return vx * alpha + vy; });
 }
 
 /// Compute vector a = b
