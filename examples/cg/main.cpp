@@ -1,9 +1,10 @@
-#include "poisson.h"
 #include "../../src/cg.hpp"
 #include "../../src/chebyshev.hpp"
 #include "../../src/operators.hpp"
 #include "../../src/vector.hpp"
+#include "poisson.h"
 
+#include <array>
 #include <basix/e-lagrange.h>
 #include <dolfinx.h>
 #include <dolfinx/fem/dolfinx_fem.h>
@@ -13,7 +14,6 @@
 #include <dolfinx/mesh/generation.h>
 #include <iostream>
 #include <memory>
-#include <array>
 #include <mpi.h>
 #include <petscdevice.h>
 
@@ -111,15 +111,20 @@ int main(int argc, char* argv[])
     std::sort(eign.begin(), eign.end());
     std::array<T, 2> eig_range = {eign.front(), eign.back()};
 
+    if (rank == 0)
+      std::cout << "Eigenvalues:" << eig_range[0] << "-" << eig_range[1] << std::endl;
+
     dolfinx::acc::Chebyshev<DeviceVector> cheb(V->dofmap()->index_map, 1, eig_range);
     if (rank == 0)
+    {
+      std::cout << "Compute resdiual\n";
       std::cout << "Cheb resid = " << cheb.residual(op, x, y) << std::endl;
+    }
+    
     cheb.set_max_iterations(10);
     cheb.solve(op, x, y, true);
     if (rank == 0)
       std::cout << "Cheb resid = " << cheb.residual(op, x, y) << std::endl;
-    
-    
   }
 
   PetscFinalize();
