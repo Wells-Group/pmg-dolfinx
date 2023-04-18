@@ -124,7 +124,7 @@ int main(int argc, char* argv[])
     if (rank == 0)
       std::cout << "Eigenvalues:" << eig_range[0] << "-" << eig_range[1] << std::endl;
 
-    dolfinx::acc::Chebyshev<DeviceVector> cheb(V->dofmap()->index_map, 1, eig_range, 3);
+    dolfinx::acc::Chebyshev<DeviceVector> cheb(V->dofmap()->index_map, 1, eig_range, 2);
     cheb.set_diagonal(diag);
     cheb.set_max_iterations(3);
     T rs = cheb.residual(op, x, y);
