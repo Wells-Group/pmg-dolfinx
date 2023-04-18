@@ -61,7 +61,7 @@ public:
     // Get communicator from mesh
     _comm = V->mesh()->comm();
 
-    _map = pattern.index_map(1);
+    _map = std::make_shared<const common::IndexMap>(pattern.column_index_map());
     const PetscInt local_size = _map->size_local();
     const PetscInt global_size = _map->size_global();
 
@@ -124,6 +124,8 @@ public:
     MatDestroy(&_hip_mat);
     MatDestroy(&_hip_mat);
   }
+
+  std::shared_ptr<const common::IndexMap> index_map() { return _map; };
 
   /**
    * @brief Return device PETSc Mat pointer.
