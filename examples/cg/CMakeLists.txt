@@ -3,6 +3,8 @@ cmake_minimum_required(VERSION 3.20)
 set(PROJECT_NAME cg C CXX)
 project(${PROJECT_NAME})
 
+option(profiling          "Enable scoped profiling"                                  on)
+
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_FLAGS "-Ofast -march=native -stdlib=libstdc++ --gcc-toolchain=/opt/cray/pe/gcc/11.2.0/snos ${CMAKE_CXX_FLAGS} -DNDEBUG -Wall")
 set(CMAKE_C_FLAGS "-Ofast -march=native ${CMAKE_C_FLAGS} -DNDEBUG -Wall")
@@ -32,9 +34,15 @@ add_custom_command(
 find_package(hip REQUIRED)
 find_package(rocprim REQUIRED CONFIG)
 find_package(rocthrust REQUIRED CONFIG)
-
+if(profiling)
+	find_library(ROCTRACER_LIBRARY NAMES roctx64 roctracer64)
+	add_definitions(-DROCM_TRACING=1)
+endif()
 add_executable(${PROJECT_NAME} main.cpp ${CMAKE_CURRENT_BINARY_DIR}/poisson.c)
 
 include_directories("../../")
 
 target_link_libraries(${PROJECT_NAME} dolfinx roc::rocthrust)
+if(profiling)
+	target_link_libraries(${PROJECT_NAME} ${ROCTRACER_LIBRARY})
+endif()
