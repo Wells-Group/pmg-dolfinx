@@ -46,4 +46,4 @@ cd build
 cmake ..
 make -j8
 
-srun -N ${SLURM_NNODES} -n ${SLURM_NTASKS} ${cpu_bind} ${gpu_bind} ./mg
+srun -N ${SLURM_NNODES} -n ${SLURM_NTASKS} ${cpu_bind} ${gpu_bind} ./cg

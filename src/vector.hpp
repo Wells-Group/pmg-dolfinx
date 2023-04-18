@@ -349,9 +349,10 @@ template <typename Vector, typename S>
 void axpy(Vector& r, S alpha, const Vector& x, const Vector& y)
 {
   using T = typename Vector::value_type;
-  thrust::transform(x.array().begin(), x.array().begin() + x.map()->size_local(), y.array().begin(),
-                    r.mutable_array().begin(),
-                    [&alpha](const T& vx, const T& vy) { return vx * alpha + vy; });
+  thrust::transform(thrust::device, x.array().begin(), x.array().begin() + x.map()->size_local(),
+                    y.array().begin(), r.mutable_array().begin(),
+                    [alpha] __host__ __device__(const T& vx, const T& vy)
+                    { return vx * alpha + vy; });
 }
 
 /// Compute vector a = b
@@ -364,7 +365,27 @@ void copy(Vector& a, const Vector& b)
   const std::int32_t local_size = a.bs() * a.map()->size_local();
   std::span<T> x_a = a.mutable_array().subspan(0, local_size);
   std::span<const T> x_b = b.array().subspan(0, local_size);
-  thrust::copy(x_b.begin(), x_b.end(), x_a.begin());
+  thrust::copy(thrust::device, x_b.begin(), x_b.end(), x_a.begin());
+}
+
+/// Compute pointwise vector multiplication w[i] = x[i] * y[i]
+/// @param w
+/// @param x
+/// @param y
+template <typename Vector>
+void pointwise_mult(Vector& w, const Vector& x, const Vector& y)
+{
+  using T = typename Vector::value_type;
+  thrust::transform(thrust::device, x.array().begin(), x.array().begin() + x.map()->size_local(),
+                    y.array().begin(), w.mutable_array().begin(),
+                    [] __host__ __device__(const T& xi, const T& yi) { return xi * yi; });
+}
+
+template <typename Vector, typename UnaryFunction>
+void transform(Vector& x, UnaryFunction op)
+{
+  thrust::transform(thrust::device, x.array().begin(), x.array().begin() + x.map()->size_local(),
+                    x.mutable_array().begin(), op);
 }
 
 } // namespace dolfinx::acc

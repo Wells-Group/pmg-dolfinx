@@ -32,7 +32,7 @@ int main(int argc, char* argv[])
 
     // Create a hexahedral mesh
     auto mesh = std::make_shared<mesh::Mesh<T>>(mesh::create_box<T>(
-        comm, {{{0, 0, 0}, {1, 1, 1}}}, {15, 15, 15}, mesh::CellType::hexahedron));
+        comm, {{{0, 0, 0}, {1, 1, 1}}}, {20, 20, 20}, mesh::CellType::hexahedron));
 
     auto V = std::make_shared<fem::FunctionSpace<T>>(
         fem::create_functionspace(functionspace_form_poisson_a, "u", mesh));
@@ -82,7 +82,6 @@ int main(int argc, char* argv[])
 
     // Define vectors
     using DeviceVector = dolfinx::acc::Vector<T, acc::Device::HIP>;
-    using HostVector = dolfinx::acc::Vector<T, acc::Device::CPP>;
 
     DeviceVector x(V->dofmap()->index_map, 1);
     x.set(T{0.0});
@@ -95,6 +94,16 @@ int main(int argc, char* argv[])
     // x = Ay
     op(y, x);
 
+    // Get diagonal of the operator
+    auto diag = std::make_shared<DeviceVector>(V->dofmap()->index_map, 1);
+    Vec _diag;
+    const PetscInt local_size = V->dofmap()->index_map->size_local();
+    const PetscInt global_size = V->dofmap()->index_map->size_global();
+    VecCreateMPIHIPWithArray(comm, PetscInt(1), local_size, global_size, NULL, &_diag);
+    VecHIPPlaceArray(_diag, diag->mutable_array().data());
+    MatGetDiagonal(op.device_matrix(), _diag);
+    VecHIPResetArray(_diag);
+
     // Create distributed CG solver
     dolfinx::acc::CGSolver<DeviceVector> cg(V->dofmap()->index_map, 1);
     cg.set_max_iterations(50);
@@ -102,38 +111,33 @@ int main(int argc, char* argv[])
     cg.store_coefficients(true);
 
     // Solve
-    /// ...
     int its = cg.solve(op, x, y, true);
     if (rank == 0)
     {
       std::cout << "Number of iterations" << its << std::endl;
-      //      auto a = cg.alphas();
-      //      auto b = cg.betas();
-      //      for (int i = 0; i < a.size(); ++i)
-      //        std::cout << a[i] << ", " << b[i] << "\n";
     }
 
     std::vector<T> eign = cg.compute_eigenvalues();
     std::sort(eign.begin(), eign.end());
-    std::array<T, 2> eig_range = {eign.front(), eign.back()};
+    std::array<T, 2> eig_range = {0.3 * eign.back(), 1.2 * eign.back()};
 
     if (rank == 0)
       std::cout << "Eigenvalues:" << eig_range[0] << "-" << eig_range[1] << std::endl;
 
-    eig_range[0] = 0.0;
-    eig_range[1] *= 1.1;
-
-    dolfinx::acc::Chebyshev<DeviceVector> cheb(V->dofmap()->index_map, 1, eig_range);
+    dolfinx::acc::Chebyshev<DeviceVector> cheb(V->dofmap()->index_map, 1, eig_range, 3);
+    cheb.set_diagonal(diag);
+    cheb.set_max_iterations(3);
     T rs = cheb.residual(op, x, y);
+
     if (rank == 0)
       std::cout << "Cheb resid = " << rs << std::endl;
 
-    for (int i = 0; i < 10; ++i){
-    cheb.set_max_iterations(1);
-    cheb.solve(op, x, y, true);
-    rs = cheb.residual(op, x, y);
-    if (rank == 0)
-      std::cout << i << " Cheb resid = " << rs << std::endl;
+    for (int i = 0; i < 10; ++i)
+    {
+      cheb.solve(op, x, y, true);
+      T rs = cheb.residual(op, x, y);
+      if (rank == 0)
+        std::cout << i << " Cheb resid = " << rs << std::endl;
     }
   }
 
