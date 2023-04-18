@@ -247,7 +247,9 @@ int main(int argc, char* argv[])
     roctxRangePush("cg solve");
 #endif
     int its = cg.solve(op, x, y, true);
+#ifdef ROCM_TRACING
     roctxRangePop();
+#endif
     if (rank == 0)
     {
       std::cout << "Number of iterations" << its << std::endl;
