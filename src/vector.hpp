@@ -123,9 +123,10 @@ public:
   template <typename OtherVector>
   void copy_from_host(OtherVector& other)
   {
+    // Copies only local data
     auto* other_ptr = other.array().data();
     auto* this_ptr = thrust::raw_pointer_cast(_x.data());
-    std::size_t size_bytes = other.array().size() * sizeof(value_type);
+    std::size_t size_bytes = _map->size_local() * sizeof(value_type);
     err_check(hipMemcpy(this_ptr, other_ptr, size_bytes, hipMemcpyHostToDevice));
   }
 

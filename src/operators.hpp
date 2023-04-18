@@ -32,7 +32,7 @@ public:
   PETScOperator(std::shared_ptr<fem::Form<T, T>> a,
                 const std::vector<std::shared_ptr<const fem::DirichletBC<T, T>>>& bcs)
   {
-    dolfinx::common::Timer t0("~setup phase");
+    dolfinx::common::Timer t0("~setup phase PETScOperator");
     static_assert(std::is_same<T, PetscScalar>(), "Type mismatch");
 
     if (a->rank() != 2)
@@ -55,9 +55,12 @@ public:
     MatAssemblyBegin(_host_mat, MAT_FINAL_ASSEMBLY);
     MatAssemblyEnd(_host_mat, MAT_FINAL_ASSEMBLY);
 
+
+    dolfinx::common::Timer t1("~Convert matrix to MATAIJHIPSPARSE");
     // Create HIP matrix
     MatConvert(_host_mat, MATAIJHIPSPARSE, MAT_INITIAL_MATRIX, &_hip_mat);
-
+    t1.stop();
+    
     // Get communicator from mesh
     _comm = V->mesh()->comm();
 

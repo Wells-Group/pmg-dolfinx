@@ -1,5 +1,6 @@
 #include "../../src/cg.hpp"
 #include "../../src/chebyshev.hpp"
+#include "../../src/csr.hpp"
 #include "../../src/operators.hpp"
 #include "../../src/vector.hpp"
 #include "poisson.h"
@@ -50,8 +51,6 @@ int main(int argc, char* argv[])
     int rank = 0, size = 0;
     MPI_Comm_rank(comm, &rank);
     MPI_Comm_size(comm, &size);
-
-    std::cout << "rank = " << rank << "\n";
 
     const int order = 2;
     double nx_approx = (std::pow(ndofs * size, 1.0 / 3.0) - 1) / order;
@@ -114,6 +113,7 @@ int main(int argc, char* argv[])
       std::cout << "Number of cells-rank : " << ncells / size << "\n";
       std::cout << "Number of dofs-rank : " << ndofs / size << "\n";
       std::cout << "-----------------------------------\n";
+      std::cout << std::flush;
     }
 
     // Prepare and set Constants for the bilinear form
@@ -167,8 +167,13 @@ int main(int argc, char* argv[])
     roctxRangePop();
 #endif
 
+    // Define vectors
+    using DeviceVector = dolfinx::acc::Vector<T, acc::Device::HIP>;
+    acc::MatrixOperator<T> op(a, {bc});
+    auto map = op.index_map();
+
     fem::Function<T> u(V);
-    la::Vector<T> b(V->dofmap()->index_map, V->dofmap()->index_map_bs());
+    la::Vector<T> b(map, 1);
 
 #ifdef ROCM_TRACING
     roctxRangePush("assembling and scattering");
@@ -182,13 +187,10 @@ int main(int argc, char* argv[])
     roctxRangePop();
 #endif
 
-    // Define vectors
-    using DeviceVector = dolfinx::acc::Vector<T, acc::Device::HIP>;
-
 #ifdef ROCM_TRACING
     roctxRangePush("setup device x");
 #endif
-    DeviceVector x(V->dofmap()->index_map, 1);
+    DeviceVector x(map, 1);
     x.set(T{0.0});
 #ifdef ROCM_TRACING
     roctxRangePop();
@@ -197,35 +199,24 @@ int main(int argc, char* argv[])
 #ifdef ROCM_TRACING
     roctxRangePush("setup device y");
 #endif
-    DeviceVector y(V->dofmap()->index_map, 1);
+    DeviceVector y(map, 1);
     y.copy_from_host(b); // Copy data from host vector to device vector
 #ifdef ROCM_TRACING
     roctxRangePop();
 #endif
 
 #ifdef ROCM_TRACING
-    roctxRangePush("create petsc operator");
+    roctxRangePush("matrix operator");
 #endif
     // Create petsc operator
-    PETScOperator op(a, {bc});
-    // x = Ay
     op(y, x);
-#ifdef ROCM_TRACING
-    roctxRangePop();
-#endif
 
-    // Get diagonal of the operato
-#ifdef ROCM_TRACING
-    roctxRangePush("getting diagonal");
-#endif
-    auto diag = std::make_shared<DeviceVector>(V->dofmap()->index_map, 1);
-    Vec _diag;
-    const PetscInt local_size = V->dofmap()->index_map->size_local();
-    const PetscInt global_size = V->dofmap()->index_map->size_global();
-    VecCreateMPIHIPWithArray(comm, PetscInt(1), local_size, global_size, NULL, &_diag);
-    VecHIPPlaceArray(_diag, diag->mutable_array().data());
-    MatGetDiagonal(op.device_matrix(), _diag);
-    VecHIPResetArray(_diag);
+    T norm = acc::norm(x);
+    if (rank == 0)
+    {
+      std::cout << "Norm x vector initial " << norm << std::endl;
+      std::cout << std::flush;
+    }
 #ifdef ROCM_TRACING
     roctxRangePop();
 #endif
@@ -234,7 +225,7 @@ int main(int argc, char* argv[])
 #ifdef ROCM_TRACING
     roctxRangePush("creating cg solver");
 #endif
-    dolfinx::acc::CGSolver<DeviceVector> cg(V->dofmap()->index_map, 1);
+    dolfinx::acc::CGSolver<DeviceVector> cg(map, 1);
     cg.set_max_iterations(50);
     cg.set_tolerance(1e-5);
     cg.store_coefficients(true);
@@ -247,10 +238,13 @@ int main(int argc, char* argv[])
     roctxRangePush("cg solve");
 #endif
     int its = cg.solve(op, x, y, true);
+#ifdef ROCM_TRACING
     roctxRangePop();
+#endif
     if (rank == 0)
     {
-      std::cout << "Number of iterations" << its << std::endl;
+      std::cout << "Number of iterations " << its << std::endl;
+      std::cout << std::flush;
     }
 
 #ifdef ROCM_TRACING
@@ -264,13 +258,12 @@ int main(int argc, char* argv[])
 #endif
 
     if (rank == 0)
-      std::cout << "Eigenvalues:" << eig_range[0] << "-" << eig_range[1] << std::endl;
+      std::cout << "Eigenvalues:" << eig_range[0] << " - " << eig_range[1] << std::endl;
 
 #ifdef ROCM_TRACING
     roctxRangePush("chebyshev solve");
 #endif
-    dolfinx::acc::Chebyshev<DeviceVector> cheb(V->dofmap()->index_map, 1, eig_range, 2);
-    cheb.set_diagonal(diag);
+    dolfinx::acc::Chebyshev<DeviceVector> cheb(map, 1, eig_range, 3);
     cheb.set_max_iterations(3);
     T rs = cheb.residual(op, x, y);
 #ifdef ROCM_TRACING
@@ -289,9 +282,15 @@ int main(int argc, char* argv[])
 #ifdef ROCM_TRACING
       roctxRangePop();
 #endif
-      if (rank == 0)
+      if (rank == 0){
         std::cout << i << " Cheb resid = " << rs << std::endl;
+        std::cout << std::flush;
+      }
+
     }
+
+    // Display timings
+    dolfinx::list_timings(MPI_COMM_WORLD, {dolfinx::TimingType::wall});
   }
 
   PetscFinalize();
