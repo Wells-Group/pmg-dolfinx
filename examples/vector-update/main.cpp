@@ -2,6 +2,7 @@
 #include "src/cg.hpp"
 #include "src/operators.hpp"
 #include "src/vector.hpp"
+#include "src/ghost_layer.hpp"
 
 #include <basix/e-lagrange.h>
 #include <dolfinx.h>
@@ -30,7 +31,9 @@ int main(int argc, char* argv[])
 
     // Create a hexahedral mesh
     auto mesh = std::make_shared<mesh::Mesh<T>>(mesh::create_box<T>(
-        comm, {{{0, 0, 0}, {1, 1, 1}}}, {100, 100, 100}, mesh::CellType::hexahedron));
+        comm, {{{0, 0, 0}, {1, 1, 1}}}, {10, 10, 10}, mesh::CellType::hexahedron));
+
+    mesh = create_ghost_layer(mesh);
 
     auto V = std::make_shared<fem::FunctionSpace<T>>(
         fem::create_functionspace(functionspace_form_poisson_a, "u", mesh));
