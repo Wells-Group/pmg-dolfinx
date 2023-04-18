@@ -1,10 +1,11 @@
 
 #pragma once
 
-#include <memory>
-#include <dolfinx/mesh/Mesh.h>
 #include <dolfinx/common/IndexMap.h>
 #include <dolfinx/fem/CoordinateElement.h>
+#include <dolfinx/mesh/Mesh.h>
+#include <dolfinx/mesh/utils.h>
+#include <memory>
 
 template <typename T>
 std::shared_ptr<mesh::Mesh<T>> create_ghost_layer(std::shared_ptr<mesh::Mesh<T>> mesh)
