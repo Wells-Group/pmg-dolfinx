@@ -12,6 +12,7 @@ set(CMAKE_C_FLAGS "-Ofast -march=native ${CMAKE_C_FLAGS} -DNDEBUG -Wall")
 # General configuration
 find_package(MPI)
 find_package(DOLFINX REQUIRED)
+find_package(Boost 1.70 REQUIRED program_options)
 
 set(CMAKE_INCLUDE_CURRENT_DIR ON)
 
@@ -37,4 +38,4 @@ add_executable(${PROJECT_NAME} main.cpp ${CMAKE_CURRENT_BINARY_DIR}/poisson.c)
 
 include_directories("../../")
 
-target_link_libraries(${PROJECT_NAME} dolfinx roc::rocthrust)
+target_link_libraries(${PROJECT_NAME} dolfinx roc::rocthrust Boost::program_options)
