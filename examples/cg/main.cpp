@@ -85,9 +85,14 @@ int main(int argc, char* argv[])
     }
 #endif
     // Create a hexahedral mesh
+#ifdef ROCM_TRACING
     roctxRangePush("making mesh");
+#endif
     auto mesh = std::make_shared<mesh::Mesh<T>>(mesh::create_box<T>(
         comm, {{{0, 0, 0}, {1, 1, 1}}}, {nx[0], nx[1], nx[2]}, mesh::CellType::hexahedron));
+#ifdef ROCM_TRACING
+    roctxRangePop();
+#endif
 
 #ifdef ROCM_TRACING
     roctxRangePush("making V");
