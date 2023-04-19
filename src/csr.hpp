@@ -142,7 +142,7 @@ public:
 
   /// Create a distributed vector
   MatrixOperator(std::shared_ptr<fem::Form<T, T>> a,
-                 const std::vector<std::shared_ptr<const fem::DirichletBC<T, T>>>& bcs)
+                 const std::vector<std::shared_ptr<const fem::DirichletBC<T, double>>>& bcs)
   {
 
     dolfinx::common::Timer t0("~setup phase MatrixOperator");
@@ -165,6 +165,7 @@ public:
 
     std::int32_t num_rows = _map->size_local();
     std::int32_t nnz = _A->row_ptr()[num_rows];
+    _nnz = nnz;
 
     // Allocate data on device
     err_check(hipMalloc((void**)&_row_ptr, num_rows * sizeof(std::int32_t)));
@@ -223,7 +224,9 @@ public:
     test::spmv(*_A, x, y);
   }
 
-  std::shared_ptr<const common::IndexMap> index_map() { return _map; };
+  std::shared_ptr<const common::IndexMap> index_map() { return _map; }
+
+  std::size_t nnz() {return _nnz;}
 
   ~MatrixOperator()
   {
@@ -234,6 +237,7 @@ public:
   }
 
 private:
+  std::size_t _nnz;
   T* _values;
   std::int32_t* _row_ptr;
   std::int32_t* _cols;
