@@ -1,7 +1,8 @@
-#include "../../src/cg.hpp"
-#include "../../src/chebyshev.hpp"
-#include "../../src/csr.hpp"
-#include "../../src/vector.hpp"
+#include "src/cg.hpp"
+#include "src/chebyshev.hpp"
+#include "src/csr.hpp"
+#include "src/operators.hpp"
+#include "src/vector.hpp"
 #include "poisson.h"
 
 #include <array>
@@ -19,6 +20,11 @@
 #ifdef ROCM_TRACING
 #include <roctx.h>
 #endif
+#ifdef ROCM_SMI
+#include "src/amd_gpu.hpp"
+#endif
+
+
 
 using namespace dolfinx;
 using T = double;
@@ -26,9 +32,13 @@ namespace po = boost::program_options;
 
 int main(int argc, char* argv[])
 {
+  int err;
+  uint32_t num_devices;
+  uint16_t dev_id;
+
   po::options_description desc("Allowed options");
   desc.add_options()("help,h", "print usage message")(
-      "ndofs", po::value<std::size_t>()->default_value(50000), "number of dofs per rank");
+      "ndofs", po::value<std::size_t>()->default_value(500), "number of dofs per rank");
 
   po::variables_map vm;
   po::store(po::command_line_parser(argc, argv).options(desc).allow_unregistered().run(), vm);
@@ -48,6 +58,13 @@ int main(int argc, char* argv[])
     int rank = 0, size = 0;
     MPI_Comm_rank(comm, &rank);
     MPI_Comm_size(comm, &size);
+
+#ifdef ROCM_SMI
+    err = initialise_rocm_smi();
+    num_devices = num_monitored_devices();
+    std::cout << "MPI rank " << rank << " can see " << num_devices << " AMD GPUs\n";
+    print_amd_gpu_memory_usage("Beginning");
+#endif
 
     const int order = 2;
     double nx_approx = (std::pow(ndofs * size, 1.0 / 3.0) - 1) / order;
@@ -83,6 +100,8 @@ int main(int argc, char* argv[])
     // Create a hexahedral mesh
 #ifdef ROCM_TRACING
     roctxRangePush("making mesh");
+    print_amd_gpu_memory_usage("making mesh");
+
 #endif
     auto mesh = std::make_shared<mesh::Mesh<T>>(mesh::create_box<T>(
         comm, {{{0, 0, 0}, {1, 1, 1}}}, {nx[0], nx[1], nx[2]}, mesh::CellType::hexahedron));
@@ -92,6 +111,7 @@ int main(int argc, char* argv[])
 
 #ifdef ROCM_TRACING
     roctxRangePush("making V");
+    print_amd_gpu_memory_usage("making V");
 #endif
     auto V = std::make_shared<fem::FunctionSpace<T>>(
         fem::create_functionspace(functionspace_form_poisson_a, "u", mesh));
@@ -120,6 +140,7 @@ int main(int argc, char* argv[])
     // Define variational forms
 #ifdef ROCM_TRACING
     roctxRangePush("making forms");
+    print_amd_gpu_memory_usage("making forms");
 #endif
     auto a = std::make_shared<fem::Form<T>>(
         fem::create_form<T>(*form_poisson_a, {V, V}, {}, {{"kappa", kappa}}, {}));
@@ -144,6 +165,7 @@ int main(int argc, char* argv[])
 
 #ifdef ROCM_TRACING
     roctxRangePush("doing topology");
+    print_amd_gpu_memory_usage("doing topology");
 #endif
     auto topology = V->mesh()->topology_mutable();
     int tdim = topology->dim();
@@ -155,6 +177,7 @@ int main(int argc, char* argv[])
 
 #ifdef ROCM_TRACING
     roctxRangePush("doing boundary conditions");
+    print_amd_gpu_memory_usage("doing boundary conditions");
 #endif
     auto dofmap = V->dofmap();
     auto facets = dolfinx::mesh::exterior_facet_indices(*topology);
@@ -174,6 +197,7 @@ int main(int argc, char* argv[])
 
 #ifdef ROCM_TRACING
     roctxRangePush("assembling and scattering");
+    print_amd_gpu_memory_usage("assembling and scattering");
 #endif
     b.set(T(0.0));
     fem::assemble_vector(b.mutable_array(), *L);
@@ -186,6 +210,7 @@ int main(int argc, char* argv[])
 
 #ifdef ROCM_TRACING
     roctxRangePush("setup device x");
+    print_amd_gpu_memory_usage("setup device x");
 #endif
     DeviceVector x(map, 1);
     x.set(T{0.0});
@@ -195,6 +220,7 @@ int main(int argc, char* argv[])
 
 #ifdef ROCM_TRACING
     roctxRangePush("setup device y");
+    print_amd_gpu_memory_usage("setup device y");
 #endif
     DeviceVector y(map, 1);
     y.copy_from_host(b); // Copy data from host vector to device vector
@@ -204,6 +230,7 @@ int main(int argc, char* argv[])
 
 #ifdef ROCM_TRACING
     roctxRangePush("matrix operator");
+    print_amd_gpu_memory_usage("matrix operator");
 #endif
     // Create operator
     op(y, x);
@@ -221,6 +248,7 @@ int main(int argc, char* argv[])
     // Create distributed CG solver
 #ifdef ROCM_TRACING
     roctxRangePush("creating cg solver");
+    print_amd_gpu_memory_usage("creating cg solver");
 #endif
     dolfinx::acc::CGSolver<DeviceVector> cg(map, 1);
     cg.set_max_iterations(50);
@@ -233,6 +261,7 @@ int main(int argc, char* argv[])
     // Solve
 #ifdef ROCM_TRACING
     roctxRangePush("cg solve");
+    print_amd_gpu_memory_usage("before cg solve");
 #endif
     int its = cg.solve(op, x, y, true);
 #ifdef ROCM_TRACING
@@ -246,6 +275,7 @@ int main(int argc, char* argv[])
 
 #ifdef ROCM_TRACING
     roctxRangePush("get eigenvalues");
+    print_amd_gpu_memory_usage("get eigenvalues");
 #endif
     std::vector<T> eign = cg.compute_eigenvalues();
     std::sort(eign.begin(), eign.end());
@@ -259,6 +289,7 @@ int main(int argc, char* argv[])
 
 #ifdef ROCM_TRACING
     roctxRangePush("chebyshev solve");
+    print_amd_gpu_memory_usage("chebyshev solve");
 #endif
     dolfinx::acc::Chebyshev<DeviceVector> cheb(map, 1, eig_range, 3);
     cheb.set_max_iterations(3);
@@ -273,6 +304,7 @@ int main(int argc, char* argv[])
     {
 #ifdef ROCM_TRACING
       roctxRangePush("chebyshev solve");
+      print_amd_gpu_memory_usage("chebyshev solve");
 #endif
       cheb.solve(op, x, y, true);
       T rs = cheb.residual(op, x, y);
@@ -288,6 +320,11 @@ int main(int argc, char* argv[])
     dolfinx::list_timings(MPI_COMM_WORLD, {dolfinx::TimingType::wall});
   }
 
+#ifdef ROCM_SMI
+  err = shutdown_rocm_smi();
+#endif
+
   MPI_Finalize();
+
   return 0;
 }
