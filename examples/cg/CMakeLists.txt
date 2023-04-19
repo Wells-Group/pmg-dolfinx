@@ -4,8 +4,27 @@ set(PROJECT_NAME cg C CXX)
 project(${PROJECT_NAME})
 
 option(profiling          "Enable ROCm scoped profiling"                                  off)
+option(cpu		  "Build for CPUs"						  off)
+option(nvidia		  "Build for NVidia GPUs"					  off)
+option(amd		  "Build for AMD GPUs"						  on)
+
+if(cpu AND nvidia OR cpu AND amd)
+  message(FATAL_ERROR "You cannot select both a cpu build and a GPU (amd or nvidia) build. Only select one of the three options: cpu, nvidia, amd")
+endif()
+if(nvidia AND amd)
+  message(FATAL_ERROR "You cannot select both amd and nvidia GPU builds. Only select one of the three options: cpu, nvidia, amd")
+endif()
 
 message(STATUS "Profiling is ${profiling}")
+if(cpu)
+  message(STATUS "Compiling for CPUs")
+elseif(nvidia)
+  message(STATUS "Compiling for NVIDIA GPUs")
+elseif(amd)
+  message(STATUS "Compiling for AMD GPUs")
+else()
+  message(FATAL_ERROR "No target selected for the build. Please select one of the three options: cpu, nvidia, amd")
+endif()
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_FLAGS "-Ofast -march=native -stdlib=libstdc++ --gcc-toolchain=/opt/cray/pe/gcc/11.2.0/snos ${CMAKE_CXX_FLAGS} -DNDEBUG -Wall")
@@ -22,7 +41,13 @@ set(CMAKE_INCLUDE_CURRENT_DIR ON)
 
 
 # Set the GPU to compile for
-set(GPU_TARGETS "gfx90a" CACHE STRING "GPU targets to compile for")
+if(amd)
+  set(GPU_TARGETS "gfx90a" CACHE STRING "GPU targets to compile for")
+endif()
+
+if(nvidia)
+  set(GPU_TARGETS "Ampere" CACHE STRING "GPU targets to compile for")
+endif()
 
 add_custom_command(
   OUTPUT poisson.c
