@@ -6,6 +6,10 @@
 #include <dolfinx/common/IndexMap.h>
 #include <dolfinx/common/MPI.h>
 
+#ifdef ROCM_TRACING
+#include <roctx.h>
+#endif
+
 using namespace dolfinx;
 
 namespace
@@ -163,6 +167,9 @@ public:
     int k = 0;
     while (k < _max_iter)
     {
+#ifdef ROCM_TRACING
+    roctxRangePush("cg solve iteration");
+#endif
       ++k;
 
       // MatVec
@@ -202,6 +209,9 @@ public:
         _betas.push_back(beta);
         _residuals.push_back(rnorm);
       }
+#ifdef ROCM_TRACING
+    roctxRangePop();
+#endif
     }
     return k;
   }
