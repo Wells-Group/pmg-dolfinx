@@ -22,7 +22,7 @@ void spmv_impl(std::span<const T> values, std::span<const std::int32_t> row_begi
   assert(row_begin.size() == row_end.size());
   for (std::size_t i = 0; i < row_begin.size(); i++)
   {
-    double vi{0};
+    T vi{0};
     for (std::int32_t j = row_begin[i]; j < row_end[i]; j++)
       vi += values[j] * x[indices[j]];
     y[i] += vi;
@@ -98,15 +98,18 @@ namespace
 /// @param[in] x Input vector
 /// @param[in, out] x Output vector
 template <typename T>
-__global__ void spmv_impl(const T* values, const std::int32_t* row_begin,
-                          const std::int32_t* row_end, const std::int32_t* indices, const T* x,
-                          T* y, std::int32_t num_rows)
+__global__ void spmv_impl(int N, 
+                          const T* values, 
+                          const std::int32_t* row_begin,
+                          const std::int32_t* row_end, 
+                          const std::int32_t* indices, 
+                          const T* x,
+                          T* y)
 {
   // Calculate the row index for this thread.
   int i = blockIdx.x * blockDim.x + threadIdx.x;
-
   // Check if the row index is out of bounds.
-  if (i < num_rows)
+  if (i < N)
   {
     // Perform the sparse matrix-vector multiplication for this row.
     T vi{0};
@@ -157,26 +160,30 @@ public:
     _A->finalize();
     fem::set_diagonal<T>(_A->mat_set_values(), *V, bcs, T(1.0));
 
-    // Allocate data on device
-    err_check(hipMalloc((void**)&_row_ptr, _A->row_ptr().size() * sizeof(std::int32_t)));
-    err_check(hipMalloc((void**)&_cols, _A->cols().size() * sizeof(std::int32_t)));
-    err_check(
-        hipMalloc((void**)&_off_diag_offset, _A->off_diag_offset().size() * sizeof(std::int32_t)));
-    err_check(hipMalloc((void**)&_values, _A->values().size() * sizeof(T)));
-
-    // Copy data from host to device
-    err_check(hipMemcpy(_row_ptr, _A->row_ptr().data(), _A->row_ptr().size() * sizeof(std::int32_t),
-                        hipMemcpyHostToDevice));
-    err_check(hipMemcpy(_cols, _A->cols().data(), _A->cols().size() * sizeof(std::int32_t),
-                        hipMemcpyHostToDevice));
-    err_check(hipMemcpy(_off_diag_offset, _A->off_diag_offset().data(),
-                        _A->off_diag_offset().size() * sizeof(std::int32_t),
-                        hipMemcpyHostToDevice));
-    err_check(hipMemcpy(_values, _A->values().data(), _A->values().size() * sizeof(T),
-                        hipMemcpyHostToDevice));
-
     // Get communicator from mesh
     _comm = V->mesh()->comm();
+
+    std::int32_t num_rows = _map->size_local();
+    std::int32_t nnz = _A->row_ptr()[num_rows];
+
+    // Allocate data on device
+    err_check(hipMalloc((void**)&_row_ptr, num_rows * sizeof(std::int32_t)));
+    err_check(hipMalloc((void**)&_off_diag_offset, num_rows * sizeof(std::int32_t)));
+    err_check(hipMalloc((void**)&_cols, nnz * sizeof(std::int32_t)));
+    err_check(hipMalloc((void**)&_values, nnz * sizeof(T)));
+
+    // Copy data from host to device
+    err_check(hipMemcpy(_row_ptr, _A->row_ptr().data(), num_rows * sizeof(std::int32_t),
+                        hipMemcpyHostToDevice));
+    err_check(hipMemcpy(_off_diag_offset, _A->off_diag_offset().data(),
+                        num_rows * sizeof(std::int32_t),
+                        hipMemcpyHostToDevice));
+
+    err_check(hipMemcpy(_cols, _A->cols().data(), nnz * sizeof(std::int32_t),
+                        hipMemcpyHostToDevice));
+    err_check(hipMemcpy(_values, _A->values().data(), nnz * sizeof(T),
+                        hipMemcpyHostToDevice));
+    err_check(hipDeviceSynchronize());
   }
 
   /**
@@ -201,12 +208,13 @@ public:
     dim3 grid_size((num_rows + block_size.x - 1) / block_size.x);
 
     x.scatter_fwd_begin();
-    hipLaunchKernelGGL(spmv_impl<T>, block_size, grid_size, 0, 0, _values, _row_ptr,
-                       _off_diag_offset, _cols, _x, _y, num_rows);
-    
+    hipLaunchKernelGGL(spmv_impl<T>, grid_size, block_size, 0, 0, num_rows, _values, _row_ptr,
+                       _off_diag_offset, _cols, _x, _y);
+    err_check(hipGetLastError());
     x.scatter_fwd_end();
-    hipLaunchKernelGGL(spmv_impl<T>, block_size, grid_size, 0, 0, _values, _off_diag_offset,
-                       _row_ptr + 1, _cols, _x, _y, num_rows);
+    hipLaunchKernelGGL(spmv_impl<T>, grid_size, block_size, 0, 0, num_rows, _values, _row_ptr,
+                       _off_diag_offset, _cols, _x, _y);
+    err_check(hipGetLastError());
   }
 
   template <typename Vector>
