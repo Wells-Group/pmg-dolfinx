@@ -1,7 +1,6 @@
 #include "../../src/cg.hpp"
 #include "../../src/chebyshev.hpp"
 #include "../../src/csr.hpp"
-#include "../../src/operators.hpp"
 #include "../../src/vector.hpp"
 #include "poisson.h"
 
@@ -10,14 +9,12 @@
 #include <boost/program_options.hpp>
 #include <dolfinx.h>
 #include <dolfinx/fem/dolfinx_fem.h>
-#include <dolfinx/fem/petsc.h>
 #include <dolfinx/la/MatrixCSR.h>
 #include <dolfinx/la/SparsityPattern.h>
 #include <dolfinx/mesh/generation.h>
 #include <iostream>
 #include <memory>
 #include <mpi.h>
-#include <petscdevice.h>
 
 #ifdef ROCM_TRACING
 #include <roctx.h>
@@ -45,7 +42,7 @@ int main(int argc, char* argv[])
   const std::size_t ndofs = vm["ndofs"].as<std::size_t>();
 
   init_logging(argc, argv);
-  PetscInitialize(&argc, &argv, nullptr, nullptr);
+  MPI_Init(&argc, &argv);
   {
     MPI_Comm comm{MPI_COMM_WORLD};
     int rank = 0, size = 0;
@@ -208,7 +205,7 @@ int main(int argc, char* argv[])
 #ifdef ROCM_TRACING
     roctxRangePush("matrix operator");
 #endif
-    // Create petsc operator
+    // Create operator
     op(y, x);
 
     T norm = acc::norm(x);
@@ -286,13 +283,11 @@ int main(int argc, char* argv[])
         std::cout << i << " Cheb resid = " << rs << std::endl;
         std::cout << std::flush;
       }
-
     }
-
     // Display timings
     dolfinx::list_timings(MPI_COMM_WORLD, {dolfinx::TimingType::wall});
   }
 
-  PetscFinalize();
+  MPI_Finalize();
   return 0;
 }

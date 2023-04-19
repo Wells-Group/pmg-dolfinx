@@ -216,7 +216,7 @@ public:
     const std::int32_t* indices = thrust::raw_pointer_cast(_local_indices.data());
     const T* in = this->array().data();
     T* out = thrust::raw_pointer_cast(_buffer_local.data());
-    hipLaunchKernelGGL(pack<T>, dim_block, dim_grid, 0, 0, _local_indices.size(), indices, in, out);
+    hipLaunchKernelGGL(pack<T>, dim_grid, dim_block, 0, 0, _local_indices.size(), indices, in, out);
     err_check(hipDeviceSynchronize());
 
     T* remote = thrust::raw_pointer_cast(_buffer_remote.data());
@@ -240,7 +240,7 @@ public:
     const std::int32_t* indices = thrust::raw_pointer_cast(_remote_indices.data());
     const T* in = thrust::raw_pointer_cast(_buffer_remote.data());
     T* out = x_remote.data();
-    hipLaunchKernelGGL(unpack<T>, dim_block, dim_grid, 0, 0, _remote_indices.size(), indices, in,
+    hipLaunchKernelGGL(unpack<T>, dim_grid, dim_block, 0, 0, _remote_indices.size(), indices, in,
                        out);
     err_check(hipDeviceSynchronize());
   }
