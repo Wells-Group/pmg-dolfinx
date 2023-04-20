@@ -1,5 +1,14 @@
+#pragma once
+#include <iomanip>
+#include <map>
 #ifdef ROCM_SMI
 #include <rocm_smi/rocm_smi.h>
+#endif
+#ifdef ROCM_TRACING
+#include <roctracer/roctx.h>
+#endif
+#ifdef OMNITRACE
+#include <omnitrace/user.h>
 #endif
 
 bool initialised = false;
@@ -88,7 +97,9 @@ void print_amd_gpu_memory_used(char const *text)
 #ifdef ROCM_SMI
   rsmi_status_t err;
   uint64_t usage;
-
+  uint64_t gb = 1024;
+  gb = gb*1024;
+  gb = gb*1024;
   MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 
   if(initialised){
@@ -99,9 +110,9 @@ void print_amd_gpu_memory_used(char const *text)
         err = rsmi_dev_memory_usage_get(i, static_cast<rsmi_memory_type_t>(mem_type), &usage);
         if (err != RSMI_STATUS_SUCCESS) {
           return;
-        }
+	}
         std::cout << " " << kDevMemoryTypeNameMap.at(static_cast<rsmi_memory_type_t>(mem_type));
-        std::cout << " " << usage;
+        std::cout << " " << usage/gb << "GB"  << " " << usage;
       }
       std::cout << "\n";
     }
@@ -147,35 +158,46 @@ void print_amd_gpu_memory_total(char const *text)
   return;
 }
 
-void print_amd_gpu_memory_percentage_used(char const *text)
+float print_amd_gpu_memory_percentage_used(char const *text)
 {
   int rank;
 #ifdef ROCM_SMI
   rsmi_status_t err;
   uint64_t total;
   uint64_t usage;
+  float return_value = 0.0;
+  uint32_t num_devices;
 
   MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 
   if(initialised){
 
-    for(uint32_t i = 0; i < num_monitored_devices(); ++i) {
-      std::cout << text << " MPI Rank " << rank << " GPU " << i << "  % memory used:";
-      for (uint32_t mem_type = RSMI_MEM_TYPE_FIRST; mem_type <= RSMI_MEM_TYPE_LAST; ++mem_type) {
-        err = rsmi_dev_memory_total_get(i, static_cast<rsmi_memory_type_t>(mem_type), &total);
-        if (err != RSMI_STATUS_SUCCESS) {
-          return;
-        }
-	err = rsmi_dev_memory_usage_get(i, static_cast<rsmi_memory_type_t>(mem_type), &usage);
-        if (err != RSMI_STATUS_SUCCESS) {
-          return;
-        }
+    num_devices = num_monitored_devices();
 
+    if(num_devices == 1 || rank == 0){
 
-        std::cout << " " << kDevMemoryTypeNameMap.at(static_cast<rsmi_memory_type_t>(mem_type));
-        std::cout << " " << (static_cast<float>(usage)*100)/total;
+      for(uint32_t i = 0; i < num_devices; ++i) {
+
+        std::cout << text << " MPI Rank " << rank << " GPU " << i << "  % memory used:";
+        for (uint32_t mem_type = RSMI_MEM_TYPE_FIRST; mem_type <= RSMI_MEM_TYPE_LAST; ++mem_type) {
+          err = rsmi_dev_memory_total_get(i, static_cast<rsmi_memory_type_t>(mem_type), &total);
+          if (err != RSMI_STATUS_SUCCESS) {
+            return return_value;
+          }
+ 	  err = rsmi_dev_memory_usage_get(i, static_cast<rsmi_memory_type_t>(mem_type), &usage);
+          if (err != RSMI_STATUS_SUCCESS) {
+            return return_value;
+          }
+
+	  if(mem_type == RSMI_MEM_TYPE_VRAM){
+	    return_value = (static_cast<float>(usage)*100)/total;
+	  }	
+          std::cout << " " << kDevMemoryTypeNameMap.at(static_cast<rsmi_memory_type_t>(mem_type));
+          std::cout << " " << std::setprecision(2) << (static_cast<float>(usage)*100)/total;
+
+        }
+        std::cout << "\n";
       }
-      std::cout << "\n";
     }
 
   }else{
@@ -183,5 +205,25 @@ void print_amd_gpu_memory_percentage_used(char const *text)
   }
 
 #endif
-  return;
+  return return_value;
+}
+
+void add_profiling_annotation(const char *tag)
+{
+#ifdef ROCM_TRACING
+  roctxRangePush(tag);
+#endif
+#ifdef OMNITRACE
+  omnitrace_user_push_region(tag);
+#endif
+}
+
+void remove_profiling_annotation(const char *tag)
+{
+#ifdef ROCM_TRACING
+  roctxRangePop();
+#endif
+#ifdef OMNITRACE
+  omnitrace_user_pop_region(tag);
+#endif
 }

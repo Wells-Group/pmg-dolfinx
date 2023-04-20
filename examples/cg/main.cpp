@@ -17,12 +17,7 @@
 #include <memory>
 #include <mpi.h>
 
-#ifdef ROCM_TRACING
-#include <roctx.h>
-#endif
-#ifdef ROCM_SMI
 #include "src/amd_gpu.hpp"
-#endif
 
 using namespace dolfinx;
 using T = double;

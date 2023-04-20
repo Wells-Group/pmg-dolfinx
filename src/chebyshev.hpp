@@ -7,6 +7,8 @@
 #include <dolfinx/common/IndexMap.h>
 #include <dolfinx/common/MPI.h>
 #include <iostream>
+#include "amd_gpu.hpp"
+
 
 using namespace dolfinx;
 
@@ -117,6 +119,7 @@ public:
     // Horner's Rule is applied to avoid computing A^k directly
     for (int it = 0; it < _max_iter; it++)
     {
+      add_profiling_annotation("Chebyshev solver iteration");
       A(x, *_q);
       acc::axpy(*_r, T(-1), *_q, b);
 
@@ -130,7 +133,9 @@ public:
       }
 
       acc::axpy(x, T{1.0}, x, *_z);
+      remove_profiling_annotation("Chebyshev solver iteration");
     }
+    
   }
 
 private:
