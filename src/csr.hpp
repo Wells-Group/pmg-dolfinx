@@ -6,6 +6,7 @@
 
 namespace test
 {
+
 /// Computes y += A*x for a local CSR matrix A and local dense vectors x,y
 /// @param[in] values Nonzero values of A
 /// @param[in] row_begin First index of each row in the arrays values and
@@ -13,7 +14,7 @@ namespace test
 /// @param[in] row_end Last index of each row in the arrays values and indices.
 /// @param[in] indices Column indices for each non-zero element of the matrix A
 /// @param[in] x Input vector
-/// @param[in, out] x Output vector
+/// @param[in, out] y Output vector
 template <typename T>
 void spmv_impl(std::span<const T> values, std::span<const std::int32_t> row_begin,
                std::span<const std::int32_t> row_end, std::span<const std::int32_t> indices,
@@ -26,6 +27,28 @@ void spmv_impl(std::span<const T> values, std::span<const std::int32_t> row_begi
     for (std::int32_t j = row_begin[i]; j < row_end[i]; j++)
       vi += values[j] * x[indices[j]];
     y[i] += vi;
+  }
+}
+
+/// Computes y += A^T*x for a local CSR matrix A and local dense vectors x,y
+/// @param[in] values Nonzero values of A
+/// @param[in] row_begin First index of each row in the arrays values and
+/// indices.
+/// @param[in] row_end Last index of each row in the arrays values and indices.
+/// @param[in] indices Column indices for each non-zero element of the matrix A
+/// @param[in] x Input vector
+/// @param[in, out] y Output vector
+template <typename T>
+void spmvT_impl(std::span<const T> values, std::span<const std::int32_t> row_begin,
+                std::span<const std::int32_t> row_end, std::span<const std::int32_t> indices,
+                std::span<const T> x, std::span<T> y)
+{
+  assert(row_begin.size() == row_end.size());
+  for (std::size_t i = 0; i < row_begin.size(); i++)
+  {
+    T vi{0};
+    for (std::int32_t j = row_begin[i]; j < row_end[i]; j++)
+      y[indices[j]] += values[j] * x[i];
   }
 }
 
@@ -96,14 +119,10 @@ namespace
 /// @param[in] row_end Last index of each row in the arrays values and indices.
 /// @param[in] indices Column indices for each non-zero element of the matrix A
 /// @param[in] x Input vector
-/// @param[in, out] x Output vector
+/// @param[in, out] y Output vector
 template <typename T>
-__global__ void spmv_impl(int N, 
-                          const T* values, 
-                          const std::int32_t* row_begin,
-                          const std::int32_t* row_end, 
-                          const std::int32_t* indices, 
-                          const T* x,
+__global__ void spmv_impl(int N, const T* values, const std::int32_t* row_begin,
+                          const std::int32_t* row_end, const std::int32_t* indices, const T* x,
                           T* y)
 {
   // Calculate the row index for this thread.
@@ -116,6 +135,23 @@ __global__ void spmv_impl(int N,
     for (std::int32_t j = row_begin[i]; j < row_end[i]; j++)
       vi += values[j] * x[indices[j]];
     y[i] += vi;
+  }
+}
+
+template <typename T>
+__global__ void spmvT_impl(int N, const T* values, const std::int32_t* row_begin,
+                           const std::int32_t* row_end, const std::int32_t* indices, const T* x,
+                           T* y)
+{
+  // Calculate the row index for this thread.
+  int i = blockIdx.x * blockDim.x + threadIdx.x;
+  // Check if the row index is out of bounds.
+  if (i < N)
+  {
+    // Perform the transpose sparse matrix-vector multiplication for this row.
+    T vi{0};
+    for (std::int32_t j = row_begin[i]; j < row_end[i]; j++)
+      atomicAdd(&y[indices[j]], values[j] * x[i]);
   }
 }
 
@@ -177,13 +213,11 @@ public:
     err_check(hipMemcpy(_row_ptr, _A->row_ptr().data(), num_rows * sizeof(std::int32_t),
                         hipMemcpyHostToDevice));
     err_check(hipMemcpy(_off_diag_offset, _A->off_diag_offset().data(),
-                        num_rows * sizeof(std::int32_t),
-                        hipMemcpyHostToDevice));
+                        num_rows * sizeof(std::int32_t), hipMemcpyHostToDevice));
 
-    err_check(hipMemcpy(_cols, _A->cols().data(), nnz * sizeof(std::int32_t),
-                        hipMemcpyHostToDevice));
-    err_check(hipMemcpy(_values, _A->values().data(), nnz * sizeof(T),
-                        hipMemcpyHostToDevice));
+    err_check(
+        hipMemcpy(_cols, _A->cols().data(), nnz * sizeof(std::int32_t), hipMemcpyHostToDevice));
+    err_check(hipMemcpy(_values, _A->values().data(), nnz * sizeof(T), hipMemcpyHostToDevice));
     err_check(hipDeviceSynchronize());
   }
 
@@ -208,14 +242,28 @@ public:
     dim3 block_size(512);
     dim3 grid_size((num_rows + block_size.x - 1) / block_size.x);
 
-    x.scatter_fwd_begin();
-    hipLaunchKernelGGL(spmv_impl<T>, grid_size, block_size, 0, 0, num_rows, _values, _row_ptr,
-                       _off_diag_offset, _cols, _x, _y);
-    err_check(hipGetLastError());
-    x.scatter_fwd_end();
-    hipLaunchKernelGGL(spmv_impl<T>, grid_size, block_size, 0, 0, num_rows, _values, _row_ptr,
-                       _off_diag_offset, _cols, _x, _y);
-    err_check(hipGetLastError());
+    if (transpose)
+    {
+      x.scatter_fwd_begin();
+      hipLaunchKernelGGL(spmvT_impl<T>, grid_size, block_size, 0, 0, num_rows, _values, _row_ptr,
+                         _off_diag_offset, _cols, _x, _y);
+      err_check(hipGetLastError());
+      x.scatter_fwd_end();
+      hipLaunchKernelGGL(spmvT_impl<T>, grid_size, block_size, 0, 0, num_rows, _values, _row_ptr,
+                         _off_diag_offset, _cols, _x, _y);
+      err_check(hipGetLastError());
+    }
+    else
+    {
+      x.scatter_fwd_begin();
+      hipLaunchKernelGGL(spmv_impl<T>, grid_size, block_size, 0, 0, num_rows, _values, _row_ptr,
+                         _off_diag_offset, _cols, _x, _y);
+      err_check(hipGetLastError());
+      x.scatter_fwd_end();
+      hipLaunchKernelGGL(spmv_impl<T>, grid_size, block_size, 0, 0, num_rows, _values, _row_ptr,
+                         _off_diag_offset, _cols, _x, _y);
+      err_check(hipGetLastError());
+    }
   }
 
   template <typename Vector>
@@ -226,7 +274,7 @@ public:
 
   std::shared_ptr<const common::IndexMap> index_map() { return _map; }
 
-  std::size_t nnz() {return _nnz;}
+  std::size_t nnz() { return _nnz; }
 
   ~MatrixOperator()
   {
@@ -247,4 +295,3 @@ private:
   MPI_Comm _comm;
 };
 } // namespace dolfinx::acc
-
