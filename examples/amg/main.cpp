@@ -185,6 +185,9 @@ int main(int argc, char* argv[])
 
     VecHIPResetArray(_b);
     VecHIPResetArray(_x);
+
+    // Display timings
+    dolfinx::list_timings(MPI_COMM_WORLD, {dolfinx::TimingType::wall});
   }
 
   PetscFinalize();
