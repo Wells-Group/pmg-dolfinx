@@ -1,6 +1,7 @@
 #include "../../src/cg.hpp"
 #include "../../src/chebyshev.hpp"
 #include "../../src/csr.hpp"
+#include "../../src/pmg.hpp"
 #include "../../src/vector.hpp"
 #include "poisson.h"
 
@@ -51,6 +52,9 @@ int main(int argc, char* argv[])
     MPI_Comm_rank(comm, &rank);
     MPI_Comm_size(comm, &size);
 
+    // if (rank == 0)
+    //   loguru::g_stderr_verbosity = loguru::Verbosity_INFO;
+
     const int order = 3;
     double nx_approx = (std::pow(ndofs * size, 1.0 / 3.0) - 1) / order;
     std::size_t n0 = static_cast<int>(nx_approx);
@@ -76,7 +80,6 @@ int main(int argc, char* argv[])
           }
     }
 
-
     // Create mesh
     auto mesh = std::make_shared<mesh::Mesh<T>>(mesh::create_box<T>(
         comm, {{{0, 0, 0}, {1, 1, 1}}}, {nx[0], nx[1], nx[2]}, mesh::CellType::hexahedron));
@@ -94,7 +97,7 @@ int main(int argc, char* argv[])
 
     auto facets = dolfinx::mesh::exterior_facet_indices(*topology);
     std::vector<std::size_t> ndofs(V.size());
-    
+
     // Prepare and set Constants for the bilinear form
     auto kappa = std::make_shared<fem::Constant<T>>(2.0);
     for (std::size_t i = 0; i < form_a.size(); i++)
@@ -103,31 +106,29 @@ int main(int argc, char* argv[])
           fem::create_functionspace(fs_poisson_a[i], "v_0", mesh));
       ndofs[i] = V[i]->dofmap()->index_map->size_global();
       a[i] = std::make_shared<fem::Form<T>>(
-            fem::create_form<T>(*form_a[i], {V[i], V[i]}, {}, {{"c0", kappa}}, {}));
+          fem::create_form<T>(*form_a[i], {V[i], V[i]}, {}, {{"c0", kappa}}, {}));
     }
-    
-
 
     // assemble RHS for each level
     for (std::size_t i = 0; i < V.size(); i++)
     {
       auto f = std::make_shared<fem::Function<T>>(V[i]);
       f->interpolate(
-        [](auto x) -> std::pair<std::vector<T>, std::vector<std::size_t>>
-        {
-          std::vector<T> out;
-          for (std::size_t p = 0; p < x.extent(1); ++p)
+          [](auto x) -> std::pair<std::vector<T>, std::vector<std::size_t>>
           {
-            auto dx = (x(0, p) - 0.5) * (x(0, p) - 0.5);
-            auto dy = (x(1, p) - 0.5) * (x(1, p) - 0.5);
-            out.push_back(1000 * std::exp(-(dx + dy) / 0.02));
-          }
+            std::vector<T> out;
+            for (std::size_t p = 0; p < x.extent(1); ++p)
+            {
+              auto dx = (x(0, p) - 0.5) * (x(0, p) - 0.5);
+              auto dy = (x(1, p) - 0.5) * (x(1, p) - 0.5);
+              out.push_back(1000 * std::exp(-(dx + dy) / 0.02));
+            }
 
-          return {out, {out.size()}};
-        });
-  
+            return {out, {out.size()}};
+          });
+
       auto Li = std::make_shared<fem::Form<T, T>>(
-        fem::create_form<T>(*form_L[i], {V[i]}, {{"w0", f}}, {}, {}));
+          fem::create_form<T>(*form_L[i], {V[i]}, {{"w0", f}}, {}, {}));
       L[i] = Li;
 
       auto dofmap = V[i]->dofmap();
@@ -155,7 +156,6 @@ int main(int argc, char* argv[])
       std::cout << std::flush;
     }
 
-    
     std::vector<std::shared_ptr<DeviceVector>> bs(V.size());
 
     for (std::size_t i = 0; i < V.size(); i++)
@@ -176,8 +176,8 @@ int main(int argc, char* argv[])
       bs[i]->copy_from_host(b);
     }
 
-
-    for (std::size_t i = 0; i < V.size(); i++){
+    for (std::size_t i = 0; i < V.size(); i++)
+    {
       auto size = operators[i]->nnz();
       if (rank == 0)
       {
@@ -200,21 +200,51 @@ int main(int argc, char* argv[])
 
       (*operators[i])(*bs[i], x);
 
-      [[maybe_unused]]int its = cg.solve(*operators[i], x, *bs[i], true);
+      [[maybe_unused]] int its = cg.solve(*operators[i], x, *bs[i], false);
       std::vector<T> eign = cg.compute_eigenvalues();
       std::sort(eign.begin(), eign.end());
       std::array<T, 2> eig_range = {0.3 * eign.back(), 1.2 * eign.back()};
       smoothers[i] = std::make_shared<acc::Chebyshev<DeviceVector>>(maps[i], 1, eig_range, 2);
-      if(rank ==0)
+
+
+      if (rank == 0)
       {
         std::cout << "Eigenvalues level " << i << ": ";
         std::cout << eig_range[0] << " " << eig_range[1] << std::endl;
       }
     }
 
+    smoothers[0]->set_max_iterations(20);
+    smoothers[1]->set_max_iterations(5);
+    smoothers[2]->set_max_iterations(5);
 
-    
-  
+    // Create Restriction operator
+    std::vector<std::shared_ptr<acc::MatrixOperator<T>>> restriction(V.size() - 1);
+
+    // Create Prolongation operator
+    std::vector<std::shared_ptr<acc::MatrixOperator<T>>> prolongation(V.size() - 1);
+
+    // From V1 to V0
+    prolongation[0] = std::make_shared<acc::MatrixOperator<T>>(*V[0], *V[1]);
+    prolongation[0] = std::make_shared<acc::MatrixOperator<T>>(*V[1], *V[2]);
+
+
+    using OpType = acc::MatrixOperator<T>;
+    using SolverType = acc::Chebyshev<DeviceVector>;
+
+    using PMG = acc::MultigridPreconditioner<DeviceVector, OpType, OpType, OpType, SolverType>;
+
+    PMG pmg(maps, 1);
+    pmg.set_solvers(smoothers);
+    pmg.set_operators(operators);
+    pmg.set_interpolators(prolongation);
+
+    // Create solution vector
+    DeviceVector x(maps.back(), 1);
+    x.set(T{0.0});
+
+    pmg.apply(*bs.back(), x);
+
     // Display timings
     dolfinx::list_timings(MPI_COMM_WORLD, {dolfinx::TimingType::wall});
   }
