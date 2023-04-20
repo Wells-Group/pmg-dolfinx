@@ -41,7 +41,7 @@ public:
     la::SparsityPattern pattern = fem::create_sparsity_pattern(*a);
     pattern.assemble();
 
-    _host_mat = la::petsc::create_matrix(a->mesh()->comm(), pattern);
+    _host_mat = la::petsc::create_matrix(a->mesh()->comm(), pattern, "mpiaijhipsparse");
 
     MatZeroEntries(_host_mat);
     auto set_fn = la::petsc::Matrix::set_block_fn(_host_mat, ADD_VALUES);
@@ -55,10 +55,9 @@ public:
     MatAssemblyBegin(_host_mat, MAT_FINAL_ASSEMBLY);
     MatAssemblyEnd(_host_mat, MAT_FINAL_ASSEMBLY);
 
-
-    dolfinx::common::Timer t1("~Convert matrix to MATAIJHIPSPARSE");
     // Create HIP matrix
-    MatConvert(_host_mat, MATAIJHIPSPARSE, MAT_INITIAL_MATRIX, &_hip_mat);
+    dolfinx::common::Timer t1("~Convert matrix to MATAIJHIPSPARSE");
+    MatConvert(_host_mat, MATSAME, MAT_INITIAL_MATRIX, &_hip_mat);
     t1.stop();
     
     // Get communicator from mesh
