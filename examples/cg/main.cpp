@@ -1,9 +1,9 @@
+#include "poisson.h"
 #include "src/cg.hpp"
 #include "src/chebyshev.hpp"
 #include "src/csr.hpp"
 #include "src/operators.hpp"
 #include "src/vector.hpp"
-#include "poisson.h"
 
 #include <array>
 #include <basix/e-lagrange.h>
@@ -23,8 +23,6 @@
 #ifdef ROCM_SMI
 #include "src/amd_gpu.hpp"
 #endif
-
-
 
 using namespace dolfinx;
 using T = double;
@@ -251,7 +249,7 @@ int main(int argc, char* argv[])
     print_amd_gpu_memory_usage("creating cg solver");
 #endif
     dolfinx::acc::CGSolver<DeviceVector> cg(map, 1);
-    cg.set_max_iterations(50);
+    cg.set_max_iterations(30);
     cg.set_tolerance(1e-5);
     cg.store_coefficients(true);
 #ifdef ROCM_TRACING
@@ -263,7 +261,11 @@ int main(int argc, char* argv[])
     roctxRangePush("cg solve");
     print_amd_gpu_memory_usage("before cg solve");
 #endif
-    int its = cg.solve(op, x, y, true);
+
+    dolfinx::common::Timer tcg("ZZZ CG");
+    int its = cg.solve(op, x, y, false);
+    tcg.stop();
+
 #ifdef ROCM_TRACING
     roctxRangePop();
 #endif
@@ -291,31 +293,29 @@ int main(int argc, char* argv[])
     roctxRangePush("chebyshev solve");
     print_amd_gpu_memory_usage("chebyshev solve");
 #endif
+
+    dolfinx::common::Timer tcheb("ZZZ Chebyshev");
     dolfinx::acc::Chebyshev<DeviceVector> cheb(map, 1, eig_range, 3);
-    cheb.set_max_iterations(3);
-    T rs = cheb.residual(op, x, y);
+    cheb.set_max_iterations(10);
 #ifdef ROCM_TRACING
     roctxRangePop();
 #endif
+
+    T rs = cheb.residual(op, x, y);
     if (rank == 0)
       std::cout << "Cheb resid = " << rs << std::endl;
 
-    for (int i = 0; i < 10; ++i)
-    {
 #ifdef ROCM_TRACING
-      roctxRangePush("chebyshev solve");
-      print_amd_gpu_memory_usage("chebyshev solve");
+    roctxRangePush("chebyshev solve");
+    print_amd_gpu_memory_usage("chebyshev solve");
 #endif
-      cheb.solve(op, x, y, true);
-      T rs = cheb.residual(op, x, y);
+    cheb.solve(op, x, y, true);
+
 #ifdef ROCM_TRACING
-      roctxRangePop();
+    roctxRangePop();
 #endif
-      if (rank == 0){
-        std::cout << i << " Cheb resid = " << rs << std::endl;
-        std::cout << std::flush;
-      }
-    }
+    tcheb.stop();
+
     // Display timings
     dolfinx::list_timings(MPI_COMM_WORLD, {dolfinx::TimingType::wall});
   }

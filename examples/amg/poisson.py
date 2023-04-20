@@ -2,7 +2,7 @@ from ufl import (Coefficient, Constant, FunctionSpace, Mesh,
                  TestFunction, TrialFunction, dx, grad, inner)
 from basix.ufl import element
 
-e = element("Lagrange", "hexahedron", 2)
+e = element("Lagrange", "hexahedron", 1)
 coord_element = element("Lagrange", "hexahedron", 1, rank=1)
 mesh = Mesh(coord_element)
 
