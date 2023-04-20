@@ -32,6 +32,9 @@ int main(int argc, char* argv[])
 {
   int err;
   uint32_t num_devices;
+  float peak_mem = 0.0;
+  float global_peak_mem = 0.0;
+  float mem = 0.0;
 
   po::options_description desc("Allowed options");
   desc.add_options()("help,h", "print usage message")(
@@ -60,7 +63,8 @@ int main(int argc, char* argv[])
     err = initialise_rocm_smi();
     num_devices = num_monitored_devices();
     std::cout << "MPI rank " << rank << " can see " << num_devices << " AMD GPUs\n";
-    print_amd_gpu_memory_used("Beginning");
+    mem = print_amd_gpu_memory_percentage_used("Beginning");
+    if(mem > peak_mem) peak_mem = mem;
 #endif
 
     const int order = 2;
@@ -96,24 +100,29 @@ int main(int argc, char* argv[])
 #endif
     // Create a hexahedral mesh
 #ifdef ROCM_TRACING
-    roctxRangePush("making mesh");
-    print_amd_gpu_memory_used("making mesh");
-
+    add_profiling_annotation("making mesh");
+#endif
+#ifdef ROCM_SMI
+    mem = print_amd_gpu_memory_percentage_used("making mesh");
+    if(mem > peak_mem) peak_mem = mem;
 #endif
     auto mesh = std::make_shared<mesh::Mesh<T>>(mesh::create_box<T>(
         comm, {{{0, 0, 0}, {1, 1, 1}}}, {nx[0], nx[1], nx[2]}, mesh::CellType::hexahedron));
 #ifdef ROCM_TRACING
-    roctxRangePop();
+    remove_profiling_annotation("making mesh");
 #endif
 
 #ifdef ROCM_TRACING
-    roctxRangePush("making V");
-    print_amd_gpu_memory_used("making V");
+    add_profiling_annotation("making V");
+#endif
+#ifdef ROCM_SMI
+    mem = print_amd_gpu_memory_percentage_used("making V");
+    if(mem > peak_mem) peak_mem = mem;
 #endif
     auto V = std::make_shared<fem::FunctionSpace<T>>(
         fem::create_functionspace(functionspace_form_poisson_a, "u", mesh));
 #ifdef ROCM_TRACING
-    roctxRangePop();
+    remove_profiling_annotation("making V");
 #endif
 
     std::size_t ncells = mesh->topology()->index_map(3)->size_global();
@@ -136,15 +145,18 @@ int main(int argc, char* argv[])
 
     // Define variational forms
 #ifdef ROCM_TRACING
-    roctxRangePush("making forms");
-    print_amd_gpu_memory_used("making forms");
+    add_profiling_annotation("making forms");
+#endif
+#ifdef ROCM_SMI
+    mem = print_amd_gpu_memory_percentage_used("making forms");
+    if(mem > peak_mem) peak_mem = mem;
 #endif
     auto a = std::make_shared<fem::Form<T>>(
         fem::create_form<T>(*form_poisson_a, {V, V}, {}, {{"kappa", kappa}}, {}));
     auto L = std::make_shared<fem::Form<T>>(
         fem::create_form<T>(*form_poisson_L, {V}, {{"f", f}}, {}, {}));
 #ifdef ROCM_TRACING
-    roctxRangePop();
+    remove_profiling_annotation("making forms");
 #endif
     f->interpolate(
         [](auto x) -> std::pair<std::vector<T>, std::vector<std::size_t>>
@@ -161,27 +173,33 @@ int main(int argc, char* argv[])
         });
 
 #ifdef ROCM_TRACING
-    roctxRangePush("doing topology");
-    print_amd_gpu_memory_used("doing topology");
+    add_profiling_annotation("doing topology");
+#endif
+#ifdef ROCM_SMI
+    mem = print_amd_gpu_memory_percentage_used("doing topology");
+    if(mem > peak_mem) peak_mem = mem;
 #endif
     auto topology = V->mesh()->topology_mutable();
     int tdim = topology->dim();
     int fdim = tdim - 1;
     topology->create_connectivity(fdim, tdim);
 #ifdef ROCM_TRACING
-    roctxRangePop();
+    remove_profiling_annotation("doing topology");
 #endif
 
 #ifdef ROCM_TRACING
-    roctxRangePush("doing boundary conditions");
-    print_amd_gpu_memory_used("doing boundary conditions");
+    add_profiling_annotation("doing boundary conditions");
+#endif
+#ifdef ROCM_SMI
+    mem = print_amd_gpu_memory_percentage_used("doing boundary conditions");
+    if(mem > peak_mem) peak_mem = mem;
 #endif
     auto dofmap = V->dofmap();
     auto facets = dolfinx::mesh::exterior_facet_indices(*topology);
     auto bdofs = fem::locate_dofs_topological(*topology, *dofmap, fdim, facets);
     auto bc = std::make_shared<const fem::DirichletBC<T>>(0.0, bdofs, V);
 #ifdef ROCM_TRACING
-    roctxRangePop();
+    remove_profiling_annotation("doing boundary conditions");
 #endif
 
     // Define vectors
@@ -193,8 +211,11 @@ int main(int argc, char* argv[])
     la::Vector<T> b(map, 1);
 
 #ifdef ROCM_TRACING
-    roctxRangePush("assembling and scattering");
-    print_amd_gpu_memory_used("assembling and scattering");
+    add_profiling_annotation("assembling and scattering");
+#endif
+#ifdef ROCM_SMI
+    mem = print_amd_gpu_memory_percentage_used("assembling and scattering");
+    if(mem > peak_mem) peak_mem = mem;
 #endif
     b.set(T(0.0));
     fem::assemble_vector(b.mutable_array(), *L);
@@ -202,32 +223,41 @@ int main(int argc, char* argv[])
     b.scatter_rev(std::plus<T>());
     fem::set_bc<T, T>(b.mutable_array(), {bc});
 #ifdef ROCM_TRACING
-    roctxRangePop();
+    remove_profiling_annotation("assembling and scattering");
 #endif
 
 #ifdef ROCM_TRACING
-    roctxRangePush("setup device x");
-    print_amd_gpu_memory_used("setup device x");
+    add_profiling_annotation("setup device x");
+#endif
+#ifdef ROCM_SMI
+    mem = print_amd_gpu_memory_percentage_used("setup device x");
+    if(mem > peak_mem) peak_mem = mem;
 #endif
     DeviceVector x(map, 1);
     x.set(T{0.0});
 #ifdef ROCM_TRACING
-    roctxRangePop();
+    remove_profiling_annotation("setup device x");
 #endif
 
 #ifdef ROCM_TRACING
-    roctxRangePush("setup device y");
-    print_amd_gpu_memory_used("setup device y");
+    add_profiling_annotation("setup device y");
+#endif
+#ifdef ROCM_SMI
+    mem = print_amd_gpu_memory_percentage_used("setup device y");
+    if(mem > peak_mem) peak_mem = mem;
 #endif
     DeviceVector y(map, 1);
     y.copy_from_host(b); // Copy data from host vector to device vector
 #ifdef ROCM_TRACING
-    roctxRangePop();
+    remove_profiling_annotation("setup device y");
 #endif
 
 #ifdef ROCM_TRACING
-    roctxRangePush("matrix operator");
-    print_amd_gpu_memory_used("matrix operator");
+    add_profiling_annotation("matrix operator");
+#endif
+#ifdef ROCM_SMI
+    mem = print_amd_gpu_memory_percentage_used("matrix operator");
+    if(mem > peak_mem) peak_mem = mem;
 #endif
     // Create operator
     op(y, x);
@@ -239,26 +269,32 @@ int main(int argc, char* argv[])
       std::cout << std::flush;
     }
 #ifdef ROCM_TRACING
-    roctxRangePop();
+    remove_profiling_annotation("matrix operator");
 #endif
 
     // Create distributed CG solver
 #ifdef ROCM_TRACING
-    roctxRangePush("creating cg solver");
-    print_amd_gpu_memory_used("creating cg solver");
+    add_profiling_annotation("creating cg solver");
+#endif
+#ifdef ROCM_SMI
+    mem = print_amd_gpu_memory_percentage_used("creating cg solver");
+    if(mem > peak_mem) peak_mem = mem;
 #endif
     dolfinx::acc::CGSolver<DeviceVector> cg(map, 1);
     cg.set_max_iterations(30);
     cg.set_tolerance(1e-5);
     cg.store_coefficients(true);
 #ifdef ROCM_TRACING
-    roctxRangePop();
+    remove_profiling_annotation("creating cg solver");
 #endif
 
     // Solve
 #ifdef ROCM_TRACING
-    roctxRangePush("cg solve");
-    print_amd_gpu_memory_used("before cg solve");
+    add_profiling_annotation("cg solve");
+#endif
+#ifdef ROCM_SMI
+    mem = print_amd_gpu_memory_percentage_used("before cg solve");
+    if(mem > peak_mem) peak_mem = mem;
 #endif
 
     dolfinx::common::Timer tcg("ZZZ CG");
@@ -266,7 +302,7 @@ int main(int argc, char* argv[])
     tcg.stop();
 
 #ifdef ROCM_TRACING
-    roctxRangePop();
+    remove_profiling_annotation("cg solve");
 #endif
     if (rank == 0)
     {
@@ -275,29 +311,35 @@ int main(int argc, char* argv[])
     }
 
 #ifdef ROCM_TRACING
-    roctxRangePush("get eigenvalues");
-    print_amd_gpu_memory_used("get eigenvalues");
+    add_profiling_annotation("get eigenvalues");
+#endif
+#ifdef ROCM_SMI
+    mem = print_amd_gpu_memory_percentage_used("get eigenvalues");
+    if(mem > peak_mem) peak_mem = mem;
 #endif
     std::vector<T> eign = cg.compute_eigenvalues();
     std::sort(eign.begin(), eign.end());
     std::array<T, 2> eig_range = {0.3 * eign.back(), 1.2 * eign.back()};
 #ifdef ROCM_TRACING
-    roctxRangePop();
+    remove_profiling_annotation("get eigenvalues");
 #endif
 
     if (rank == 0)
       std::cout << "Eigenvalues:" << eig_range[0] << " - " << eig_range[1] << std::endl;
 
 #ifdef ROCM_TRACING
-    roctxRangePush("chebyshev solve");
-    print_amd_gpu_memory_used("chebyshev solve");
+    add_profiling_annotation("chebyshev solve");
+#endif
+#ifdef ROCM_SMI
+    mem = print_amd_gpu_memory_percentage_used("chebyshev solve");
+    if(mem > peak_mem) peak_mem = mem;
 #endif
 
     dolfinx::common::Timer tcheb("ZZZ Chebyshev");
     dolfinx::acc::Chebyshev<DeviceVector> cheb(map, 1, eig_range, 3);
     cheb.set_max_iterations(10);
 #ifdef ROCM_TRACING
-    roctxRangePop();
+    remove_profiling_annotation("chebyshev solve");
 #endif
 
     T rs = cheb.residual(op, x, y);
@@ -305,20 +347,31 @@ int main(int argc, char* argv[])
       std::cout << "Cheb resid = " << rs << std::endl;
 
 #ifdef ROCM_TRACING
-    roctxRangePush("chebyshev solve");
-    print_amd_gpu_memory_usage("chebyshev solve");
+      add_profiling_annotation("chebyshev solve");
 #endif
-    cheb.solve(op, x, y, true);
-
+#ifdef ROCM_SMI
+    mem = print_amd_gpu_memory_percentage_used("before chebyshev solve");
+    if(mem > peak_mem) peak_mem = mem;
+#endif
+      cheb.solve(op, x, y, true);
+#ifdef ROCM_SMI
+    mem = print_amd_gpu_memory_percentage_used("afterchebyshev solve");
+    if(mem > peak_mem) peak_mem = mem;
+#endif
 #ifdef ROCM_TRACING
-    roctxRangePop();
+      remove_profiling_annotation("chebyshev solve");
 #endif
     tcheb.stop();
 
     // Display timings
     dolfinx::list_timings(MPI_COMM_WORLD, {dolfinx::TimingType::wall});
-  }
 
+
+    MPI_Reduce(&peak_mem, &global_peak_mem, 1, MPI_FLOAT, MPI_MAX, 0, MPI_COMM_WORLD);
+    if(rank == 0){
+      std::cout << "peak memory used during the run (as a percentage of the total memory available): " << global_peak_mem << "%\n";
+    }
+  }
 #ifdef ROCM_SMI
   err = shutdown_rocm_smi();
 #endif

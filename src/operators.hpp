@@ -2,6 +2,7 @@
 // SPDX-License-Identifier:    MIT
 
 #include <dolfinx.h>
+#include <dolfinx/common/log.h>
 #include <dolfinx/fem/dolfinx_fem.h>
 #include <dolfinx/fem/petsc.h>
 #include <petscmat.h>
@@ -41,12 +42,16 @@ public:
     la::SparsityPattern pattern = fem::create_sparsity_pattern(*a);
     pattern.assemble();
 
+    LOG(INFO) << "Create matrix...";
     _host_mat = la::petsc::create_matrix(a->mesh()->comm(), pattern, "mpiaijhipsparse");
 
+    LOG(INFO) << "Zero matrix...";
     MatZeroEntries(_host_mat);
     auto set_fn = la::petsc::Matrix::set_block_fn(_host_mat, ADD_VALUES);
+    LOG(INFO) << "Assemble matrix...";
     fem::assemble_matrix(set_fn, *a, bcs);
 
+    LOG(INFO) << "Assemble matrix 2...";
     auto V = a->function_spaces()[0];
     MatAssemblyBegin(_host_mat, MAT_FLUSH_ASSEMBLY);
     MatAssemblyEnd(_host_mat, MAT_FLUSH_ASSEMBLY);
@@ -55,18 +60,19 @@ public:
     MatAssemblyBegin(_host_mat, MAT_FINAL_ASSEMBLY);
     MatAssemblyEnd(_host_mat, MAT_FINAL_ASSEMBLY);
 
+    LOG(INFO) << "Convert matrix...";
     // Create HIP matrix
     dolfinx::common::Timer t1("~Convert matrix to MATAIJHIPSPARSE");
     MatConvert(_host_mat, MATSAME, MAT_INITIAL_MATRIX, &_hip_mat);
     t1.stop();
-    
+
     // Get communicator from mesh
     _comm = V->mesh()->comm();
 
     _map = std::make_shared<const common::IndexMap>(pattern.column_index_map());
     const PetscInt local_size = _map->size_local();
     const PetscInt global_size = _map->size_global();
-
+    LOG(INFO) << "Create vecs...";
     VecCreateMPIHIPWithArray(_comm, PetscInt(1), local_size, global_size, NULL, &_x_petsc);
     VecCreateMPIHIPWithArray(_comm, PetscInt(1), local_size, global_size, NULL, &_y_petsc);
   }
@@ -151,9 +157,12 @@ public:
   template <typename Vector>
   void operator()(const Vector& x, Vector& y, bool transpose = false)
   {
+    LOG(INFO) << "HipPlaceArray";
+
     VecHIPPlaceArray(_x_petsc, x.array().data());
     VecHIPPlaceArray(_y_petsc, y.mutable_array().data());
 
+    LOG(INFO) << "MatMult";
     if (transpose)
       // y = A^T x
       MatMultTranspose(_hip_mat, _x_petsc, _y_petsc);
@@ -161,6 +170,7 @@ public:
       // y = A x
       MatMult(_hip_mat, _x_petsc, _y_petsc);
 
+    LOG(INFO) << "HipResetArray";
     VecHIPResetArray(_y_petsc);
     VecHIPResetArray(_x_petsc);
   }
