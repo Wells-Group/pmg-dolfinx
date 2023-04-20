@@ -1,5 +1,5 @@
 #include "poisson.h"
-#include "src/operators.hpp"
+#include "src/rocalution.hpp"
 #include "src/vector.hpp"
 
 #include <basix/e-lagrange.h>
@@ -38,7 +38,6 @@ int main(int argc, char* argv[])
   const std::size_t ndofs = vm["ndofs"].as<std::size_t>();
 
   init_logging(argc, argv);
-  PetscInitialize(&argc, &argv, nullptr, nullptr);
   {
     MPI_Comm comm{MPI_COMM_WORLD};
 
@@ -153,53 +152,53 @@ int main(int argc, char* argv[])
     DeviceVector y(V->dofmap()->index_map, 1);
     y.copy_from_host(b); // Copy data from host vector to device vector
 
-    LOG(INFO) << "Create Petsc Operator";
+    LOG(INFO) << "Create Rocalution Operator";
 
     // Create petsc operator
-    PETScOperator op(a, {bc});
+    RocalutionOperator op(a, {bc});
 
     LOG(INFO) << "Apply operator";
 
-    op(y, x);
+    //    op(y, x);
 
-    LOG(INFO) << "get device matrix";
-    Mat A = op.device_matrix();
+    // LOG(INFO) << "get device matrix";
+    // Mat A = op.device_matrix();
 
-    LOG(INFO) << "Create Petsc KSP";
-    // Create PETSc KSP object
-    KSP solver;
-    PC prec;
-    KSPCreate(comm, &solver);
-    KSPSetType(solver, KSPCG);
-    KSPSetOperators(solver, A, A);
-    KSPGetPC(solver, &prec);
-    PCSetType(prec, PCGAMG);
-    PCGAMGSetType(prec, PCGAMGAGG);
-    KSPSetFromOptions(solver);
-    KSPSetUp(solver);
+    // LOG(INFO) << "Create Petsc KSP";
+    // // Create PETSc KSP object
+    // KSP solver;
+    // PC prec;
+    // KSPCreate(comm, &solver);
+    // KSPSetType(solver, KSPCG);
+    // KSPSetOperators(solver, A, A);
+    // KSPGetPC(solver, &prec);
+    // PCSetType(prec, PCGAMG);
+    // PCGAMGSetType(prec, PCGAMGAGG);
+    // KSPSetFromOptions(solver);
+    // KSPSetUp(solver);
 
-    LOG(INFO) << "Create Petsc HIP arrays";
-    // SET OPTIONS????
-    const PetscInt local_size = V->dofmap()->index_map->size_local();
-    const PetscInt global_size = V->dofmap()->index_map->size_global();
-    Vec _b, _x;
-    VecCreateMPIHIPWithArray(comm, PetscInt(1), local_size, global_size, NULL, &_x);
-    VecCreateMPIHIPWithArray(comm, PetscInt(1), local_size, global_size, NULL, &_b);
+    // LOG(INFO) << "Create Petsc HIP arrays";
+    // // SET OPTIONS????
+    // const PetscInt local_size = V->dofmap()->index_map->size_local();
+    // const PetscInt global_size = V->dofmap()->index_map->size_global();
+    // Vec _b, _x;
+    // VecCreateMPIHIPWithArray(comm, PetscInt(1), local_size, global_size, NULL, &_x);
+    // VecCreateMPIHIPWithArray(comm, PetscInt(1), local_size, global_size, NULL, &_b);
 
-    VecHIPPlaceArray(_b, y.array().data());
-    VecHIPPlaceArray(_x, x.array().data());
+    // VecHIPPlaceArray(_b, y.array().data());
+    // VecHIPPlaceArray(_x, x.array().data());
 
-    KSPSolve(solver, _b, _x);
-    KSPView(solver, PETSC_VIEWER_STDOUT_WORLD);
+    // KSPSolve(solver, _b, _x);
+    // KSPView(solver, PETSC_VIEWER_STDOUT_WORLD);
 
-    KSPConvergedReason reason;
-    KSPGetConvergedReason(solver, &reason);
+    // KSPConvergedReason reason;
+    // KSPGetConvergedReason(solver, &reason);
 
-    if (rank == 0)
-      std::cout << "Converged reason " << reason;
+    // if (rank == 0)
+    //   std::cout << "Converged reason " << reason;
 
-    VecHIPResetArray(_b);
-    VecHIPResetArray(_x);
+    // VecHIPResetArray(_b);
+    // VecHIPResetArray(_x);
 
     // Display timings
     dolfinx::list_timings(MPI_COMM_WORLD, {dolfinx::TimingType::wall});
