@@ -5,7 +5,7 @@
 #include <dolfinx/common/log.h>
 #include <dolfinx/fem/dolfinx_fem.h>
 #include <dolfinx/la/MatrixCSR.h>
-// #include <rocalution/rocalution.hpp>
+#include <rocalution/rocalution.hpp>
 
 template <typename T>
 class RocalutionOperator
@@ -39,8 +39,7 @@ public:
     dolfinx::common::Timer t1("~Convert matrix to ROCALUTION");
 
     // Start to create Rocalution data structures
-    auto pm = std::make_shared<ParallelManager>();
-    auto roc_mat = std::make_shared<GlobalMatrix<T>>();
+    auto pm = std::make_shared<rocalution::ParallelManager>();
 
     // Get communicator from mesh
     MPI_Comm _comm = V->mesh()->comm();
@@ -50,20 +49,22 @@ public:
     const std::int64_t global_size = _map->size_global();
 
     // Initialize manager
-    pm->SetMPICommunicator(comm);
+    pm->SetMPICommunicator(_comm);
     pm->SetGlobalNrow(global_size);
     pm->SetGlobalNcol(global_size);
     pm->SetLocalNrow(local_size);
     pm->SetLocalNcol(local_size);
 
-    if (nprocs > 1)
+    int mpi_size = dolfinx::MPI::size(_comm);
+
+    if (mpi_size > 1)
     {
       pm->SetBoundaryIndex(boundary_nnz, boundary.data());
       pm->SetReceivers(nrecv, recvs.data(), recv_index_offset.data());
       pm->SetSenders(nsend, sends.data(), send_index_offset.data());
     }
 
-    roc_mat->SetParallelManager(*pm);
+    auto roc_mat = std::make_shared<rocalution::GlobalMatrix<T>>(*pm);
 
     t1.stop();
 
