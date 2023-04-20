@@ -5,6 +5,7 @@
 #include <basix/e-lagrange.h>
 #include <boost/program_options.hpp>
 #include <dolfinx.h>
+#include <dolfinx/common/log.h>
 #include <dolfinx/fem/dolfinx_fem.h>
 #include <dolfinx/fem/petsc.h>
 #include <dolfinx/la/MatrixCSR.h>
@@ -91,8 +92,7 @@ int main(int argc, char* argv[])
       std::cout << std::flush;
     }
 
-    if (rank == 0)
-      loguru::g_stderr_verbosity = loguru::Verbosity_INFO;
+    loguru::g_stderr_verbosity = loguru::Verbosity_INFO;
 
     // Prepare and set Constants for the bilinear form
     auto kappa = std::make_shared<fem::Constant<T>>(2.0);
@@ -103,6 +103,8 @@ int main(int argc, char* argv[])
         fem::create_form<T>(*form_poisson_a, {V, V}, {}, {{"kappa", kappa}}, {}));
     auto L = std::make_shared<fem::Form<T>>(
         fem::create_form<T>(*form_poisson_L, {V}, {{"f", f}}, {}, {}));
+
+    LOG(INFO) << "Interpolate";
 
     f->interpolate(
         [](auto x) -> std::pair<std::vector<T>, std::vector<std::size_t>>
@@ -117,10 +119,14 @@ int main(int argc, char* argv[])
           return {out, {out.size()}};
         });
 
+    LOG(INFO) << "Topology";
+
     auto topology = V->mesh()->topology_mutable();
     int tdim = topology->dim();
     int fdim = tdim - 1;
     topology->create_connectivity(fdim, tdim);
+
+    LOG(INFO) << "DirichletBC";
 
     auto dofmap = V->dofmap();
     auto facets = dolfinx::mesh::exterior_facet_indices(*topology);
@@ -130,6 +136,7 @@ int main(int argc, char* argv[])
     fem::Function<T> u(V);
     la::Vector<T> b(V->dofmap()->index_map, V->dofmap()->index_map_bs());
 
+    LOG(INFO) << "Assemble Vector";
     b.set(T(0.0));
     fem::assemble_vector(b.mutable_array(), *L);
     fem::apply_lifting<T, T>(b.mutable_array(), {a}, {{bc}}, {}, T(1));
@@ -146,12 +153,19 @@ int main(int argc, char* argv[])
     DeviceVector y(V->dofmap()->index_map, 1);
     y.copy_from_host(b); // Copy data from host vector to device vector
 
+    LOG(INFO) << "Create Petsc Operator";
+
     // Create petsc operator
     PETScOperator op(a, {bc});
+
+    LOG(INFO) << "Apply operator";
+
     op(y, x);
 
+    LOG(INFO) << "get device matrix";
     Mat A = op.device_matrix();
 
+    LOG(INFO) << "Create Petsc KSP";
     // Create PETSc KSP object
     KSP solver;
     PC prec;
@@ -164,6 +178,7 @@ int main(int argc, char* argv[])
     KSPSetFromOptions(solver);
     KSPSetUp(solver);
 
+    LOG(INFO) << "Create Petsc HIP arrays";
     // SET OPTIONS????
     const PetscInt local_size = V->dofmap()->index_map->size_local();
     const PetscInt global_size = V->dofmap()->index_map->size_global();
