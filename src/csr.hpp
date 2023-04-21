@@ -50,7 +50,6 @@ void spmvT_impl(std::span<const T> values, std::span<const std::int32_t> row_beg
   assert(row_begin.size() == row_end.size());
   for (std::size_t i = 0; i < row_begin.size(); i++)
   {
-    T vi{0};
     for (std::int32_t j = row_begin[i]; j < row_end[i]; j++)
       y[indices[j]] += values[j] * x[i];
   }
@@ -153,7 +152,6 @@ __global__ void spmvT_impl(int N, const T* values, const std::int32_t* row_begin
   if (i < N)
   {
     // Perform the transpose sparse matrix-vector multiplication for this row.
-    T vi{0};
     for (std::int32_t j = row_begin[i]; j < row_end[i]; j++)
       atomicAdd(&y[indices[j]], values[j] * x[i]);
   }
