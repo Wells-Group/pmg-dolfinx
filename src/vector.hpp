@@ -3,7 +3,10 @@
 
 #pragma once
 
-#include "hip/hip_runtime.h"
+#ifdef USE_HIP
+#include <hip/hip_runtime.h>
+#elif USE_CUDA
+#endif
 #include <dolfinx/la/dolfinx_la.h>
 #include <iostream>
 #include <thrust/device_vector.h>
@@ -51,6 +54,7 @@ static __global__ void _scatter(std::int32_t N, const int32_t* __restrict__ indi
 }
 } // namespace
 
+#ifdef USE_HIP
 #define err_check(command)                                                                         \
   {                                                                                                \
     hipError_t status = command;                                                                   \
@@ -60,6 +64,27 @@ static __global__ void _scatter(std::int32_t N, const int32_t* __restrict__ indi
       exit(1);                                                                                     \
     }                                                                                              \
   }
+#elif USE_CUDA
+#define err_check(command)                                                                         \
+  {                                                                                                \
+    cudaError_t status = command;                                                                   \
+    if (status != cudaSuccess)                                                                      \
+    {                                                                                              \
+      printf("(%s:%d) Error: CUDA reports %s\n", __FILE__, __LINE__, cudaGetErrorString(status));    \
+      exit(1);                                                                                     \
+    }                                                                                              \
+  }
+#elif CPU
+#define err_check(command)                                                                         \
+  {                                                                                                \
+    int status = command;                                                                   \
+    if (status != 0)                                                                      \
+    {                                                                                              \
+      printf("(%s:%d) Error: Report %s\n", __FILE__, __LINE__, perror());    \
+      exit(1);                                                                                     \
+    }                                                                                              \
+  }
+#endif
 
 namespace dolfinx::acc
 {
@@ -127,7 +152,12 @@ public:
     auto* other_ptr = other.array().data();
     auto* this_ptr = thrust::raw_pointer_cast(_x.data());
     std::size_t size_bytes = _map->size_local() * sizeof(value_type);
+#ifdef USE_HIP
     err_check(hipMemcpy(this_ptr, other_ptr, size_bytes, hipMemcpyHostToDevice));
+#elif USE_CUDA
+    err_check(cudaMemcpy(this_ptr, other_ptr, size_bytes, cudaMemcpyHostToDevice));
+#elif CPU
+#endif
   }
 
   template <typename OtherVector>

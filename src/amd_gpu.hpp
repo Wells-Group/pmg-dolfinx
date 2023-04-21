@@ -208,22 +208,22 @@ float print_amd_gpu_memory_percentage_used(char const *text)
   return return_value;
 }
 
-void add_profiling_annotation(const char *tag)
+
+inline void add_profiling_annotation(const char * const tag)
 {
 #ifdef ROCM_TRACING
   roctxRangePush(tag);
-#endif
-#ifdef OMNITRACE
+#elif defined(OMNITRACE)
   omnitrace_user_push_region(tag);
 #endif
 }
 
-void remove_profiling_annotation(const char *tag)
+inline void remove_profiling_annotation(const char * const tag)
 {
-#ifdef ROCM_TRACING
-  roctxRangePop();
-#endif
 #ifdef OMNITRACE
   omnitrace_user_pop_region(tag);
+#elif defined(ROCM_TRACING)
+  roctxRangePop();
 #endif
 }
+

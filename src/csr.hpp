@@ -1,4 +1,8 @@
-#include "hip/hip_runtime.h"
+#ifdef USE_HIP
+#include <hip/hip_runtime.h>
+#elif USE_CUDA
+#include <cuda/cuda_runtime.h>
+#endif
 #include <dolfinx.h>
 #include <dolfinx/fem/dolfinx_fem.h>
 #include <dolfinx/fem/petsc.h>
@@ -157,6 +161,7 @@ __global__ void spmvT_impl(int N, const T* values, const std::int32_t* row_begin
 
 } // namespace
 
+#ifdef USE_HIP
 #define err_check(command)                                                                         \
   {                                                                                                \
     hipError_t status = command;                                                                   \
@@ -166,7 +171,27 @@ __global__ void spmvT_impl(int N, const T* values, const std::int32_t* row_begin
       exit(1);                                                                                     \
     }                                                                                              \
   }
-
+#elif USE_CUDA
+#define err_check(command)                                                                         \
+  {                                                                                                \
+    cudaError_t status = command;                                                                   \
+    if (status != cudaSuccess)                                                                      \
+    {                                                                                              \
+      printf("(%s:%d) Error: CUDA reports %s\n", __FILE__, __LINE__, cudaGetErrorString(status));    \
+      exit(1);                                                                                     \
+    }                                                                                              \
+  }
+#elif CPU
+#define err_check(command)                                                                         \
+  {                                                                                                \
+    int status = command;                                                                   \
+    if (status != 0)                                                                      \
+    {                                                                                              \
+      printf("(%s:%d) Error: Report %s\n", __FILE__, __LINE__, perror());    \
+      exit(1);                                                                                     \
+    }                                                                                              \
+  }
+#endif
 namespace dolfinx::acc
 {
 template <typename T>
@@ -204,6 +229,7 @@ public:
     _nnz = nnz;
 
     // Allocate data on device
+#ifdef USE_HIP
     err_check(hipMalloc((void**)&_row_ptr, num_rows * sizeof(std::int32_t)));
     err_check(hipMalloc((void**)&_off_diag_offset, num_rows * sizeof(std::int32_t)));
     err_check(hipMalloc((void**)&_cols, nnz * sizeof(std::int32_t)));
@@ -219,6 +245,23 @@ public:
         hipMemcpy(_cols, _A->cols().data(), nnz * sizeof(std::int32_t), hipMemcpyHostToDevice));
     err_check(hipMemcpy(_values, _A->values().data(), nnz * sizeof(T), hipMemcpyHostToDevice));
     err_check(hipDeviceSynchronize());
+ #elif USE_CUDA
+    err_check(cudaMalloc((void**)&_row_ptr, num_rows * sizeof(std::int32_t)));
+    err_check(cudaMalloc((void**)&_off_diag_offset, num_rows * sizeof(std::int32_t)));
+    err_check(cudaMalloc((void**)&_cols, nnz * sizeof(std::int32_t)));
+    err_check(cudaMalloc((void**)&_values, nnz * sizeof(T)));
+
+    // Copy data from host to device
+    err_check(cudaMemcpy(_row_ptr, _A->row_ptr().data(), num_rows * sizeof(std::int32_t),
+                        cudaMemcpyHostToDevice));
+    err_check(cudaMemcpy(_off_diag_offset, _A->off_diag_offset().data(),
+                        num_rows * sizeof(std::int32_t), cudaMemcpyHostToDevice));
+
+    err_check(
+        cudaMemcpy(_cols, _A->cols().data(), nnz * sizeof(std::int32_t), cudaMemcpyHostToDevice));
+    err_check(cudaMemcpy(_values, _A->values().data(), nnz * sizeof(T), cudaMemcpyHostToDevice));
+    err_check(cudaDeviceSynchronize());
+ #endif
   }
 
   MatrixOperator(const fem::FunctionSpace<T>& V0, const fem::FunctionSpace<T>& V1)
@@ -268,7 +311,7 @@ public:
     LOG(WARNING) << "Number of non zeros " <<  _nnz;
     LOG(WARNING) << "Number of rows " <<  num_rows;
 
-
+#ifdef USE_HIP
     // Allocate data on device
     err_check(hipMalloc((void**)&_row_ptr, num_rows * sizeof(std::int32_t)));
     err_check(hipMalloc((void**)&_off_diag_offset, num_rows * sizeof(std::int32_t)));
@@ -285,6 +328,24 @@ public:
         hipMemcpy(_cols, _A->cols().data(), nnz * sizeof(std::int32_t), hipMemcpyHostToDevice));
     err_check(hipMemcpy(_values, _A->values().data(), nnz * sizeof(T), hipMemcpyHostToDevice));
     err_check(hipDeviceSynchronize());
+#elif USE_CUDA
+    // Allocate data on device
+    err_check(hipMalloc((void**)&_row_ptr, num_rows * sizeof(std::int32_t)));
+    err_check(hipMalloc((void**)&_off_diag_offset, num_rows * sizeof(std::int32_t)));
+    err_check(hipMalloc((void**)&_cols, nnz * sizeof(std::int32_t)));
+    err_check(hipMalloc((void**)&_values, nnz * sizeof(T)));
+
+    // Copy data from host to device
+    err_check(hipMemcpy(_row_ptr, _A->row_ptr().data(), num_rows * sizeof(std::int32_t),
+                        hipMemcpyHostToDevice));
+    err_check(hipMemcpy(_off_diag_offset, _A->off_diag_offset().data(),
+                        num_rows * sizeof(std::int32_t), hipMemcpyHostToDevice));
+
+    err_check(
+        hipMemcpy(_cols, _A->cols().data(), nnz * sizeof(std::int32_t), hipMemcpyHostToDevice));
+    err_check(hipMemcpy(_values, _A->values().data(), nnz * sizeof(T), hipMemcpyHostToDevice));
+    err_check(hipDeviceSynchronize());
+#endif
   }
 
   /**
@@ -311,23 +372,53 @@ public:
     if (transpose)
     {
       x.scatter_fwd_begin();
+ #ifdef USE_HIP
       hipLaunchKernelGGL(spmvT_impl<T>, grid_size, block_size, 0, 0, num_rows, _values, _row_ptr,
                          _off_diag_offset, _cols, _x, _y);
       err_check(hipGetLastError());
+#elif USE_CUDA
+      spmv_impl<T><<grid_size, block_size, 0, 0, num_rows>>(_values, _row_ptr, _off_diag_offset, _cols, _x, _y);
+      err_check(cudaGetLastError());
+#elif CPU
+      spmv_impl<T>(A->values().data(), A->row_ptr().data(), A->off_diag_offset().data(), A->cols().data(), _x, _y);
+#endif
+
       x.scatter_fwd_end();
+ #ifdef USE_HIP
       hipLaunchKernelGGL(spmvT_impl<T>, grid_size, block_size, 0, 0, num_rows, _values, _row_ptr,
                          _off_diag_offset, _cols, _x, _y);
       err_check(hipGetLastError());
+#elif USE_CUDA
+      spmv_impl<T><<grid_size, block_size, 0, 0, num_rows>>(_values, _row_ptr, _off_diag_offset, _cols, _x, _y);
+      err_check(cudaGetLastError());
+#elif CPU
+      spmv_impl<T>(A->values().data(), A->row_ptr().data(), A->off_diag_offset().data(), A->cols().data(), _x, _y);
+#endif
     }
     else
     {
       x.scatter_fwd_begin();
+#ifdef USE_HIP
       hipLaunchKernelGGL(spmv_impl<T>, grid_size, block_size, 0, 0, num_rows, _values, _row_ptr,
                          _off_diag_offset, _cols, _x, _y);
       err_check(hipGetLastError());
+#elif USE_CUDA
+      spmv_impl<T><<grid_size, block_size, 0, 0, num_rows>>(_values, _row_ptr, _off_diag_offset, _cols, _x, _y);
+      err_check(cudaGetLastError());
+#elif CPU
+      spmv_impl<T>(A->values().data(), A->row_ptr().data(), A->off_diag_offset().data(), A->cols().data(), _x, _y);
+#endif
       x.scatter_fwd_end();
+#ifdef USE_HIP
       hipLaunchKernelGGL(spmv_impl<T>, grid_size, block_size, 0, 0, num_rows, _values, _row_ptr,
                          _off_diag_offset, _cols, _x, _y);
+#elif USE_CUDA
+      spmv_impl<T><<grid_size, block_size, 0, 0, num_rows>>(_values, _row_ptr, _off_diag_offset, _cols, _x, _y);
+      err_check(cudaGetLastError());
+#elif CPU
+      spmv_impl<T>(A->values().data(), A->row_ptr().data(), A->off_diag_offset().data(), A->cols().data(), _x, _y);
+#endif
+
       err_check(hipGetLastError());
     }
   }
@@ -345,10 +436,17 @@ public:
 
   ~MatrixOperator()
   {
+#ifdef USE_HIP
     err_check(hipFree(_values));
     err_check(hipFree(_row_ptr));
     err_check(hipFree(_cols));
     err_check(hipFree(_off_diag_offset));
+#elif USE_CUDA
+    err_check(cudaFree(_values));
+    err_check(cudaFree(_row_ptr));
+    err_check(cudaFree(_cols));
+    err_check(cudaFree(_off_diag_offset));
+#endif
   }
 
 private:
