@@ -10,6 +10,7 @@
 #include <boost/program_options.hpp>
 #include <dolfinx.h>
 #include <dolfinx/fem/dolfinx_fem.h>
+#include <dolfinx/io/XDMFFile.h>
 #include <dolfinx/la/MatrixCSR.h>
 #include <dolfinx/la/SparsityPattern.h>
 #include <dolfinx/mesh/generation.h>
@@ -35,7 +36,8 @@ int main(int argc, char* argv[])
 
   po::options_description desc("Allowed options");
   desc.add_options()("help,h", "print usage message")(
-      "ndofs", po::value<std::size_t>()->default_value(500), "number of dofs per rank");
+      "ndofs", po::value<std::size_t>()->default_value(500), "number of dofs per rank")(
+      "file", po::value<std::string>()->default_value(""), "mesh filename");
 
   po::variables_map vm;
   po::store(po::command_line_parser(argc, argv).options(desc).allow_unregistered().run(), vm);
@@ -47,6 +49,7 @@ int main(int argc, char* argv[])
     return 0;
   }
   const std::size_t ndofs = vm["ndofs"].as<std::size_t>();
+  const std::string filename = vm["file"].as<std::string>();
 
   init_logging(argc, argv);
   MPI_Init(&argc, &argv);
@@ -63,31 +66,6 @@ int main(int argc, char* argv[])
     print_amd_gpu_memory_used("Beginning");
 #endif
 
-    const int order = 2;
-    double nx_approx = (std::pow(ndofs * size, 1.0 / 3.0) - 1) / order;
-    std::size_t n0 = static_cast<int>(nx_approx);
-    std::array<std::size_t, 3> nx = {n0, n0, n0};
-
-    // Try to improve fit to ndofs +/- 5 in each direction
-    if (n0 > 5)
-    {
-      std::int64_t best_misfit
-          = (n0 * order + 1) * (n0 * order + 1) * (n0 * order + 1) - ndofs * size;
-      best_misfit = std::abs(best_misfit);
-      for (std::size_t nx0 = n0 - 5; nx0 < n0 + 6; ++nx0)
-        for (std::size_t ny0 = n0 - 5; ny0 < n0 + 6; ++ny0)
-          for (std::size_t nz0 = n0 - 5; nz0 < n0 + 6; ++nz0)
-          {
-            std::int64_t misfit
-                = (nx0 * order + 1) * (ny0 * order + 1) * (nz0 * order + 1) - ndofs * size;
-            if (std::abs(misfit) < best_misfit)
-            {
-              best_misfit = std::abs(misfit);
-              nx = {nx0, ny0, nz0};
-            }
-          }
-    }
-
 #ifdef ROCM_TRACING
     if (rank == 0)
     {
@@ -100,8 +78,43 @@ int main(int argc, char* argv[])
     print_amd_gpu_memory_used("making mesh");
 
 #endif
-    auto mesh = std::make_shared<mesh::Mesh<T>>(mesh::create_box<T>(
-        comm, {{{0, 0, 0}, {1, 1, 1}}}, {nx[0], nx[1], nx[2]}, mesh::CellType::hexahedron));
+
+    std::shared_ptr<mesh::Mesh<T>> mesh;
+
+    if (filename.size() > 0)
+    {
+      dolfinx::io::XDMFFile xdmf(MPI_COMM_WORLD, filename, "r");
+    }
+    else
+    {
+      const int order = 2;
+      double nx_approx = (std::pow(ndofs * size, 1.0 / 3.0) - 1) / order;
+      std::size_t n0 = static_cast<int>(nx_approx);
+      std::array<std::size_t, 3> nx = {n0, n0, n0};
+
+      // Try to improve fit to ndofs +/- 5 in each direction
+      if (n0 > 5)
+      {
+        std::int64_t best_misfit
+            = (n0 * order + 1) * (n0 * order + 1) * (n0 * order + 1) - ndofs * size;
+        best_misfit = std::abs(best_misfit);
+        for (std::size_t nx0 = n0 - 5; nx0 < n0 + 6; ++nx0)
+          for (std::size_t ny0 = n0 - 5; ny0 < n0 + 6; ++ny0)
+            for (std::size_t nz0 = n0 - 5; nz0 < n0 + 6; ++nz0)
+            {
+              std::int64_t misfit
+                  = (nx0 * order + 1) * (ny0 * order + 1) * (nz0 * order + 1) - ndofs * size;
+              if (std::abs(misfit) < best_misfit)
+              {
+                best_misfit = std::abs(misfit);
+                nx = {nx0, ny0, nz0};
+              }
+            }
+      }
+      mesh = std::make_shared<mesh::Mesh<T>>(mesh::create_box<T>(
+          comm, {{{0, 0, 0}, {1, 1, 1}}}, {nx[0], nx[1], nx[2]}, mesh::CellType::hexahedron));
+    }
+
 #ifdef ROCM_TRACING
     roctxRangePop();
 #endif
