@@ -234,8 +234,6 @@ float print_amd_gpu_memory_percentage_used(char const* text)
   return return_value;
 }
 
-<<<<<<< HEAD
-
 inline void add_profiling_annotation(const char * const tag)
 {
 #ifdef ROCM_TRACING

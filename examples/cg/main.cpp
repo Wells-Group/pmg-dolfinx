@@ -393,19 +393,12 @@ int main(int argc, char* argv[])
     // Display timings
     dolfinx::list_timings(MPI_COMM_WORLD, {dolfinx::TimingType::wall});
 
-<<<<<<< Updated upstream
     MPI_Reduce(&peak_mem, &global_peak_mem, 1, MPI_FLOAT, MPI_MAX, 0, MPI_COMM_WORLD);
     if (rank == 0)
     {
       std::cout
           << "peak memory used during the run (as a percentage of the total memory available): "
           << global_peak_mem << "%\n";
-=======
-
-    MPI_Reduce(&peak_mem, &global_peak_mem, 1, MPI_FLOAT, MPI_MAX, 0, MPI_COMM_WORLD);
-    if(rank == 0){
-      std::cout << "peak memory used during the run (as a percentage of the total memory available): " << global_peak_mem << "%\n";
->>>>>>> Stashed changes
     }
   }
 #ifdef ROCM_SMI
