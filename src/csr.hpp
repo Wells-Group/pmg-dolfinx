@@ -189,7 +189,7 @@ public:
     pattern.assemble();
     _map = std::make_shared<const common::IndexMap>(pattern.column_index_map());
 
-    auto _A = std::make_unique<la::MatrixCSR<T>>(pattern);
+    _A = std::make_unique<la::MatrixCSR<T>>(pattern);
     fem::assemble_matrix(_A->mat_add_values(), *a, bcs);
     _A->finalize();
     fem::set_diagonal<T>(_A->mat_set_values(), *V, bcs, T(1.0));
@@ -200,6 +200,72 @@ public:
     std::int32_t num_rows = _map->size_local();
     std::int32_t nnz = _A->row_ptr()[num_rows];
     _nnz = nnz;
+
+    // Allocate data on device
+    err_check(hipMalloc((void**)&_row_ptr, num_rows * sizeof(std::int32_t)));
+    err_check(hipMalloc((void**)&_off_diag_offset, num_rows * sizeof(std::int32_t)));
+    err_check(hipMalloc((void**)&_cols, nnz * sizeof(std::int32_t)));
+    err_check(hipMalloc((void**)&_values, nnz * sizeof(T)));
+
+    // Copy data from host to device
+    err_check(hipMemcpy(_row_ptr, _A->row_ptr().data(), num_rows * sizeof(std::int32_t),
+                        hipMemcpyHostToDevice));
+    err_check(hipMemcpy(_off_diag_offset, _A->off_diag_offset().data(),
+                        num_rows * sizeof(std::int32_t), hipMemcpyHostToDevice));
+
+    err_check(
+        hipMemcpy(_cols, _A->cols().data(), nnz * sizeof(std::int32_t), hipMemcpyHostToDevice));
+    err_check(hipMemcpy(_values, _A->values().data(), nnz * sizeof(T), hipMemcpyHostToDevice));
+    err_check(hipDeviceSynchronize());
+  }
+
+  MatrixOperator(const fem::FunctionSpace<T>& V0, const fem::FunctionSpace<T>& V1)
+  {
+    dolfinx::common::Timer t0("~setup phase Interpolation Oerators");
+    _comm = V0.mesh()->comm();
+    assert(V0.mesh());
+    auto mesh = V0.mesh();
+    assert(V1.mesh());
+    assert(mesh == V1.mesh());
+
+    std::shared_ptr<const fem::DofMap> dofmap0 = V0.dofmap();
+    assert(dofmap0);
+    std::shared_ptr<const fem::DofMap> dofmap1 = V1.dofmap();
+    assert(dofmap1);
+
+    // Create and build  sparsity pattern
+    assert(dofmap0->index_map);
+    assert(dofmap1->index_map);
+
+    la::SparsityPattern pattern(_comm, {dofmap1->index_map, dofmap0->index_map},
+                                {dofmap1->index_map_bs(), dofmap0->index_map_bs()});
+
+    int tdim = mesh->topology()->dim();
+    auto map = mesh->topology()->index_map(tdim);
+    assert(map);
+    std::vector<std::int32_t> c(map->size_local(), 0);
+    std::iota(c.begin(), c.end(), 0);
+    fem::sparsitybuild::cells(pattern, c, {*dofmap1, *dofmap0});
+    pattern.assemble();
+
+    // Build operator
+    _A = std::make_unique<la::MatrixCSR<T>>(pattern);
+    fem::interpolation_matrix<T>(V0, V1, _A->mat_set_values());
+    _A->finalize();
+
+    // Create HIP matrix
+    _map = std::make_shared<const common::IndexMap>(pattern.column_index_map());
+
+
+    // Create hip sparse matrix
+    std::int32_t num_rows = _map->size_local();
+    std::int32_t nnz = _A->row_ptr().size();
+    _nnz = nnz;
+
+  
+    LOG(WARNING) << "Number of non zeros " <<  _nnz;
+    LOG(WARNING) << "Number of rows " <<  num_rows;
+
 
     // Allocate data on device
     err_check(hipMalloc((void**)&_row_ptr, num_rows * sizeof(std::int32_t)));
@@ -263,6 +329,7 @@ public:
       err_check(hipGetLastError());
     }
   }
+
 
   template <typename Vector>
   void apply_host(Vector& x, Vector& y, bool transpose = false)
