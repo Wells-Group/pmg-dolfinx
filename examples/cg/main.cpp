@@ -57,6 +57,9 @@ int main(int argc, char* argv[])
     MPI_Comm_rank(comm, &rank);
     MPI_Comm_size(comm, &size);
 
+    if (rank == 0)
+      loguru::g_stderr_verbosity = loguru::Verbosity_INFO;
+
 #ifdef ROCM_SMI
     err = initialise_rocm_smi();
     num_devices = num_monitored_devices();
@@ -89,7 +92,7 @@ int main(int argc, char* argv[])
       dolfinx::fem::CoordinateElement element(mesh::CellType::tetrahedron, 1);
       dolfinx::io::XDMFFile xdmf(MPI_COMM_WORLD, filename, "r");
       mesh = std::make_shared<dolfinx::mesh::Mesh<T>>(
-          xdmf.read_mesh(element, mesh::GhostMode::none, "mesh"));
+          xdmf.read_mesh(element, mesh::GhostMode::none, "Grid"));
     }
     else
     {
@@ -139,6 +142,21 @@ int main(int argc, char* argv[])
     remove_profiling_annotation("making V");
 #endif
 
+    // Compute geometric range of mesh...
+    std::array<T, 3> max_x = {-1e9, -1e9, -1e9}, min_x = {1e9, 1e9, 1e9};
+    auto geom = mesh->geometry().x();
+    for (int i = 0; i < geom.size(); i += 3)
+      for (int j = 0; j < 3; ++j)
+      {
+        max_x[j] = max(geom[i + j], max_x[j]);
+        min_x[j] = min(geom[i + j], min_x[j]);
+      }
+    std::array<T, 3> global_max_x, global_min_x;
+    MPI_Allreduce(max_x.data(), global_max_x.data(), 3, dolfinx::MPI::mpi_type<T>(), MPI_MAX,
+                  MPI_COMM_WORLD);
+    MPI_Allreduce(min_x.data(), global_min_x.data(), 3, dolfinx::MPI::mpi_type<T>(), MPI_MIN,
+                  MPI_COMM_WORLD);
+
     std::size_t ncells = mesh->topology()->index_map(3)->size_global();
     std::size_t ndofs = V->dofmap()->index_map->size_global();
     if (rank == 0)
@@ -149,6 +167,11 @@ int main(int argc, char* argv[])
       std::cout << "Number of dofs-global : " << ndofs << "\n";
       std::cout << "Number of cells-rank : " << ncells / size << "\n";
       std::cout << "Number of dofs-rank : " << ndofs / size << "\n";
+      std::cout << "Range min: " << global_min_x[0] << "," << global_min_x[1] << ","
+                << global_min_x[2] << "\n";
+      std::cout << "Range max: " << global_max_x[0] << "," << global_max_x[1] << ","
+                << global_max_x[2] << "\n";
+
       std::cout << "-----------------------------------\n";
       std::cout << std::flush;
     }
@@ -179,9 +202,10 @@ int main(int argc, char* argv[])
           std::vector<T> out;
           for (std::size_t p = 0; p < x.extent(1); ++p)
           {
-            auto dx = (x(0, p) - 0.5) * (x(0, p) - 0.5);
-            auto dy = (x(1, p) - 0.5) * (x(1, p) - 0.5);
-            out.push_back(1000 * std::exp(-(dx + dy) / 0.02));
+            //            auto dx = (x(0, p) - 0.5) * (x(0, p) - 0.5);
+            //            auto dy = (x(1, p) - 0.5) * (x(1, p) - 0.5);
+            //            out.push_back(1000 * std::exp(-(dx + dy) / 0.02));
+            out.push_back(x(0, p));
           }
 
           return {out, {out.size()}};
