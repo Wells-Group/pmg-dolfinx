@@ -10,6 +10,7 @@
 #include <boost/program_options.hpp>
 #include <dolfinx.h>
 #include <dolfinx/fem/dolfinx_fem.h>
+#include <dolfinx/io/XDMFFile.h>
 #include <dolfinx/la/MatrixCSR.h>
 #include <dolfinx/la/SparsityPattern.h>
 #include <dolfinx/mesh/generation.h>
@@ -17,12 +18,7 @@
 #include <memory>
 #include <mpi.h>
 
-#ifdef ROCM_TRACING
-#include <roctx.h>
-#endif
-#ifdef ROCM_SMI
 #include "src/amd_gpu.hpp"
-#endif
 
 using namespace dolfinx;
 using T = double;
@@ -38,7 +34,8 @@ int main(int argc, char* argv[])
 
   po::options_description desc("Allowed options");
   desc.add_options()("help,h", "print usage message")(
-      "ndofs", po::value<std::size_t>()->default_value(500), "number of dofs per rank");
+      "ndofs", po::value<std::size_t>()->default_value(500), "number of dofs per rank")(
+      "file", po::value<std::string>()->default_value(""), "mesh filename");
 
   po::variables_map vm;
   po::store(po::command_line_parser(argc, argv).options(desc).allow_unregistered().run(), vm);
@@ -50,6 +47,7 @@ int main(int argc, char* argv[])
     return 0;
   }
   const std::size_t ndofs = vm["ndofs"].as<std::size_t>();
+  const std::string filename = vm["file"].as<std::string>();
 
   init_logging(argc, argv);
   MPI_Init(&argc, &argv);
@@ -64,33 +62,9 @@ int main(int argc, char* argv[])
     num_devices = num_monitored_devices();
     std::cout << "MPI rank " << rank << " can see " << num_devices << " AMD GPUs\n";
     mem = print_amd_gpu_memory_percentage_used("Beginning");
-    if(mem > peak_mem) peak_mem = mem;
+    if (mem > peak_mem)
+      peak_mem = mem;
 #endif
-
-    const int order = 2;
-    double nx_approx = (std::pow(ndofs * size, 1.0 / 3.0) - 1) / order;
-    std::size_t n0 = static_cast<int>(nx_approx);
-    std::array<std::size_t, 3> nx = {n0, n0, n0};
-
-    // Try to improve fit to ndofs +/- 5 in each direction
-    if (n0 > 5)
-    {
-      std::int64_t best_misfit
-          = (n0 * order + 1) * (n0 * order + 1) * (n0 * order + 1) - ndofs * size;
-      best_misfit = std::abs(best_misfit);
-      for (std::size_t nx0 = n0 - 5; nx0 < n0 + 6; ++nx0)
-        for (std::size_t ny0 = n0 - 5; ny0 < n0 + 6; ++ny0)
-          for (std::size_t nz0 = n0 - 5; nz0 < n0 + 6; ++nz0)
-          {
-            std::int64_t misfit
-                = (nx0 * order + 1) * (ny0 * order + 1) * (nz0 * order + 1) - ndofs * size;
-            if (std::abs(misfit) < best_misfit)
-            {
-              best_misfit = std::abs(misfit);
-              nx = {nx0, ny0, nz0};
-            }
-          }
-    }
 
 #ifdef ROCM_TRACING
     if (rank == 0)
@@ -104,10 +78,49 @@ int main(int argc, char* argv[])
 #endif
 #ifdef ROCM_SMI
     mem = print_amd_gpu_memory_percentage_used("making mesh");
-    if(mem > peak_mem) peak_mem = mem;
+    if (mem > peak_mem)
+      peak_mem = mem;
 #endif
-    auto mesh = std::make_shared<mesh::Mesh<T>>(mesh::create_box<T>(
-        comm, {{{0, 0, 0}, {1, 1, 1}}}, {nx[0], nx[1], nx[2]}, mesh::CellType::hexahedron));
+
+    std::shared_ptr<mesh::Mesh<T>> mesh;
+
+    if (filename.size() > 0)
+    {
+      dolfinx::fem::CoordinateElement element(mesh::CellType::tetrahedron, 1);
+      dolfinx::io::XDMFFile xdmf(MPI_COMM_WORLD, filename, "r");
+      mesh = std::make_shared<dolfinx::mesh::Mesh<T>>(
+          xdmf.read_mesh(element, mesh::GhostMode::none, "mesh"));
+    }
+    else
+    {
+      const int order = 2;
+      double nx_approx = (std::pow(ndofs * size, 1.0 / 3.0) - 1) / order;
+      std::size_t n0 = static_cast<int>(nx_approx);
+      std::array<std::size_t, 3> nx = {n0, n0, n0};
+
+      // Try to improve fit to ndofs +/- 5 in each direction
+      if (n0 > 5)
+      {
+        std::int64_t best_misfit
+            = (n0 * order + 1) * (n0 * order + 1) * (n0 * order + 1) - ndofs * size;
+        best_misfit = std::abs(best_misfit);
+        for (std::size_t nx0 = n0 - 5; nx0 < n0 + 6; ++nx0)
+          for (std::size_t ny0 = n0 - 5; ny0 < n0 + 6; ++ny0)
+            for (std::size_t nz0 = n0 - 5; nz0 < n0 + 6; ++nz0)
+            {
+              std::int64_t misfit
+                  = (nx0 * order + 1) * (ny0 * order + 1) * (nz0 * order + 1) - ndofs * size;
+              if (std::abs(misfit) < best_misfit)
+              {
+                best_misfit = std::abs(misfit);
+                nx = {nx0, ny0, nz0};
+              }
+            }
+      }
+      mesh = std::make_shared<mesh::Mesh<T>>(mesh::create_box<T>(
+          comm, {{{0, 0, 0}, {1, 1, 1}}}, {nx[0], nx[1], nx[2]}, mesh::CellType::hexahedron));
+    }
+
 #ifdef ROCM_TRACING
     remove_profiling_annotation("making mesh");
 #endif
@@ -117,7 +130,8 @@ int main(int argc, char* argv[])
 #endif
 #ifdef ROCM_SMI
     mem = print_amd_gpu_memory_percentage_used("making V");
-    if(mem > peak_mem) peak_mem = mem;
+    if (mem > peak_mem)
+      peak_mem = mem;
 #endif
     auto V = std::make_shared<fem::FunctionSpace<T>>(
         fem::create_functionspace(functionspace_form_poisson_a, "u", mesh));
@@ -149,7 +163,8 @@ int main(int argc, char* argv[])
 #endif
 #ifdef ROCM_SMI
     mem = print_amd_gpu_memory_percentage_used("making forms");
-    if(mem > peak_mem) peak_mem = mem;
+    if (mem > peak_mem)
+      peak_mem = mem;
 #endif
     auto a = std::make_shared<fem::Form<T>>(
         fem::create_form<T>(*form_poisson_a, {V, V}, {}, {{"kappa", kappa}}, {}));
@@ -177,7 +192,8 @@ int main(int argc, char* argv[])
 #endif
 #ifdef ROCM_SMI
     mem = print_amd_gpu_memory_percentage_used("doing topology");
-    if(mem > peak_mem) peak_mem = mem;
+    if (mem > peak_mem)
+      peak_mem = mem;
 #endif
     auto topology = V->mesh()->topology_mutable();
     int tdim = topology->dim();
@@ -192,7 +208,8 @@ int main(int argc, char* argv[])
 #endif
 #ifdef ROCM_SMI
     mem = print_amd_gpu_memory_percentage_used("doing boundary conditions");
-    if(mem > peak_mem) peak_mem = mem;
+    if (mem > peak_mem)
+      peak_mem = mem;
 #endif
     auto dofmap = V->dofmap();
     auto facets = dolfinx::mesh::exterior_facet_indices(*topology);
@@ -215,7 +232,8 @@ int main(int argc, char* argv[])
 #endif
 #ifdef ROCM_SMI
     mem = print_amd_gpu_memory_percentage_used("assembling and scattering");
-    if(mem > peak_mem) peak_mem = mem;
+    if (mem > peak_mem)
+      peak_mem = mem;
 #endif
     b.set(T(0.0));
     fem::assemble_vector(b.mutable_array(), *L);
@@ -231,7 +249,8 @@ int main(int argc, char* argv[])
 #endif
 #ifdef ROCM_SMI
     mem = print_amd_gpu_memory_percentage_used("setup device x");
-    if(mem > peak_mem) peak_mem = mem;
+    if (mem > peak_mem)
+      peak_mem = mem;
 #endif
     DeviceVector x(map, 1);
     x.set(T{0.0});
@@ -244,7 +263,8 @@ int main(int argc, char* argv[])
 #endif
 #ifdef ROCM_SMI
     mem = print_amd_gpu_memory_percentage_used("setup device y");
-    if(mem > peak_mem) peak_mem = mem;
+    if (mem > peak_mem)
+      peak_mem = mem;
 #endif
     DeviceVector y(map, 1);
     y.copy_from_host(b); // Copy data from host vector to device vector
@@ -257,7 +277,8 @@ int main(int argc, char* argv[])
 #endif
 #ifdef ROCM_SMI
     mem = print_amd_gpu_memory_percentage_used("matrix operator");
-    if(mem > peak_mem) peak_mem = mem;
+    if (mem > peak_mem)
+      peak_mem = mem;
 #endif
     // Create operator
     op(y, x);
@@ -278,7 +299,8 @@ int main(int argc, char* argv[])
 #endif
 #ifdef ROCM_SMI
     mem = print_amd_gpu_memory_percentage_used("creating cg solver");
-    if(mem > peak_mem) peak_mem = mem;
+    if (mem > peak_mem)
+      peak_mem = mem;
 #endif
     dolfinx::acc::CGSolver<DeviceVector> cg(map, 1);
     cg.set_max_iterations(30);
@@ -294,7 +316,8 @@ int main(int argc, char* argv[])
 #endif
 #ifdef ROCM_SMI
     mem = print_amd_gpu_memory_percentage_used("before cg solve");
-    if(mem > peak_mem) peak_mem = mem;
+    if (mem > peak_mem)
+      peak_mem = mem;
 #endif
 
     dolfinx::common::Timer tcg("ZZZ CG");
@@ -315,7 +338,8 @@ int main(int argc, char* argv[])
 #endif
 #ifdef ROCM_SMI
     mem = print_amd_gpu_memory_percentage_used("get eigenvalues");
-    if(mem > peak_mem) peak_mem = mem;
+    if (mem > peak_mem)
+      peak_mem = mem;
 #endif
     std::vector<T> eign = cg.compute_eigenvalues();
     std::sort(eign.begin(), eign.end());
@@ -332,7 +356,8 @@ int main(int argc, char* argv[])
 #endif
 #ifdef ROCM_SMI
     mem = print_amd_gpu_memory_percentage_used("chebyshev solve");
-    if(mem > peak_mem) peak_mem = mem;
+    if (mem > peak_mem)
+      peak_mem = mem;
 #endif
 
     dolfinx::common::Timer tcheb("ZZZ Chebyshev");
@@ -347,29 +372,33 @@ int main(int argc, char* argv[])
       std::cout << "Cheb resid = " << rs << std::endl;
 
 #ifdef ROCM_TRACING
-      add_profiling_annotation("chebyshev solve");
+    add_profiling_annotation("chebyshev solve");
 #endif
 #ifdef ROCM_SMI
     mem = print_amd_gpu_memory_percentage_used("before chebyshev solve");
-    if(mem > peak_mem) peak_mem = mem;
+    if (mem > peak_mem)
+      peak_mem = mem;
 #endif
-      cheb.solve(op, x, y, true);
+    cheb.solve(op, x, y, true);
 #ifdef ROCM_SMI
     mem = print_amd_gpu_memory_percentage_used("afterchebyshev solve");
-    if(mem > peak_mem) peak_mem = mem;
+    if (mem > peak_mem)
+      peak_mem = mem;
 #endif
 #ifdef ROCM_TRACING
-      remove_profiling_annotation("chebyshev solve");
+    remove_profiling_annotation("chebyshev solve");
 #endif
     tcheb.stop();
 
     // Display timings
     dolfinx::list_timings(MPI_COMM_WORLD, {dolfinx::TimingType::wall});
 
-
     MPI_Reduce(&peak_mem, &global_peak_mem, 1, MPI_FLOAT, MPI_MAX, 0, MPI_COMM_WORLD);
-    if(rank == 0){
-      std::cout << "peak memory used during the run (as a percentage of the total memory available): " << global_peak_mem << "%\n";
+    if (rank == 0)
+    {
+      std::cout
+          << "peak memory used during the run (as a percentage of the total memory available): "
+          << global_peak_mem << "%\n";
     }
   }
 #ifdef ROCM_SMI

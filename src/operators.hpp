@@ -43,7 +43,7 @@ public:
     pattern.assemble();
 
     LOG(INFO) << "Create matrix...";
-    _host_mat = la::petsc::create_matrix(a->mesh()->comm(), pattern, "mpiaijhipsparse");
+    _host_mat = la::petsc::create_matrix(a->mesh()->comm(), pattern, "aijhipsparse");
 
     LOG(INFO) << "Zero matrix...";
     MatZeroEntries(_host_mat);

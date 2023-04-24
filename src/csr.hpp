@@ -3,8 +3,11 @@
 #include <dolfinx/fem/petsc.h>
 #include <dolfinx/la/MatrixCSR.h>
 
+#ifdef USE_HIP
 #include "hip/hip_runtime.h"
 #include <hipsparse.h>
+#elif USE_CUDA
+#endif
 
 namespace test
 {
@@ -48,7 +51,6 @@ void spmvT_impl(std::span<const T> values, std::span<const std::int32_t> row_beg
   assert(row_begin.size() == row_end.size());
   for (std::size_t i = 0; i < row_begin.size(); i++)
   {
-    T vi{0};
     for (std::int32_t j = row_begin[i]; j < row_end[i]; j++)
       y[indices[j]] += values[j] * x[i];
   }
@@ -158,6 +160,7 @@ __global__ void spmvT_impl(int N, const T* values, const std::int32_t* row_begin
 
 } // namespace
 
+#ifdef USE_HIP
 #define err_check(command)                                                                         \
   {                                                                                                \
     hipError_t status = command;                                                                   \
@@ -167,6 +170,27 @@ __global__ void spmvT_impl(int N, const T* values, const std::int32_t* row_begin
       exit(1);                                                                                     \
     }                                                                                              \
   }
+#elif USE_CUDA
+#define err_check(command)                                                                         \
+  {                                                                                                \
+    cudaError_t status = command;                                                                  \
+    if (status != cudaSuccess)                                                                     \
+    {                                                                                              \
+      printf("(%s:%d) Error: CUDA reports %s\n", __FILE__, __LINE__, cudaGetErrorString(status));  \
+      exit(1);                                                                                     \
+    }                                                                                              \
+  }
+#elif CPU
+#define err_check(command)                                                                         \
+  {                                                                                                \
+    int status = command;                                                                          \
+    if (status != 0)                                                                               \
+    {                                                                                              \
+      printf("(%s:%d) Error: Report %s\n", __FILE__, __LINE__, perror());                          \
+      exit(1);                                                                                     \
+    }                                                                                              \
+  }
+#endif
 
 namespace dolfinx::acc
 {
@@ -205,6 +229,7 @@ public:
     _nnz = nnz;
 
     // Allocate data on device
+#ifdef USE_HIP
     err_check(hipMalloc((void**)&_row_ptr, num_rows * sizeof(std::int32_t)));
     err_check(hipMalloc((void**)&_off_diag_offset, num_rows * sizeof(std::int32_t)));
     err_check(hipMalloc((void**)&_cols, nnz * sizeof(std::int32_t)));
@@ -220,11 +245,6 @@ public:
         hipMemcpy(_cols, _A->cols().data(), nnz * sizeof(std::int32_t), hipMemcpyHostToDevice));
     err_check(hipMemcpy(_values, _A->values().data(), nnz * sizeof(T), hipMemcpyHostToDevice));
     err_check(hipDeviceSynchronize());
-
-#ifdef USE_HIPSPARSE
-    hipsparseCreate(&handle);
-    hipsparseCreateMatDescr(&descrA);
-#endif
   }
 
   MatrixOperator(const fem::FunctionSpace<T>& V0, const fem::FunctionSpace<T>& V1)
@@ -269,6 +289,14 @@ public:
     std::int32_t nnz = _A->row_ptr().size();
     _nnz = nnz;
 
+    LOG(WARNING) << "Number of non zeros " << _nnz;
+    LOG(WARNING) << "Number of rows " << num_rows;
+
+    err_check(
+        hipMemcpy(_cols, _A->cols().data(), nnz * sizeof(std::int32_t), hipMemcpyHostToDevice));
+    err_check(hipMemcpy(_values, _A->values().data(), nnz * sizeof(T), hipMemcpyHostToDevice));
+    err_check(hipDeviceSynchronize());
+#elif USE_CUDA
     // Allocate data on device
     err_check(hipMalloc((void**)&_row_ptr, num_rows * sizeof(std::int32_t)));
     err_check(hipMalloc((void**)&_off_diag_offset, num_rows * sizeof(std::int32_t)));
@@ -285,11 +313,6 @@ public:
         hipMemcpy(_cols, _A->cols().data(), nnz * sizeof(std::int32_t), hipMemcpyHostToDevice));
     err_check(hipMemcpy(_values, _A->values().data(), nnz * sizeof(T), hipMemcpyHostToDevice));
     err_check(hipDeviceSynchronize());
-
-#ifdef USE_HIPSPARSE
-    hipsparseCreate(&handle);
-    hipsparseCreateMatDescr(&descrA);
-#endif
   }
 
   /**
@@ -327,14 +350,21 @@ public:
       dim3 block_size(256);
       dim3 grid_size((num_rows + block_size.x - 1) / block_size.x);
       x.scatter_fwd_begin();
+#ifdef USE_HIP
       hipLaunchKernelGGL(spmvT_impl<T>, grid_size, block_size, 0, 0, num_rows, _values, _row_ptr,
                          _off_diag_offset, _cols, _x, _y);
       err_check(hipGetLastError());
-      x.scatter_fwd_end();
-      hipLaunchKernelGGL(spmvT_impl<T>, grid_size, block_size, 0, 0, num_rows, _values,
-                         _off_diag_offset, _row_ptr + 1, _cols, _x, _y);
-      err_check(hipGetLastError());
+#elif USE_CUDA
+      spmv_impl<T><<grid_size, block_size, 0, 0, num_rows>>(_values, _row_ptr, _off_diag_offset, _cols, _x, _y);
+      err_check(cudaGetLastError());
+#elif CPU
+      spmv_impl<T>(A->values().data(), A->row_ptr().data(), A->off_diag_offset().data(), A->cols().data(), _x, _y);
 #endif
+
+      x.scatter_fwd_end();
+      hipLaunchKernelGGL(spmvT_impl<T>, grid_size, block_size, 0, 0, num_rows, _values, _row_ptr,
+                         _off_diag_offset, _cols, _x, _y);
+      err_check(hipGetLastError());
     }
     else
     {
@@ -354,12 +384,19 @@ public:
       dim3 block_size(256);
       dim3 grid_size((num_rows + block_size.x - 1) / block_size.x);
       x.scatter_fwd_begin();
+#ifdef USE_HIP
       hipLaunchKernelGGL(spmv_impl<T>, grid_size, block_size, 0, 0, num_rows, _values, _row_ptr,
                          _off_diag_offset, _cols, _x, _y);
       err_check(hipGetLastError());
+#elif USE_CUDA
+      spmv_impl<T><<grid_size, block_size, 0, 0, num_rows>>(_values, _row_ptr, _off_diag_offset, _cols, _x, _y);
+      err_check(cudaGetLastError());
+#elif CPU
+      spmv_impl<T>(A->values().data(), A->row_ptr().data(), A->off_diag_offset().data(), A->cols().data(), _x, _y);
+#endif
       x.scatter_fwd_end();
-      hipLaunchKernelGGL(spmv_impl<T>, grid_size, block_size, 0, 0, num_rows, _values,
-                         _off_diag_offset, _row_ptr + 1, _cols, _x, _y);
+      hipLaunchKernelGGL(spmv_impl<T>, grid_size, block_size, 0, 0, num_rows, _values, _row_ptr,
+                         _off_diag_offset, _cols, _x, _y);
       err_check(hipGetLastError());
 #endif
     }
@@ -377,10 +414,13 @@ public:
 
   ~MatrixOperator()
   {
+#ifdef USE_HIP
     err_check(hipFree(_values));
     err_check(hipFree(_row_ptr));
     err_check(hipFree(_cols));
     err_check(hipFree(_off_diag_offset));
+#endif
+
 #ifdef USE_HIPSPARSE
     hipsparseDestroyMatDescr(descrA);
     hipsparseDestroy(handle);

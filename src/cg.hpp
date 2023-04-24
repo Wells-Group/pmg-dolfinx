@@ -6,9 +6,7 @@
 #include <dolfinx/common/IndexMap.h>
 #include <dolfinx/common/MPI.h>
 
-#ifdef ROCM_TRACING
-#include <roctx.h>
-#endif
+#include "amd_gpu.hpp"
 
 using namespace dolfinx;
 
@@ -167,9 +165,7 @@ public:
     int k = 0;
     while (k < _max_iter)
     {
-#ifdef ROCM_TRACING
-    roctxRangePush("cg solve iteration");
-#endif
+      add_profiling_annotation("cg solver iteration");
       ++k;
 
       // MatVec
@@ -209,9 +205,7 @@ public:
         _betas.push_back(beta);
         _residuals.push_back(rnorm);
       }
-#ifdef ROCM_TRACING
-    roctxRangePop();
-#endif
+      remove_profiling_annotation("cg solver iteration");  
     }
     return k;
   }
