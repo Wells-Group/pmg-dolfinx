@@ -35,6 +35,8 @@ add_custom_command(
 find_package(hip REQUIRED)
 find_package(rocprim REQUIRED CONFIG)
 find_package(rocthrust REQUIRED CONFIG)
+find_package(hipsparse REQUIRED CONFIG)
+
 if(profiling)
 	find_library(ROCTRACER_LIBRARY NAMES roctx64 roctracer64)
 	add_definitions(-DROCM_TRACING=1)
@@ -43,7 +45,7 @@ add_executable(${PROJECT_NAME} main.cpp ${CMAKE_CURRENT_BINARY_DIR}/poisson.c)
 
 include_directories("../../")
 
-target_link_libraries(${PROJECT_NAME} dolfinx roc::rocthrust Boost::program_options)
+target_link_libraries(${PROJECT_NAME} dolfinx roc::rocthrust roc::hipsparse Boost::program_options)
 if(profiling)
 	target_link_libraries(${PROJECT_NAME} ${ROCTRACER_LIBRARY})
 endif()

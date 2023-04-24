@@ -1,8 +1,10 @@
-#include "hip/hip_runtime.h"
 #include <dolfinx.h>
 #include <dolfinx/fem/dolfinx_fem.h>
 #include <dolfinx/fem/petsc.h>
 #include <dolfinx/la/MatrixCSR.h>
+
+#include "hip/hip_runtime.h"
+#include <hipsparse.h>
 
 namespace test
 {
@@ -149,7 +151,6 @@ __global__ void spmvT_impl(int N, const T* values, const std::int32_t* row_begin
   if (i < N)
   {
     // Perform the transpose sparse matrix-vector multiplication for this row.
-    T vi{0};
     for (std::int32_t j = row_begin[i]; j < row_end[i]; j++)
       atomicAdd(&y[indices[j]], values[j] * x[i]);
   }
@@ -219,6 +220,11 @@ public:
         hipMemcpy(_cols, _A->cols().data(), nnz * sizeof(std::int32_t), hipMemcpyHostToDevice));
     err_check(hipMemcpy(_values, _A->values().data(), nnz * sizeof(T), hipMemcpyHostToDevice));
     err_check(hipDeviceSynchronize());
+
+#ifdef USE_HIPSPARSE
+    hipsparseCreate(&handle);
+    hipsparseCreateMatDescr(&descrA);
+#endif
   }
 
   MatrixOperator(const fem::FunctionSpace<T>& V0, const fem::FunctionSpace<T>& V1)
@@ -258,16 +264,10 @@ public:
     // Create HIP matrix
     _map = std::make_shared<const common::IndexMap>(pattern.column_index_map());
 
-
     // Create hip sparse matrix
     std::int32_t num_rows = _map->size_local();
     std::int32_t nnz = _A->row_ptr().size();
     _nnz = nnz;
-
-  
-    LOG(WARNING) << "Number of non zeros " <<  _nnz;
-    LOG(WARNING) << "Number of rows " <<  num_rows;
-
 
     // Allocate data on device
     err_check(hipMalloc((void**)&_row_ptr, num_rows * sizeof(std::int32_t)));
@@ -285,6 +285,11 @@ public:
         hipMemcpy(_cols, _A->cols().data(), nnz * sizeof(std::int32_t), hipMemcpyHostToDevice));
     err_check(hipMemcpy(_values, _A->values().data(), nnz * sizeof(T), hipMemcpyHostToDevice));
     err_check(hipDeviceSynchronize());
+
+#ifdef USE_HIPSPARSE
+    hipsparseCreate(&handle);
+    hipsparseCreateMatDescr(&descrA);
+#endif
   }
 
   /**
@@ -304,34 +309,61 @@ public:
     T* _x = x.mutable_array().data();
     T* _y = y.mutable_array().data();
 
-    int num_rows = _map->size_local();
-    dim3 block_size(512);
-    dim3 grid_size((num_rows + block_size.x - 1) / block_size.x);
-
     if (transpose)
     {
+#ifdef USE_HIPSPARSE
+      int num_cols = _map->size_local() + _map->num_ghosts();
+      int num_rows = _map->size_local();
+      x.scatter_fwd();
+      T alpha = 1.0;
+      T beta = 0.0;
+      hipsparseDcsrmv(handle, HIPSPARSE_OPERATION_TRANSPOSE, num_rows, num_cols, _nnz, &alpha,
+                      descrA, _values, _row_ptr, _cols, _x, &beta, _y);
+      err_check(hipGetLastError());
+      err_check(hipDeviceSynchronize());
+#else
+      int num_cols = _map->size_local() + _map->num_ghosts();
+      int num_rows = _map->size_local();
+      dim3 block_size(256);
+      dim3 grid_size((num_rows + block_size.x - 1) / block_size.x);
       x.scatter_fwd_begin();
       hipLaunchKernelGGL(spmvT_impl<T>, grid_size, block_size, 0, 0, num_rows, _values, _row_ptr,
                          _off_diag_offset, _cols, _x, _y);
       err_check(hipGetLastError());
       x.scatter_fwd_end();
-      hipLaunchKernelGGL(spmvT_impl<T>, grid_size, block_size, 0, 0, num_rows, _values, _row_ptr,
-                         _off_diag_offset, _cols, _x, _y);
+      hipLaunchKernelGGL(spmvT_impl<T>, grid_size, block_size, 0, 0, num_rows, _values,
+                         _off_diag_offset, _row_ptr + 1, _cols, _x, _y);
       err_check(hipGetLastError());
+#endif
     }
     else
     {
+#ifdef USE_HIPSPARSE
+      int num_cols = _map->size_local() + _map->num_ghosts();
+      int num_rows = _map->size_local();
+      x.scatter_fwd();
+      T alpha = 1.0;
+      T beta = 0.0;
+      hipsparseDcsrmv(handle, HIPSPARSE_OPERATION_NON_TRANSPOSE, num_rows, num_cols, _nnz, &alpha,
+                      descrA, _values, _row_ptr, _cols, _x, &beta, _y);
+      err_check(hipGetLastError());
+      err_check(hipDeviceSynchronize());
+#else
+      int num_cols = _map->size_local() + _map->num_ghosts();
+      int num_rows = _map->size_local();
+      dim3 block_size(256);
+      dim3 grid_size((num_rows + block_size.x - 1) / block_size.x);
       x.scatter_fwd_begin();
       hipLaunchKernelGGL(spmv_impl<T>, grid_size, block_size, 0, 0, num_rows, _values, _row_ptr,
                          _off_diag_offset, _cols, _x, _y);
       err_check(hipGetLastError());
       x.scatter_fwd_end();
-      hipLaunchKernelGGL(spmv_impl<T>, grid_size, block_size, 0, 0, num_rows, _values, _row_ptr,
-                         _off_diag_offset, _cols, _x, _y);
+      hipLaunchKernelGGL(spmv_impl<T>, grid_size, block_size, 0, 0, num_rows, _values,
+                         _off_diag_offset, _row_ptr + 1, _cols, _x, _y);
       err_check(hipGetLastError());
+#endif
     }
   }
-
 
   template <typename Vector>
   void apply_host(Vector& x, Vector& y, bool transpose = false)
@@ -349,6 +381,10 @@ public:
     err_check(hipFree(_row_ptr));
     err_check(hipFree(_cols));
     err_check(hipFree(_off_diag_offset));
+#ifdef USE_HIPSPARSE
+    hipsparseDestroyMatDescr(descrA);
+    hipsparseDestroy(handle);
+#endif
   }
 
 private:
@@ -359,6 +395,12 @@ private:
   std::int32_t* _off_diag_offset;
   std::shared_ptr<const common::IndexMap> _map;
   std::unique_ptr<la::MatrixCSR<T>> _A;
+
+#ifdef USE_HIPSPARSE
+  hipsparseMatDescr_t descrA;
+  hipsparseHandle_t handle;
+#endif
+
   MPI_Comm _comm;
 };
 } // namespace dolfinx::acc

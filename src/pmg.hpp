@@ -11,7 +11,8 @@ using namespace dolfinx;
 namespace dolfinx::acc
 {
 /// Conjugate gradient method
-template <typename Vector, typename Operator, typename Prolongation, typename Restriction, typename Solver>
+template <typename Vector, typename Operator, typename Prolongation, typename Restriction,
+          typename Solver>
 class MultigridPreconditioner
 {
   /// The value type
@@ -49,12 +50,12 @@ public:
   }
 
   // Apply M^{-1}x = y
-  int apply(Vector& x, const Vector& y, bool verbose = false)
+  void apply(Vector& x, const Vector& y, bool verbose = false)
   {
-    int num_levels = _maps.size();
 
-    // Compute residual in the finest level
-    
+    dolfinx::common::Timer t0("~apply MultigridPreconditioner preconditioner");
+
+    [[maybe_unused]] int num_levels = _maps.size();
     // Compute initial residual r0 = b - Ax0
     auto& A_fine = *_operators.back(); // Get reference to the finest operator
     auto& b_fine = *_b.back();         // get reference to the finest b
@@ -75,23 +76,25 @@ public:
       axpy(*_r[i], T(-1), *_r[i], *_b[i]);
 
       // Interpolate residual from level i to level i -1
-      (*_interpolation[i])(*_r[i], *_b[i - 1], true);
+      // (*_interpolation[i - 2])(*_r[i], *_b[i -1], true);
     }
 
     // Solve coarse problem
     _solvers[0]->solve(*_operators[0], *_u[0], *_b[0], false);
 
-    for (int i = 0; i >  num_levels - 1; i++)
+    for (int i = 0; i < num_levels - 1; i++)
     {
-       // [coarse->fine] Prolong correction
-       (*_interpolation[i])(*_u[i], *_du[i + 1], false);
-       axpy(*_u[i + 1], T(1), *_u[i + 1], *_du[i + 1]); // update U
+      // [coarse->fine] Prolong correction
+      //  (*_interpolation[i])(*_u[i], *_du[i + 1], false);
 
-       // [fine] Post-smooth
-       _solvers[i]->solve(*_operators[i], *_u[i + 1], *_b[i + 1], false);
+      // update U
+      axpy(*_u[i + 1], T(1), *_u[i + 1], *_du[i + 1]);
+
+      // [fine] Post-smooth
+      _solvers[i + 1]->solve(*_operators[i + 1], *_u[i + 1], *_b[i + 1], false);
     }
 
-    copy(y, *_u.back());
+    acc::copy(x, *_u.back());
   }
 
 private:

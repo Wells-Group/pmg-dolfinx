@@ -191,7 +191,7 @@ int main(int argc, char* argv[])
     for (std::size_t i = 0; i < V.size(); i++)
     {
       dolfinx::acc::CGSolver<DeviceVector> cg(maps[i], 1);
-      cg.set_max_iterations(50);
+      cg.set_max_iterations(20);
       cg.set_tolerance(1e-5);
       cg.store_coefficients(true);
 
@@ -242,8 +242,9 @@ int main(int argc, char* argv[])
     // Create solution vector
     DeviceVector x(maps.back(), 1);
     x.set(T{0.0});
-
-    pmg.apply(*bs.back(), x);
+    
+    for (int i = 0; i < 10; i++)
+      pmg.apply(*bs.back(), x);
 
     // Display timings
     dolfinx::list_timings(MPI_COMM_WORLD, {dolfinx::TimingType::wall});
