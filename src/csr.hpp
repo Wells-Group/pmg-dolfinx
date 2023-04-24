@@ -245,6 +245,23 @@ public:
         hipMemcpy(_cols, _A->cols().data(), nnz * sizeof(std::int32_t), hipMemcpyHostToDevice));
     err_check(hipMemcpy(_values, _A->values().data(), nnz * sizeof(T), hipMemcpyHostToDevice));
     err_check(hipDeviceSynchronize());
+ #elif USE_CUDA
+    err_check(cudaMalloc((void**)&_row_ptr, num_rows * sizeof(std::int32_t)));
+    err_check(cudaMalloc((void**)&_off_diag_offset, num_rows * sizeof(std::int32_t)));
+    err_check(cudaMalloc((void**)&_cols, nnz * sizeof(std::int32_t)));
+    err_check(cudaMalloc((void**)&_values, nnz * sizeof(T)));
+
+    // Copy data from host to device
+    err_check(cudaMemcpy(_row_ptr, _A->row_ptr().data(), num_rows * sizeof(std::int32_t),
+                        cudaMemcpyHostToDevice));
+    err_check(cudaMemcpy(_off_diag_offset, _A->off_diag_offset().data(),
+                        num_rows * sizeof(std::int32_t), cudaMemcpyHostToDevice));
+
+    err_check(
+        cudaMemcpy(_cols, _A->cols().data(), nnz * sizeof(std::int32_t), cudaMemcpyHostToDevice));
+    err_check(cudaMemcpy(_values, _A->values().data(), nnz * sizeof(T), cudaMemcpyHostToDevice));
+    err_check(cudaDeviceSynchronize());
+#endif
   }
 
   MatrixOperator(const fem::FunctionSpace<T>& V0, const fem::FunctionSpace<T>& V1)
@@ -292,6 +309,23 @@ public:
     LOG(WARNING) << "Number of non zeros " << _nnz;
     LOG(WARNING) << "Number of rows " << num_rows;
 
+#ifdef USE_HIP
+    err_check(
+        hipMemcpy(_cols, _A->cols().data(), nnz * sizeof(std::int32_t), hipMemcpyHostToDevice));
+    err_check(hipMemcpy(_values, _A->values().data(), nnz * sizeof(T), hipMemcpyHostToDevice));
+    err_check(hipDeviceSynchronize());
+    // Allocate data on device
+    err_check(hipMalloc((void**)&_row_ptr, num_rows * sizeof(std::int32_t)));
+    err_check(hipMalloc((void**)&_off_diag_offset, num_rows * sizeof(std::int32_t)));
+    err_check(hipMalloc((void**)&_cols, nnz * sizeof(std::int32_t)));
+    err_check(hipMalloc((void**)&_values, nnz * sizeof(T)));
+
+    // Copy data from host to device
+    err_check(hipMemcpy(_row_ptr, _A->row_ptr().data(), num_rows * sizeof(std::int32_t),
+                        hipMemcpyHostToDevice));
+    err_check(hipMemcpy(_off_diag_offset, _A->off_diag_offset().data(),
+                        num_rows * sizeof(std::int32_t), hipMemcpyHostToDevice));
+
     err_check(
         hipMemcpy(_cols, _A->cols().data(), nnz * sizeof(std::int32_t), hipMemcpyHostToDevice));
     err_check(hipMemcpy(_values, _A->values().data(), nnz * sizeof(T), hipMemcpyHostToDevice));
@@ -313,6 +347,7 @@ public:
         hipMemcpy(_cols, _A->cols().data(), nnz * sizeof(std::int32_t), hipMemcpyHostToDevice));
     err_check(hipMemcpy(_values, _A->values().data(), nnz * sizeof(T), hipMemcpyHostToDevice));
     err_check(hipDeviceSynchronize());
+#endif
   }
 
   /**
@@ -360,11 +395,18 @@ public:
 #elif CPU
       spmv_impl<T>(A->values().data(), A->row_ptr().data(), A->off_diag_offset().data(), A->cols().data(), _x, _y);
 #endif
-
       x.scatter_fwd_end();
+#ifdef USE_HIP
       hipLaunchKernelGGL(spmvT_impl<T>, grid_size, block_size, 0, 0, num_rows, _values, _row_ptr,
                          _off_diag_offset, _cols, _x, _y);
       err_check(hipGetLastError());
+#elif USE_CUDA
+      spmv_impl<T><<grid_size, block_size, 0, 0, num_rows>>(_values, _row_ptr, _off_diag_offset, _cols, _x, _y);
+      err_check(cudaGetLastError());
+#elif CPU
+      spmv_impl<T>(A->values().data(), A->row_ptr().data(), A->off_diag_offset().data(), A->cols().data(), _x, _y);
+#endif
+#endif
     }
     else
     {
@@ -395,9 +437,16 @@ public:
       spmv_impl<T>(A->values().data(), A->row_ptr().data(), A->off_diag_offset().data(), A->cols().data(), _x, _y);
 #endif
       x.scatter_fwd_end();
+#ifdef USE_HIP
       hipLaunchKernelGGL(spmv_impl<T>, grid_size, block_size, 0, 0, num_rows, _values, _row_ptr,
                          _off_diag_offset, _cols, _x, _y);
       err_check(hipGetLastError());
+#elif USE_CUDA
+      spmv_impl<T><<grid_size, block_size, 0, 0, num_rows>>(_values, _row_ptr, _off_diag_offset, _cols, _x, _y);
+      err_check(cudaGetLastError());
+#elif CPU
+      spmv_impl<T>(A->values().data(), A->row_ptr().data(), A->off_diag_offset().data(), A->cols().data(), _x, _y);
+#endif
 #endif
     }
   }
