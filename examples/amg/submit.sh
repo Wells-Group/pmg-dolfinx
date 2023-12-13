@@ -27,7 +27,7 @@ module load craype-accel-amd-gfx90a
 module load rocm
 
 
-export SPACK_DIR=/scratch/project_465000356/adrianj/spack
+export SPACK_DIR=/scratch/project_465000633/adrianj/spack
 source $SPACK_DIR/share/spack/setup-env.sh
 spack env activate fenicsx-gpu-env
 spack load fenics-dolfinx
