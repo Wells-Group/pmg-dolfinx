@@ -40,7 +40,7 @@ public:
       throw std::runtime_error("Form should have rank be 2.");
 
     la::SparsityPattern pattern = fem::create_sparsity_pattern(*a);
-    pattern.assemble();
+    pattern.finalize();
 
     LOG(INFO) << "Create matrix...";
     _host_mat = la::petsc::create_matrix(a->mesh()->comm(), pattern, "aijhipsparse");
@@ -102,8 +102,8 @@ public:
     assert(map);
     std::vector<std::int32_t> c(map->size_local(), 0);
     std::iota(c.begin(), c.end(), 0);
-    fem::sparsitybuild::cells(pattern, c, {*dofmap1, *dofmap0});
-    pattern.assemble();
+    fem::sparsitybuild::cells(pattern, {c, c}, {*dofmap1, *dofmap0});
+    pattern.finalize();
 
     // Build operator
     _host_mat = dolfinx::la::petsc::create_matrix(_comm, pattern);

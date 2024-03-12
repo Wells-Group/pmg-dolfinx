@@ -41,7 +41,7 @@ std::shared_ptr<mesh::Mesh<T>> create_ghost_layer(std::shared_ptr<mesh::Mesh<T>>
   auto partitioner = [&new_partition](MPI_Comm, int, int, const graph::AdjacencyList<std::int64_t>&)
   { return new_partition; };
 
-  fem::CoordinateElement element(mesh::CellType::hexahedron, 1);
+  fem::CoordinateElement<T> element(mesh::CellType::hexahedron, 1);
 
   std::vector<std::int64_t> global_v(cv->array().size());
   v_imap->local_to_global(cv->array(), global_v);
