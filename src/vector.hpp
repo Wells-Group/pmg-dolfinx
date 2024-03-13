@@ -7,6 +7,7 @@
 #include <hip/hip_runtime.h>
 #elif USE_CUDA
 #endif
+#undef __noinline__
 #include <dolfinx/la/dolfinx_la.h>
 #include <iostream>
 #include <thrust/device_vector.h>
@@ -67,20 +68,20 @@ static __global__ void _scatter(std::int32_t N, const int32_t* __restrict__ indi
 #elif USE_CUDA
 #define err_check(command)                                                                         \
   {                                                                                                \
-    cudaError_t status = command;                                                                   \
-    if (status != cudaSuccess)                                                                      \
+    cudaError_t status = command;                                                                  \
+    if (status != cudaSuccess)                                                                     \
     {                                                                                              \
-      printf("(%s:%d) Error: CUDA reports %s\n", __FILE__, __LINE__, cudaGetErrorString(status));    \
+      printf("(%s:%d) Error: CUDA reports %s\n", __FILE__, __LINE__, cudaGetErrorString(status));  \
       exit(1);                                                                                     \
     }                                                                                              \
   }
 #elif CPU
 #define err_check(command)                                                                         \
   {                                                                                                \
-    int status = command;                                                                   \
-    if (status != 0)                                                                      \
+    int status = command;                                                                          \
+    if (status != 0)                                                                               \
     {                                                                                              \
-      printf("(%s:%d) Error: Report %s\n", __FILE__, __LINE__, perror());    \
+      printf("(%s:%d) Error: Report %s\n", __FILE__, __LINE__, perror());                          \
       exit(1);                                                                                     \
     }                                                                                              \
   }

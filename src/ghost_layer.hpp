@@ -38,18 +38,18 @@ std::shared_ptr<mesh::Mesh<T>> create_ghost_layer(std::shared_ptr<mesh::Mesh<T>>
 
   graph::AdjacencyList<std::int32_t> new_partition(dests, offset);
 
-  auto partitioner = [&new_partition](MPI_Comm, int, int, const graph::AdjacencyList<std::int64_t>&)
+  auto partitioner
+      = [&new_partition](MPI_Comm, int, mesh::CellType, const graph::AdjacencyList<std::int64_t>&)
   { return new_partition; };
 
   fem::CoordinateElement<T> element(mesh::CellType::hexahedron, 1);
 
   std::vector<std::int64_t> global_v(cv->array().size());
   v_imap->local_to_global(cv->array(), global_v);
-  graph::AdjacencyList<std::int64_t> cv_global(global_v, cv->offsets());
   std::size_t num_pts = mesh->geometry().index_map()->size_local();
   std::span<T> geom(mesh->geometry().x().data(), num_pts * 3);
   auto new_mesh = std::make_shared<mesh::Mesh<T>>(
-      mesh::create_mesh(comm, cv_global, {element}, geom, {num_pts, 3}, partitioner));
+      mesh::create_mesh(comm, comm, global_v, {element}, comm, geom, {num_pts, 3}, partitioner));
 
   std::cout << "rank = " << rank << ":" << new_mesh->topology()->index_map(3)->num_ghosts()
             << std::endl;
