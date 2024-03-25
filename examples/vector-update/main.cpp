@@ -6,7 +6,6 @@
 #include "src/vector.hpp"
 
 #include <basix/e-lagrange.h>
-#include <boost/program_options.hpp>
 #include <dolfinx.h>
 #include <dolfinx/fem/dolfinx_fem.h>
 #include <dolfinx/fem/petsc.h>
@@ -20,24 +19,11 @@
 
 using namespace dolfinx;
 using T = double;
-namespace po = boost::program_options;
 
 int main(int argc, char* argv[])
 {
-  po::options_description desc("Allowed options");
-  desc.add_options()("help,h", "print usage message")(
-      "ndofs", po::value<std::size_t>()->default_value(50000), "number of dofs per rank");
 
-  po::variables_map vm;
-  po::store(po::command_line_parser(argc, argv).options(desc).allow_unregistered().run(), vm);
-  po::notify(vm);
-
-  if (vm.count("help"))
-  {
-    std::cout << desc << std::endl;
-    return 0;
-  }
-  const std::size_t ndofs = vm["ndofs"].as<std::size_t>();
+  const std::size_t ndofs = 10000000;
 
   init_logging(argc, argv);
   PetscInitialize(&argc, &argv, nullptr, nullptr);

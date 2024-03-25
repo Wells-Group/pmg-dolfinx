@@ -27,10 +27,9 @@ module load craype-accel-amd-gfx90a
 module load rocm
 
 
-export SPACK_DIR=/scratch/project_465000356/adrianj/spack
+export SPACK_DIR=/scratch/project_465000633/crichard/spack
 source $SPACK_DIR/share/spack/setup-env.sh
-spack env activate fenicsx-gpu-env
-spack load fenics-dolfinx
+spack env activate 2024
 
 export MPICH_GPU_SUPPORT_ENABLED=1
 export MPICH_OFI_NIC_POLICY=NUMA
@@ -46,4 +45,4 @@ cd build
 cmake ..
 make -j8
 
-srun -N ${SLURM_NNODES} -n ${SLURM_NTASKS} ${cpu_bind} ${gpu_bind} ./mg
+srun -N ${SLURM_NNODES} -n ${SLURM_NTASKS} ${cpu_bind} ${gpu_bind} ./vector-update

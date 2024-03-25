@@ -213,12 +213,12 @@ public:
 
     auto V = a->function_spaces()[0];
     la::SparsityPattern pattern = fem::create_sparsity_pattern(*a);
-    pattern.assemble();
+    pattern.finalize();
     _map = std::make_shared<const common::IndexMap>(pattern.column_index_map());
 
     _A = std::make_unique<la::MatrixCSR<T>>(pattern);
     fem::assemble_matrix(_A->mat_add_values(), *a, bcs);
-    _A->finalize();
+    _A->scatter_rev();
     fem::set_diagonal<T>(_A->mat_set_values(), *V, bcs, T(1.0));
 
     // Get communicator from mesh
@@ -245,7 +245,7 @@ public:
         hipMemcpy(_cols, _A->cols().data(), nnz * sizeof(std::int32_t), hipMemcpyHostToDevice));
     err_check(hipMemcpy(_values, _A->values().data(), nnz * sizeof(T), hipMemcpyHostToDevice));
     err_check(hipDeviceSynchronize());
- #elif USE_CUDA
+#elif USE_CUDA
     err_check(cudaMalloc((void**)&_row_ptr, num_rows * sizeof(std::int32_t)));
     err_check(cudaMalloc((void**)&_off_diag_offset, num_rows * sizeof(std::int32_t)));
     err_check(cudaMalloc((void**)&_cols, nnz * sizeof(std::int32_t)));
@@ -253,9 +253,9 @@ public:
 
     // Copy data from host to device
     err_check(cudaMemcpy(_row_ptr, _A->row_ptr().data(), num_rows * sizeof(std::int32_t),
-                        cudaMemcpyHostToDevice));
+                         cudaMemcpyHostToDevice));
     err_check(cudaMemcpy(_off_diag_offset, _A->off_diag_offset().data(),
-                        num_rows * sizeof(std::int32_t), cudaMemcpyHostToDevice));
+                         num_rows * sizeof(std::int32_t), cudaMemcpyHostToDevice));
 
     err_check(
         cudaMemcpy(_cols, _A->cols().data(), nnz * sizeof(std::int32_t), cudaMemcpyHostToDevice));
@@ -290,13 +290,13 @@ public:
     assert(map);
     std::vector<std::int32_t> c(map->size_local(), 0);
     std::iota(c.begin(), c.end(), 0);
-    fem::sparsitybuild::cells(pattern, c, {*dofmap1, *dofmap0});
-    pattern.assemble();
+    fem::sparsitybuild::cells(pattern, {c, c}, {*dofmap1, *dofmap0});
+    pattern.finalize();
 
     // Build operator
     _A = std::make_unique<la::MatrixCSR<T>>(pattern);
     fem::interpolation_matrix<T>(V0, V1, _A->mat_set_values());
-    _A->finalize();
+    _A->scatter_rev();
 
     // Create HIP matrix
     _map = std::make_shared<const common::IndexMap>(pattern.column_index_map());
@@ -390,10 +390,12 @@ public:
                          _off_diag_offset, _cols, _x, _y);
       err_check(hipGetLastError());
 #elif USE_CUDA
-      spmv_impl<T><<grid_size, block_size, 0, 0, num_rows>>(_values, _row_ptr, _off_diag_offset, _cols, _x, _y);
+      spmv_impl<T> << grid_size, block_size, 0, 0,
+          num_rows >> (_values, _row_ptr, _off_diag_offset, _cols, _x, _y);
       err_check(cudaGetLastError());
 #elif CPU
-      spmv_impl<T>(A->values().data(), A->row_ptr().data(), A->off_diag_offset().data(), A->cols().data(), _x, _y);
+      spmv_impl<T>(A->values().data(), A->row_ptr().data(), A->off_diag_offset().data(),
+                   A->cols().data(), _x, _y);
 #endif
       x.scatter_fwd_end();
 #ifdef USE_HIP
@@ -401,10 +403,12 @@ public:
                          _off_diag_offset, _cols, _x, _y);
       err_check(hipGetLastError());
 #elif USE_CUDA
-      spmv_impl<T><<grid_size, block_size, 0, 0, num_rows>>(_values, _row_ptr, _off_diag_offset, _cols, _x, _y);
+      spmv_impl<T> << grid_size, block_size, 0, 0,
+          num_rows >> (_values, _row_ptr, _off_diag_offset, _cols, _x, _y);
       err_check(cudaGetLastError());
 #elif CPU
-      spmv_impl<T>(A->values().data(), A->row_ptr().data(), A->off_diag_offset().data(), A->cols().data(), _x, _y);
+      spmv_impl<T>(A->values().data(), A->row_ptr().data(), A->off_diag_offset().data(),
+                   A->cols().data(), _x, _y);
 #endif
 #endif
     }
@@ -431,10 +435,12 @@ public:
                          _off_diag_offset, _cols, _x, _y);
       err_check(hipGetLastError());
 #elif USE_CUDA
-      spmv_impl<T><<grid_size, block_size, 0, 0, num_rows>>(_values, _row_ptr, _off_diag_offset, _cols, _x, _y);
+      spmv_impl<T> << grid_size, block_size, 0, 0,
+          num_rows >> (_values, _row_ptr, _off_diag_offset, _cols, _x, _y);
       err_check(cudaGetLastError());
 #elif CPU
-      spmv_impl<T>(A->values().data(), A->row_ptr().data(), A->off_diag_offset().data(), A->cols().data(), _x, _y);
+      spmv_impl<T>(A->values().data(), A->row_ptr().data(), A->off_diag_offset().data(),
+                   A->cols().data(), _x, _y);
 #endif
       x.scatter_fwd_end();
 #ifdef USE_HIP
@@ -442,10 +448,12 @@ public:
                          _off_diag_offset, _cols, _x, _y);
       err_check(hipGetLastError());
 #elif USE_CUDA
-      spmv_impl<T><<grid_size, block_size, 0, 0, num_rows>>(_values, _row_ptr, _off_diag_offset, _cols, _x, _y);
+      spmv_impl<T> << grid_size, block_size, 0, 0,
+          num_rows >> (_values, _row_ptr, _off_diag_offset, _cols, _x, _y);
       err_check(cudaGetLastError());
 #elif CPU
-      spmv_impl<T>(A->values().data(), A->row_ptr().data(), A->off_diag_offset().data(), A->cols().data(), _x, _y);
+      spmv_impl<T>(A->values().data(), A->row_ptr().data(), A->off_diag_offset().data(),
+                   A->cols().data(), _x, _y);
 #endif
 #endif
     }
