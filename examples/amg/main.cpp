@@ -5,6 +5,7 @@
 #include <basix/e-lagrange.h>
 #include <boost/program_options.hpp>
 #include <dolfinx.h>
+#include <dolfinx/common/Timer.h>
 #include <dolfinx/common/log.h>
 #include <dolfinx/fem/dolfinx_fem.h>
 #include <dolfinx/fem/petsc.h>
@@ -46,7 +47,7 @@ int main(int argc, char* argv[])
     MPI_Comm_rank(comm, &rank);
     MPI_Comm_size(comm, &size);
 
-    const int order = 3;
+    const int order = 1;
     double nx_approx = (std::pow(ndofs * size, 1.0 / 3.0) - 1) / order;
     std::size_t n0 = static_cast<int>(nx_approx);
     std::array<std::size_t, 3> nx = {n0, n0, n0};
@@ -147,19 +148,27 @@ int main(int argc, char* argv[])
     using DeviceVector = dolfinx::acc::Vector<T, acc::Device::HIP>;
     using HostVector = dolfinx::acc::Vector<T, acc::Device::CPP>;
 
-    DeviceVector x(V->dofmap()->index_map, 1);
-    x.set(T{0.0});
-
-    DeviceVector y(V->dofmap()->index_map, 1);
-    y.copy_from_host(b); // Copy data from host vector to device vector
-
     LOG(INFO) << "Create Petsc Operator";
 
     // Create petsc operator
     PETScOperator op(a, {bc});
 
+    auto im_op = op.index_map();
+    LOG(INFO) << "OP:" << im_op->size_global() << "/" << im_op->size_local() << "/"
+              << im_op->num_ghosts();
+    auto im_V = V->dofmap()->index_map;
+    LOG(INFO) << "V:" << im_V->size_global() << "/" << im_V->size_local() << "/"
+              << im_V->num_ghosts();
+
+    DeviceVector x(V->dofmap()->index_map, 1);
+    x.set(T{0.0});
+
+    DeviceVector y(op.index_map(), 1);
+    y.copy_from_host(b); // Copy data from host vector to device vector
+
     LOG(INFO) << "Apply operator";
 
+    // x = A.y
     op(y, x);
 
     LOG(INFO) << "get device matrix";
@@ -170,12 +179,17 @@ int main(int argc, char* argv[])
     KSP solver;
     PC prec;
     KSPCreate(comm, &solver);
+    LOG(INFO) << "Set KSP Type";
     KSPSetType(solver, KSPCG);
+    LOG(INFO) << "Set Operators";
     KSPSetOperators(solver, A, A);
+    LOG(INFO) << "Set PC Type";
     KSPGetPC(solver, &prec);
-    PCSetType(prec, PCGAMG);
-    PCGAMGSetType(prec, PCGAMGAGG);
+    PCSetType(prec, PCHYPRE);
+    //    LOG(INFO) << "Set AMG Type";
+    //    PCGAMGSetType(prec, PCGAMGAGG);
     KSPSetFromOptions(solver);
+    LOG(INFO) << "KSP Setup";
     KSPSetUp(solver);
 
     LOG(INFO) << "Create Petsc HIP arrays";
@@ -189,14 +203,24 @@ int main(int argc, char* argv[])
     VecHIPPlaceArray(_b, y.array().data());
     VecHIPPlaceArray(_x, x.array().data());
 
+    dolfinx::common::Timer tsolve("ZZZ Solve");
     KSPSolve(solver, _b, _x);
+    tsolve.stop();
     KSPView(solver, PETSC_VIEWER_STDOUT_WORLD);
 
     KSPConvergedReason reason;
     KSPGetConvergedReason(solver, &reason);
 
+    PetscInt num_iterations = 0;
+    int ierr = KSPGetIterationNumber(solver, &num_iterations);
+    if (ierr != 0)
+      LOG(ERROR) << "KSPGetIterationNumber Error:" << ierr;
+
     if (rank == 0)
-      std::cout << "Converged reason " << reason;
+    {
+      std::cout << "Converged reason: " << reason;
+      std::cout << "Num iterations: " << num_iterations;
+    }
 
     VecHIPResetArray(_b);
     VecHIPResetArray(_x);

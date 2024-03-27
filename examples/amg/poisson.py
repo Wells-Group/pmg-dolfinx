@@ -3,7 +3,7 @@ from ufl import (Coefficient, Constant, FunctionSpace, Mesh,
 from basix.ufl import element
 
 e = element("Lagrange", "hexahedron", 1)
-coord_element = element("Lagrange", "hexahedron", 1, rank=1)
+coord_element = element("Lagrange", "hexahedron", 1, shape=(3, ))
 mesh = Mesh(coord_element)
 
 V = FunctionSpace(mesh, e)

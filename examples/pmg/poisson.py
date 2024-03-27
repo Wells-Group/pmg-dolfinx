@@ -8,7 +8,7 @@ ns = vars()
 forms = []
 for degree in range(1, 4):
     e = element("Lagrange", "hexahedron", degree)
-    coord_element = element("Lagrange", "hexahedron", 1, rank=1)
+    coord_element = element("Lagrange", "hexahedron", 1, shape=(3,))
     mesh = Mesh(coord_element)
 
     V = FunctionSpace(mesh, e)
@@ -26,7 +26,7 @@ for degree in range(1, 4):
     ns[aname] = kappa * inner(grad(u), grad(v)) * dx
     ns[Lname] = inner(f, v) * dx
 
-    
+
     # Delete, so that the forms will get unnamed args and coefficients
     # and default to v_0, v_1, w0, w1 etc.
     del u, v, f, kappa

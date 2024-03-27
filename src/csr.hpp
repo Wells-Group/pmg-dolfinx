@@ -310,10 +310,6 @@ public:
     LOG(WARNING) << "Number of rows " << num_rows;
 
 #ifdef USE_HIP
-    err_check(
-        hipMemcpy(_cols, _A->cols().data(), nnz * sizeof(std::int32_t), hipMemcpyHostToDevice));
-    err_check(hipMemcpy(_values, _A->values().data(), nnz * sizeof(T), hipMemcpyHostToDevice));
-    err_check(hipDeviceSynchronize());
     // Allocate data on device
     err_check(hipMalloc((void**)&_row_ptr, num_rows * sizeof(std::int32_t)));
     err_check(hipMalloc((void**)&_off_diag_offset, num_rows * sizeof(std::int32_t)));

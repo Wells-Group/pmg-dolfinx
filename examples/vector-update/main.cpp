@@ -1,4 +1,3 @@
-
 #include "poisson.h"
 #include "src/cg.hpp"
 #include "src/ghost_layer.hpp"
@@ -6,6 +5,7 @@
 #include "src/vector.hpp"
 
 #include <basix/e-lagrange.h>
+#include <boost/program_options.hpp>
 #include <dolfinx.h>
 #include <dolfinx/fem/dolfinx_fem.h>
 #include <dolfinx/fem/petsc.h>
@@ -19,11 +19,11 @@
 
 using namespace dolfinx;
 using T = double;
+namespace po = boost::program_options;
 
 int main(int argc, char* argv[])
 {
-
-  const std::size_t ndofs = 10000000;
+  const std::size_t ndofs = 50000;
 
   init_logging(argc, argv);
   PetscInitialize(&argc, &argv, nullptr, nullptr);

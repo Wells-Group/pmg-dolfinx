@@ -42,7 +42,8 @@ public:
     la::SparsityPattern pattern = fem::create_sparsity_pattern(*a);
     pattern.finalize();
 
-    LOG(INFO) << "Create matrix...";
+    LOG(INFO) << "Create matrix..." << pattern.index_map(0)->size_global() << "x"
+              << pattern.index_map(1)->size_global();
     _host_mat = la::petsc::create_matrix(a->mesh()->comm(), pattern, "aijhipsparse");
 
     LOG(INFO) << "Zero matrix...";
@@ -60,10 +61,15 @@ public:
     MatAssemblyBegin(_host_mat, MAT_FINAL_ASSEMBLY);
     MatAssemblyEnd(_host_mat, MAT_FINAL_ASSEMBLY);
 
+    PetscReal norm;
+    MatNorm(_host_mat, NORM_FROBENIUS, &norm);
+    LOG(INFO) << "Mat norm = " << norm;
+
     LOG(INFO) << "Convert matrix...";
     // Create HIP matrix
     dolfinx::common::Timer t1("~Convert matrix to MATAIJHIPSPARSE");
-    MatConvert(_host_mat, MATSAME, MAT_INITIAL_MATRIX, &_hip_mat);
+    int ierr = MatConvert(_host_mat, MATSAME, MAT_INITIAL_MATRIX, &_hip_mat);
+    LOG(INFO) << ierr;
     t1.stop();
 
     // Get communicator from mesh
@@ -72,9 +78,12 @@ public:
     _map = std::make_shared<const common::IndexMap>(pattern.column_index_map());
     const PetscInt local_size = _map->size_local();
     const PetscInt global_size = _map->size_global();
-    LOG(INFO) << "Create vecs...";
-    VecCreateMPIHIPWithArray(_comm, PetscInt(1), local_size, global_size, NULL, &_x_petsc);
-    VecCreateMPIHIPWithArray(_comm, PetscInt(1), local_size, global_size, NULL, &_y_petsc);
+    LOG(INFO) << "Create vecs... " << local_size << "/" << global_size;
+
+    ierr = VecCreateMPIHIPWithArray(_comm, PetscInt(1), local_size, global_size, NULL, &_x_petsc);
+    LOG(INFO) << ierr;
+    ierr = VecCreateMPIHIPWithArray(_comm, PetscInt(1), local_size, global_size, NULL, &_y_petsc);
+    LOG(INFO) << ierr;
   }
 
   PETScOperator(const fem::FunctionSpace<T>& V0, const fem::FunctionSpace<T>& V1)
@@ -159,8 +168,18 @@ public:
   {
     LOG(INFO) << "HipPlaceArray";
 
-    VecHIPPlaceArray(_x_petsc, x.array().data());
-    VecHIPPlaceArray(_y_petsc, y.mutable_array().data());
+    int ierr = VecHIPPlaceArray(_x_petsc, x.array().data());
+    LOG(INFO) << "x:" << ierr << " " << x.array().data();
+    ierr = VecHIPPlaceArray(_y_petsc, y.array().data());
+    LOG(INFO) << "y:" << ierr << " " << y.array().data();
+
+    int nx, ny;
+    MatGetLocalSize(_hip_mat, &nx, &ny);
+    LOG(INFO) << "Mat shape = " << nx << "x" << ny;
+    VecGetLocalSize(_x_petsc, &nx);
+    LOG(INFO) << "Vec size x = " << nx;
+    VecGetLocalSize(_y_petsc, &ny);
+    LOG(INFO) << "Vec size y = " << ny;
 
     LOG(INFO) << "MatMult";
     if (transpose)

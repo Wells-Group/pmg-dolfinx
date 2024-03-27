@@ -7,6 +7,7 @@
 
 #include <array>
 #include <basix/e-lagrange.h>
+#include <boost/program_options.hpp>
 #include <dolfinx.h>
 #include <dolfinx/fem/dolfinx_fem.h>
 #include <dolfinx/io/XDMFFile.h>
@@ -21,6 +22,7 @@
 
 using namespace dolfinx;
 using T = double;
+namespace po = boost::program_options;
 
 int main(int argc, char* argv[])
 {
@@ -30,8 +32,22 @@ int main(int argc, char* argv[])
   float global_peak_mem = 0.0;
   float mem = 0.0;
 
-  const std::size_t ndofs = 50000;
-  const std::string filename = "";
+  po::options_description desc("Allowed options");
+  desc.add_options()("help,h", "print usage message")(
+      "ndofs", po::value<std::size_t>()->default_value(500), "number of dofs per rank")(
+      "file", po::value<std::string>()->default_value(""), "mesh filename");
+
+  po::variables_map vm;
+  po::store(po::command_line_parser(argc, argv).options(desc).allow_unregistered().run(), vm);
+  po::notify(vm);
+
+  if (vm.count("help"))
+  {
+    std::cout << desc << std::endl;
+    return 0;
+  }
+  const std::size_t ndofs = vm["ndofs"].as<std::size_t>();
+  const std::string filename = vm["file"].as<std::string>();
 
   init_logging(argc, argv);
   MPI_Init(&argc, &argv);
@@ -70,7 +86,7 @@ int main(int argc, char* argv[])
 
     if (filename.size() > 0)
     {
-      dolfinx::fem::CoordinateElement<double> element(mesh::CellType::tetrahedron, 1);
+      dolfinx::fem::CoordinateElement<T> element(mesh::CellType::tetrahedron, 1);
       dolfinx::io::XDMFFile xdmf(MPI_COMM_WORLD, filename, "r");
       mesh = std::make_shared<dolfinx::mesh::Mesh<T>>(
           xdmf.read_mesh(element, mesh::GhostMode::none, "mesh"));
