@@ -36,7 +36,7 @@ spack env activate hypre-rocm
 cd pmg-dolfinx/examples/pmg
 mkdir build
 cd build
-cmake ..
+CXX=hipcc cmake ..
 make
 ```
 
