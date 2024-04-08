@@ -1,0 +1,144 @@
+spack:
+  config:
+    shared_linking:
+      type: runpath
+      bind: false
+  compilers:
+  - compiler:
+      spec: gcc@11.2.0-env
+      paths:
+        cc: cc
+        cxx: CC
+        f77: ftn
+        fc: ftn
+      flags:
+        cflags: -Ofast
+        cxxflags: -Ofast
+        fflags: -Ofast
+      operating_system: sles15
+      target: any
+      modules:
+      - PrgEnv-gnu/8.3.3
+      - gcc/11.2.0
+      - craype/2.7.19
+      - craype-x86-milan
+      - craype-accel-amd-gfx90a
+      - libfabric/1.12.1.2.2.0
+      - craype-network-ofi
+      - perftools-base/22.12.0
+      - xpmem/2.5.2-2.4_3.20__gd0f7936.shasta
+      - cray-mpich/8.1.23
+      - cray-libsci/22.12.1.1
+      - load-epcc-module
+      environment:
+        prepend_path:
+          LD_LIBRARY_PATH: /opt/cray/pe/gcc/11.2.0/snos/lib64
+      extra_rpaths:
+      - /opt/cray/pe/gcc/11.2.0/snos/lib64
+  packages:
+    cray-mpich:
+      buildable: false
+      variants: ~wrappers
+      externals:
+      - spec: cray-mpich@8.1.23
+        modules:
+        - cray-mpich/8.1.23
+    cray-libsci:
+      buildable: false
+      externals:
+      - spec: cray-libsci@22.12.1.1
+        modules:
+        - cray-libsci/22.12.1.1
+    pkg-config:
+      buildable: false
+      externals:
+      - spec: pkg-config@0.29.2
+        prefix: /usr
+    hip:
+      externals:
+      - spec: hip@5.2.3
+        prefix: /opt/rocm/hip
+        extra_attributes:
+          compilers:
+            c: /opt/rocm/llvm/bin/clang++
+            c++: /opt/rocm/llvm/bin/clang++
+            hip: /opt/rocm/hip/bin/hipcc
+      buildable: false
+    hsa-rocr-dev:
+      externals:
+      - spec: hsa-rocr-dev@5.2.3
+        prefix: /opt/rocm
+        extra_attributes:
+          compilers:
+            c: /opt/rocm/llvm/bin/clang++
+            cxx: /opt/rocm/llvm/bin/clang++
+      buildable: false
+    llvm-amdgpu:
+      externals:
+      - spec: llvm-amdgpu@5.2.3
+        prefix: /opt/rocm/llvm
+        extra_attributes:
+          compilers:
+            c: /opt/rocm/llvm/bin/clang++
+            cxx: /opt/rocm/llvm/bin/clang++
+      buildable: false
+    rocsolver:
+      externals:
+      - spec: rocsolver@5.2.3
+        prefix: /opt/rocm/rocsolver
+      buildable: false
+    hipblas:
+      externals:
+      - spec: hipblas@5.2.3
+        prefix: /opt/rocm/hipblas
+      buildable: false
+    hipsparse:
+      externals:
+      - spec: hipsparse@5.2.3
+        prefix: /opt/rocm/hipsparse
+      buildable: false
+    hipsolver:
+      externals:
+      - spec: hipsolver@5.2.3
+        prefix: /opt/rocm/hipsolver
+      buildable: false
+    rocblas:
+      externals:
+      - spec: rocblas@5.2.3
+        prefix: /opt/rocm/rocblas
+      buildable: false
+    rocsparse:
+      externals:
+      - spec: rocsparse@5.2.3
+        prefix: /opt/rocm/rocsparse
+      buildable: false
+    rocrand:
+      externals:
+      - spec: rocrand@5.2.3
+        prefix: /opt/rocm/rocrand
+      buildable: false
+    rocthrust:
+      externals:
+      - spec: rocthrust@5.2.3
+        prefix: /opt/rocm/rocthrust
+      buildable: false
+    hypre:
+      variants: +rocm amdgpu_target=gfx90a
+    petsc:
+      variants: +hypre+rocm amdgpu_target=gfx90a
+    all:
+      compiler:
+      - gcc@11.2.0-env
+      providers:
+        mpi:
+        - cray-mpich
+        blas:
+        - cray-libsci
+        lapack:
+        - cray-libsci
+        pkgconfig:
+        - pkg-config
+  view: true
+  specs:
+  - fenics-dolfinx@main ^petsc +hypre+rocm amdgpu_target=gfx90a
+  - py-fenics-ffcx@main
