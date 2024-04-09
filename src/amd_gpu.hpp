@@ -70,8 +70,8 @@ uint32_t num_monitored_devices()
 
 void print_amd_gpu_memory_busy(char const* text)
 {
-  int rank;
 #ifdef ROCM_SMI
+  int rank;
   rsmi_status_t err;
   uint32_t mem_busy_percent;
 
@@ -102,8 +102,8 @@ void print_amd_gpu_memory_busy(char const* text)
 
 void print_amd_gpu_memory_used(char const* text)
 {
-  int rank;
 #ifdef ROCM_SMI
+  int rank;
   rsmi_status_t err;
   uint64_t usage;
   uint64_t gb = 1024;
@@ -125,8 +125,7 @@ void print_amd_gpu_memory_used(char const* text)
           return;
         }
         std::cout << " " << kDevMemoryTypeNameMap.at(static_cast<rsmi_memory_type_t>(mem_type));
-        std::cout << " " << usage / gb << "GB"
-                  << " " << usage;
+        std::cout << " " << usage / gb << "GB" << " " << usage;
       }
       std::cout << "\n";
     }
@@ -142,8 +141,8 @@ void print_amd_gpu_memory_used(char const* text)
 
 void print_amd_gpu_memory_total(char const* text)
 {
-  int rank;
 #ifdef ROCM_SMI
+  int rank;
   rsmi_status_t err;
   uint64_t total;
 
@@ -179,9 +178,9 @@ void print_amd_gpu_memory_total(char const* text)
 
 float print_amd_gpu_memory_percentage_used(char const* text)
 {
-  int rank;
   float return_value = 0.0;
 #ifdef ROCM_SMI
+  int rank;
   rsmi_status_t err;
   uint64_t total;
   uint64_t usage;
@@ -234,7 +233,7 @@ float print_amd_gpu_memory_percentage_used(char const* text)
   return return_value;
 }
 
-inline void add_profiling_annotation(const char * const tag)
+inline void add_profiling_annotation(const char* const tag)
 {
 #ifdef ROCM_TRACING
   roctxRangePush(tag);
@@ -243,7 +242,7 @@ inline void add_profiling_annotation(const char * const tag)
 #endif
 }
 
-inline void remove_profiling_annotation(const char * const tag)
+inline void remove_profiling_annotation(const char* const tag)
 {
 #ifdef OMNITRACE
   omnitrace_user_pop_region(tag);
@@ -251,4 +250,3 @@ inline void remove_profiling_annotation(const char * const tag)
   roctxRangePop();
 #endif
 }
-

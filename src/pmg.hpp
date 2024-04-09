@@ -75,8 +75,8 @@ public:
       (*_operators[i])(*_u[i], *_r[i]);
       axpy(*_r[i], T(-1), *_r[i], *_b[i]);
 
-      // Interpolate residual from level i to level i -1
-      // (*_interpolation[i - 2])(*_r[i], *_b[i -1], true);
+      // Interpolate residual from level i to level i - 1
+      (*_interpolation[i - 1])(*_r[i], *_b[i - 1], true);
     }
 
     // Solve coarse problem
@@ -85,7 +85,7 @@ public:
     for (int i = 0; i < num_levels - 1; i++)
     {
       // [coarse->fine] Prolong correction
-      //  (*_interpolation[i])(*_u[i], *_du[i + 1], false);
+      (*_interpolation[i])(*_u[i], *_du[i + 1], false);
 
       // update U
       axpy(*_u[i + 1], T(1), *_u[i + 1], *_du[i + 1]);
