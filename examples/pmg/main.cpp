@@ -52,8 +52,8 @@ int main(int argc, char* argv[])
     MPI_Comm_rank(comm, &rank);
     MPI_Comm_size(comm, &size);
 
-    // if (rank == 0)
-    //   loguru::g_stderr_verbosity = loguru::Verbosity_INFO;
+    //    if (rank == 0)
+    //      loguru::g_stderr_verbosity = loguru::Verbosity_INFO;
 
     const int order = 3;
     double nx_approx = (std::pow(ndofs * size, 1.0 / 3.0) - 1) / order;
@@ -150,7 +150,7 @@ int main(int argc, char* argv[])
       std::cout << "Hierarchy: " << std::endl;
       for (std::size_t i = 0; i < ndofs.size(); i++)
       {
-        std::cout << "Level " << i << ": " << ndofs[i] / size << "\n";
+        std::cout << "Level " << i << ": " << ndofs[i] << "\n";
       }
       std::cout << "-----------------------------------\n";
       std::cout << std::flush;
@@ -163,7 +163,7 @@ int main(int argc, char* argv[])
       std::shared_ptr<fem::Form<T, T>> a_i = a[i];
       std::vector<std::shared_ptr<const fem::DirichletBC<T, T>>> bc_i = {bcs[i]};
       operators[i] = std::make_shared<acc::MatrixOperator<T>>(a_i, bc_i);
-      maps[i] = operators[i]->index_map();
+      maps[i] = operators[i]->column_index_map();
 
       la::Vector<T> b(maps[i], 1);
       b.set(T(0.0));
@@ -206,7 +206,6 @@ int main(int argc, char* argv[])
       std::array<T, 2> eig_range = {0.3 * eign.back(), 1.2 * eign.back()};
       smoothers[i] = std::make_shared<acc::Chebyshev<DeviceVector>>(maps[i], 1, eig_range, 2);
 
-
       if (rank == 0)
       {
         std::cout << "Eigenvalues level " << i << ": ";
@@ -225,9 +224,10 @@ int main(int argc, char* argv[])
     std::vector<std::shared_ptr<acc::MatrixOperator<T>>> prolongation(V.size() - 1);
 
     // From V1 to V0
+    LOG(WARNING) << "Creating Prolongation Operators";
     prolongation[0] = std::make_shared<acc::MatrixOperator<T>>(*V[0], *V[1]);
-    prolongation[0] = std::make_shared<acc::MatrixOperator<T>>(*V[1], *V[2]);
-
+    // From V2 to V1
+    prolongation[1] = std::make_shared<acc::MatrixOperator<T>>(*V[1], *V[2]);
 
     using OpType = acc::MatrixOperator<T>;
     using SolverType = acc::Chebyshev<DeviceVector>;
@@ -242,7 +242,7 @@ int main(int argc, char* argv[])
     // Create solution vector
     DeviceVector x(maps.back(), 1);
     x.set(T{0.0});
-    
+
     for (int i = 0; i < 10; i++)
       pmg.apply(*bs.back(), x);
 

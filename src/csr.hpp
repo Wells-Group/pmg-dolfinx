@@ -214,7 +214,8 @@ public:
     auto V = a->function_spaces()[0];
     la::SparsityPattern pattern = fem::create_sparsity_pattern(*a);
     pattern.finalize();
-    _map = std::make_shared<const common::IndexMap>(pattern.column_index_map());
+    _col_map = std::make_shared<const common::IndexMap>(pattern.column_index_map());
+    _row_map = V->dofmap()->index_map;
 
     _A = std::make_unique<la::MatrixCSR<T>>(pattern);
     fem::assemble_matrix(_A->mat_add_values(), *a, bcs);
@@ -224,7 +225,7 @@ public:
     // Get communicator from mesh
     _comm = V->mesh()->comm();
 
-    std::int32_t num_rows = _map->size_local();
+    std::int32_t num_rows = _row_map->size_local();
     std::int32_t nnz = _A->row_ptr()[num_rows];
     _nnz = nnz;
 
@@ -266,7 +267,7 @@ public:
 
   MatrixOperator(const fem::FunctionSpace<T>& V0, const fem::FunctionSpace<T>& V1)
   {
-    dolfinx::common::Timer t0("~setup phase Interpolation Oerators");
+    dolfinx::common::Timer t0("~setup phase Interpolation Operators");
     _comm = V0.mesh()->comm();
     assert(V0.mesh());
     auto mesh = V0.mesh();
@@ -299,15 +300,18 @@ public:
     _A->scatter_rev();
 
     // Create HIP matrix
-    _map = std::make_shared<const common::IndexMap>(pattern.column_index_map());
+    _col_map = std::make_shared<const common::IndexMap>(pattern.column_index_map());
+    _row_map = V1.dofmap()->index_map;
 
     // Create hip sparse matrix
-    std::int32_t num_rows = _map->size_local();
-    std::int32_t nnz = _A->row_ptr().size();
+    std::int32_t num_rows = _row_map->size_local();
+    std::int32_t nnz = _A->row_ptr()[num_rows];
     _nnz = nnz;
 
-    LOG(WARNING) << "Number of non zeros " << _nnz;
-    LOG(WARNING) << "Number of rows " << num_rows;
+    LOG(WARNING) << "Operator Number of non zeros " << _nnz;
+    LOG(WARNING) << "Operator Number of rows " << num_rows;
+    LOG(WARNING) << "Operator dm0 size " << V0.dofmap()->index_map->size_global();
+    LOG(WARNING) << "Operator dm1 size " << V1.dofmap()->index_map->size_global();
 
 #ifdef USE_HIP
     // Allocate data on device
@@ -359,6 +363,7 @@ public:
   void operator()(Vector& x, Vector& y, bool transpose = false)
   {
     dolfinx::common::Timer t0("~MatrixOperator application");
+
     y.set(T{0});
     T* _x = x.mutable_array().data();
     T* _y = y.mutable_array().data();
@@ -366,8 +371,8 @@ public:
     if (transpose)
     {
 #ifdef USE_HIPSPARSE
-      int num_cols = _map->size_local() + _map->num_ghosts();
-      int num_rows = _map->size_local();
+      int num_cols = _col_map->size_local() + _col_map->num_ghosts();
+      int num_rows = _row_map->size_local();
       x.scatter_fwd();
       T alpha = 1.0;
       T beta = 0.0;
@@ -376,8 +381,7 @@ public:
       err_check(hipGetLastError());
       err_check(hipDeviceSynchronize());
 #else
-      int num_cols = _map->size_local() + _map->num_ghosts();
-      int num_rows = _map->size_local();
+      int num_rows = _row_map->size_local();
       dim3 block_size(256);
       dim3 grid_size((num_rows + block_size.x - 1) / block_size.x);
       x.scatter_fwd_begin();
@@ -411,8 +415,8 @@ public:
     else
     {
 #ifdef USE_HIPSPARSE
-      int num_cols = _map->size_local() + _map->num_ghosts();
-      int num_rows = _map->size_local();
+      int num_cols = _col_map->size_local() + _col_map->num_ghosts();
+      int num_rows = _row_map->size_local();
       x.scatter_fwd();
       T alpha = 1.0;
       T beta = 0.0;
@@ -421,8 +425,7 @@ public:
       err_check(hipGetLastError());
       err_check(hipDeviceSynchronize());
 #else
-      int num_cols = _map->size_local() + _map->num_ghosts();
-      int num_rows = _map->size_local();
+      int num_rows = _row_map->size_local();
       dim3 block_size(256);
       dim3 grid_size((num_rows + block_size.x - 1) / block_size.x);
       x.scatter_fwd_begin();
@@ -461,7 +464,9 @@ public:
     test::spmv(*_A, x, y);
   }
 
-  std::shared_ptr<const common::IndexMap> index_map() { return _map; }
+  std::shared_ptr<const common::IndexMap> column_index_map() { return _col_map; }
+
+  std::shared_ptr<const common::IndexMap> row_index_map() { return _row_map; }
 
   std::size_t nnz() { return _nnz; }
 
@@ -486,7 +491,7 @@ private:
   std::int32_t* _row_ptr;
   std::int32_t* _cols;
   std::int32_t* _off_diag_offset;
-  std::shared_ptr<const common::IndexMap> _map;
+  std::shared_ptr<const common::IndexMap> _col_map, _row_map;
   std::unique_ptr<la::MatrixCSR<T>> _A;
 
 #ifdef USE_HIPSPARSE
