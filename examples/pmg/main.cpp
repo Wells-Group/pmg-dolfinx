@@ -187,6 +187,7 @@ int main(int argc, char* argv[])
     }
 
     // Create chebyshev smoother for each level
+    // FIXME Check CG
     std::vector<std::shared_ptr<acc::Chebyshev<DeviceVector>>> smoothers(V.size());
     for (std::size_t i = 0; i < V.size(); i++)
     {
@@ -198,9 +199,10 @@ int main(int argc, char* argv[])
       DeviceVector x(maps[i], 1);
       x.set(T{0.0});
 
+      // ???
       (*operators[i])(*bs[i], x);
 
-      [[maybe_unused]] int its = cg.solve(*operators[i], x, *bs[i], false);
+      [[maybe_unused]] int its = cg.solve(*operators[i], x, *bs[i], true);
       std::vector<T> eign = cg.compute_eigenvalues();
       std::sort(eign.begin(), eign.end());
       std::array<T, 2> eig_range = {0.3 * eign.back(), 1.2 * eign.back()};
