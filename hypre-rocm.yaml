@@ -12,9 +12,9 @@ spack:
         f77: ftn
         fc: ftn
       flags:
-        cflags: -Ofast
-        cxxflags: -Ofast
-        fflags: -Ofast
+        cflags: -O3
+        cxxflags: -O3
+        fflags: -O3
       operating_system: sles15
       target: any
       modules:
@@ -126,6 +126,11 @@ spack:
       externals:
       - spec: rocthrust@5.2.3
         prefix: /opt/rocm/rocthrust
+      buildable: false
+    ncurses:
+      externals:
+      - spec: ncurses@6.1
+        prefix: /usr
       buildable: false
     hypre:
       variants: +rocm amdgpu_target=gfx90a
