@@ -74,7 +74,8 @@ public:
       // r = b[i] - A[i] * u[i]
       (*_operators[i])(*_u[i], *_r[i]);
       axpy(*_r[i], T(-1), *_r[i], *_b[i]);
-
+      T _r_sq_norm = squared_norm(*_r[i]);
+      LOG(WARNING) << "_r_sq_norm = " << _r_sq_norm;
       // Interpolate residual from level i to level i - 1
       (*_interpolation[i - 1])(*_r[i], *_b[i - 1], true);
     }
