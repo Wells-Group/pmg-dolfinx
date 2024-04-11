@@ -230,8 +230,10 @@ int main(int argc, char* argv[])
     // From V1 to V0
     LOG(WARNING) << "Creating Prolongation Operators";
     prolongation[0] = std::make_shared<acc::MatrixOperator<T>>(*V[0], *V[1]);
+    restriction[0] = std::make_shared<acc::MatrixOperator<T>>(*V[1], *V[0]);
     // From V2 to V1
     prolongation[1] = std::make_shared<acc::MatrixOperator<T>>(*V[1], *V[2]);
+    restriction[1] = std::make_shared<acc::MatrixOperator<T>>(*V[2], *V[1]);
 
     using OpType = acc::MatrixOperator<T>;
     using SolverType = acc::Chebyshev<DeviceVector>;
@@ -242,6 +244,7 @@ int main(int argc, char* argv[])
     pmg.set_solvers(smoothers);
     pmg.set_operators(operators);
     pmg.set_interpolators(prolongation);
+    pmg.set_restriction_interpolators(restriction);
 
     // Create solution vector
     DeviceVector x(maps.back(), 1);

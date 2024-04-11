@@ -49,6 +49,11 @@ public:
     _interpolation = interpolators;
   }
 
+  void set_restriction_interpolators(std::vector<std::shared_ptr<Restriction>>& interpolators)
+  {
+    _res_interpolation = interpolators;
+  }
+
   // Apply M^{-1}x = y
   void apply(Vector& x, const Vector& y, bool verbose = false)
   {
@@ -79,11 +84,14 @@ public:
       LOG(WARNING) << "LEVEL " << i << " Residual norm = " << rn;
 
       // Interpolate residual from level i to level i - 1
-      (*_interpolation[i - 1])(*_r[i], *_b[i - 1], true);
+      (*_res_interpolation[i - 1])(*_r[i], *_b[i - 1], false);
     }
 
     // Solve coarse problem
     _solvers[0]->solve(*_operators[0], *_u[0], *_b[0], false);
+
+    double unorm = acc::norm(*_u[0]);
+    LOG(WARNING) << "LEVEL 0: unorm" << unorm;
 
     for (int i = 0; i < num_levels - 1; i++)
     {
@@ -92,6 +100,9 @@ public:
 
       // update U
       axpy(*_u[i + 1], T(1), *_u[i + 1], *_du[i + 1]);
+
+      double ndu = acc::norm(*_du[i + 1]);
+      LOG(WARNING) << "Level " << i + 1 << " norm(du) = " << ndu;
 
       // [fine] Post-smooth
       _solvers[i + 1]->solve(*_operators[i + 1], *_u[i + 1], *_b[i + 1], false);
@@ -116,6 +127,8 @@ private:
   // Prologation and restriction operatos
   // Size should be nlevels - 1
   std::vector<std::shared_ptr<Prolongation>> _interpolation;
+
+  std::vector<std::shared_ptr<Restriction>> _res_interpolation;
 
   // Operators used to compute the residual
   std::vector<std::shared_ptr<Operator>> _operators;
