@@ -222,7 +222,7 @@ int main(int argc, char* argv[])
     // Define vectors
     using DeviceVector = dolfinx::acc::Vector<T, acc::Device::HIP>;
     acc::MatrixOperator<T> op(a, {bc});
-    auto map = op.index_map();
+    auto map = op.column_index_map();
 
     fem::Function<T> u(V);
     la::Vector<T> b(map, 1);
@@ -321,7 +321,7 @@ int main(int argc, char* argv[])
 #endif
 
     dolfinx::common::Timer tcg("ZZZ CG");
-    int its = cg.solve(op, x, y, false);
+    int its = cg.solve(op, x, y, true);
     tcg.stop();
 
 #ifdef ROCM_TRACING
