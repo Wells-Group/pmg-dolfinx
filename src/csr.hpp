@@ -445,8 +445,8 @@ public:
 #endif
       x.scatter_fwd_end();
 #ifdef USE_HIP
-      hipLaunchKernelGGL(spmv_impl<T>, grid_size, block_size, 0, 0, num_rows, _values, _row_ptr,
-                         _off_diag_offset, _cols, _x, _y);
+      hipLaunchKernelGGL(spmv_impl<T>, grid_size, block_size, 0, 0, num_rows, _values, _off_diag_offset,
+                         _row_ptr + 1, _cols, _x, _y);
       err_check(hipGetLastError());
 #elif USE_CUDA
       spmv_impl<T> << grid_size, block_size, 0, 0,
