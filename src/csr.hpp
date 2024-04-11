@@ -217,7 +217,9 @@ public:
     _col_map = std::make_shared<const common::IndexMap>(pattern.column_index_map());
     _row_map = V->dofmap()->index_map;
 
-    _A = std::make_unique<la::MatrixCSR<T>>(pattern);
+    _A = std::make_unique<
+        la::MatrixCSR<T, std::vector<T>, std::vector<std::int32_t>, std::vector<std::int32_t>>>(
+        pattern);
     fem::assemble_matrix(_A->mat_add_values(), *a, bcs);
     _A->scatter_rev();
     fem::set_diagonal<T>(_A->mat_set_values(), *V, bcs, T(1.0));
@@ -492,7 +494,9 @@ private:
   std::int32_t* _cols;
   std::int32_t* _off_diag_offset;
   std::shared_ptr<const common::IndexMap> _col_map, _row_map;
-  std::unique_ptr<la::MatrixCSR<T>> _A;
+  std::unique_ptr<
+      la::MatrixCSR<T, std::vector<T>, std::vector<std::int32_t>, std::vector<std::int32_t>>>
+      _A;
 
 #ifdef USE_HIPSPARSE
   hipsparseMatDescr_t descrA;
