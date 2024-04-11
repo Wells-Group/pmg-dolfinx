@@ -75,6 +75,9 @@ public:
       (*_operators[i])(*_u[i], *_r[i]);
       axpy(*_r[i], T(-1), *_r[i], *_b[i]);
 
+      double rn = acc::norm(*_r[i]);
+      LOG(WARNING) << "LEVEL " << i << " Residual norm = " << rn;
+
       // Interpolate residual from level i to level i - 1
       (*_interpolation[i - 1])(*_r[i], *_b[i - 1], true);
     }

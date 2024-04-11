@@ -200,11 +200,11 @@ int main(int argc, char* argv[])
 
       (*operators[i])(*bs[i], x);
 
-      [[maybe_unused]] int its = cg.solve(*operators[i], x, *bs[i], false);
+      [[maybe_unused]] int its = cg.solve(*operators[i], x, *bs[i], true);
       int na = cg.alphas().size();
       for (int i = 0; i < na; ++i)
         LOG(INFO) << i << "] a = " << cg.alphas()[i] << ", b = " << cg.betas()[i];
-      
+
       std::vector<T> eign = cg.compute_eigenvalues();
       std::sort(eign.begin(), eign.end());
       std::array<T, 2> eig_range = {0.3 * eign.back(), 1.2 * eign.back()};
