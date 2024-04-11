@@ -401,15 +401,15 @@ public:
 #endif
       x.scatter_fwd_end();
 #ifdef USE_HIP
-      hipLaunchKernelGGL(spmvT_impl<T>, grid_size, block_size, 0, 0, num_rows, _values, _row_ptr,
-                         _off_diag_offset, _cols, _x, _y);
+      hipLaunchKernelGGL(spmvT_impl<T>, grid_size, block_size, 0, 0, num_rows, _values,
+                         _off_diag_offset, _row_ptr + 1, _cols, _x, _y);
       err_check(hipGetLastError());
 #elif USE_CUDA
       spmv_impl<T> << grid_size, block_size, 0, 0,
-          num_rows >> (_values, _row_ptr, _off_diag_offset, _cols, _x, _y);
+          num_rows >> (_values, _off_diag_offset, _row_ptr + 1, _cols, _x, _y);
       err_check(cudaGetLastError());
 #elif CPU
-      spmv_impl<T>(A->values().data(), A->row_ptr().data(), A->off_diag_offset().data(),
+      spmv_impl<T>(A->values().data(), A->off_diag_offset().data(), A->row_ptr().data() + 1,
                    A->cols().data(), _x, _y);
 #endif
 #endif
@@ -445,15 +445,15 @@ public:
 #endif
       x.scatter_fwd_end();
 #ifdef USE_HIP
-      hipLaunchKernelGGL(spmv_impl<T>, grid_size, block_size, 0, 0, num_rows, _values, _off_diag_offset,
-                         _row_ptr + 1, _cols, _x, _y);
+      hipLaunchKernelGGL(spmv_impl<T>, grid_size, block_size, 0, 0, num_rows, _values,
+                         _off_diag_offset, _row_ptr + 1, _cols, _x, _y);
       err_check(hipGetLastError());
 #elif USE_CUDA
       spmv_impl<T> << grid_size, block_size, 0, 0,
-          num_rows >> (_values, _row_ptr, _off_diag_offset, _cols, _x, _y);
+          num_rows >> (_values, _off_diag_offset, _row_ptr + 1, _cols, _x, _y);
       err_check(cudaGetLastError());
 #elif CPU
-      spmv_impl<T>(A->values().data(), A->row_ptr().data(), A->off_diag_offset().data(),
+      spmv_impl<T>(A->values().data(), A->off_diag_offset().data(), A->row_ptr().data() + 1,
                    A->cols().data(), _x, _y);
 #endif
 #endif
