@@ -297,7 +297,10 @@ public:
     pattern.finalize();
 
     // Build operator
-    _A = std::make_unique<la::MatrixCSR<T>>(pattern);
+    _A = std::make_unique<
+        la::MatrixCSR<T, std::vector<T>, std::vector<std::int32_t>, std::vector<std::int32_t>>>(
+        pattern);
+
     fem::interpolation_matrix<T>(V0, V1, _A->mat_set_values());
     _A->scatter_rev();
 
