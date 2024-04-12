@@ -52,8 +52,8 @@ int main(int argc, char* argv[])
     MPI_Comm_rank(comm, &rank);
     MPI_Comm_size(comm, &size);
 
-    //    if (rank == 0)
-    //      loguru::g_stderr_verbosity = loguru::Verbosity_INFO;
+    if (rank == 0)
+      loguru::g_stderr_verbosity = loguru::Verbosity_INFO;
 
     const int order = 3;
     double nx_approx = (std::pow(ndofs * size, 1.0 / 3.0) - 1) / order;
@@ -200,11 +200,11 @@ int main(int argc, char* argv[])
 
       (*operators[i])(*bs[i], x);
 
-      [[maybe_unused]] int its = cg.solve(*operators[i], x, *bs[i], false);
+      [[maybe_unused]] int its = cg.solve(*operators[i], x, *bs[i], true);
       int na = cg.alphas().size();
       for (int i = 0; i < na; ++i)
         LOG(INFO) << i << "] a = " << cg.alphas()[i] << ", b = " << cg.betas()[i];
-      
+
       std::vector<T> eign = cg.compute_eigenvalues();
       std::sort(eign.begin(), eign.end());
       std::array<T, 2> eig_range = {0.3 * eign.back(), 1.2 * eign.back()};
@@ -230,8 +230,10 @@ int main(int argc, char* argv[])
     // From V1 to V0
     LOG(WARNING) << "Creating Prolongation Operators";
     prolongation[0] = std::make_shared<acc::MatrixOperator<T>>(*V[0], *V[1]);
+    restriction[0] = std::make_shared<acc::MatrixOperator<T>>(*V[1], *V[0]);
     // From V2 to V1
     prolongation[1] = std::make_shared<acc::MatrixOperator<T>>(*V[1], *V[2]);
+    restriction[1] = std::make_shared<acc::MatrixOperator<T>>(*V[2], *V[1]);
 
     using OpType = acc::MatrixOperator<T>;
     using SolverType = acc::Chebyshev<DeviceVector>;
@@ -242,6 +244,7 @@ int main(int argc, char* argv[])
     pmg.set_solvers(smoothers);
     pmg.set_operators(operators);
     pmg.set_interpolators(prolongation);
+    pmg.set_restriction_interpolators(restriction);
 
     // Create solution vector
     DeviceVector x(maps.back(), 1);

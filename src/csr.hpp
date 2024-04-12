@@ -233,13 +233,13 @@ public:
 
     // Allocate data on device
 #ifdef USE_HIP
-    err_check(hipMalloc((void**)&_row_ptr, num_rows * sizeof(std::int32_t)));
+    err_check(hipMalloc((void**)&_row_ptr, (num_rows + 1) * sizeof(std::int32_t)));
     err_check(hipMalloc((void**)&_off_diag_offset, num_rows * sizeof(std::int32_t)));
     err_check(hipMalloc((void**)&_cols, nnz * sizeof(std::int32_t)));
     err_check(hipMalloc((void**)&_values, nnz * sizeof(T)));
 
     // Copy data from host to device
-    err_check(hipMemcpy(_row_ptr, _A->row_ptr().data(), num_rows * sizeof(std::int32_t),
+    err_check(hipMemcpy(_row_ptr, _A->row_ptr().data(), (num_rows + 1) * sizeof(std::int32_t),
                         hipMemcpyHostToDevice));
     err_check(hipMemcpy(_off_diag_offset, _A->off_diag_offset().data(),
                         num_rows * sizeof(std::int32_t), hipMemcpyHostToDevice));
@@ -249,13 +249,13 @@ public:
     err_check(hipMemcpy(_values, _A->values().data(), nnz * sizeof(T), hipMemcpyHostToDevice));
     err_check(hipDeviceSynchronize());
 #elif USE_CUDA
-    err_check(cudaMalloc((void**)&_row_ptr, num_rows * sizeof(std::int32_t)));
+    err_check(cudaMalloc((void**)&_row_ptr, (num_rows + 1) * sizeof(std::int32_t)));
     err_check(cudaMalloc((void**)&_off_diag_offset, num_rows * sizeof(std::int32_t)));
     err_check(cudaMalloc((void**)&_cols, nnz * sizeof(std::int32_t)));
     err_check(cudaMalloc((void**)&_values, nnz * sizeof(T)));
 
     // Copy data from host to device
-    err_check(cudaMemcpy(_row_ptr, _A->row_ptr().data(), num_rows * sizeof(std::int32_t),
+    err_check(cudaMemcpy(_row_ptr, _A->row_ptr().data(), (num_rows + 1) * sizeof(std::int32_t),
                          cudaMemcpyHostToDevice));
     err_check(cudaMemcpy(_off_diag_offset, _A->off_diag_offset().data(),
                          num_rows * sizeof(std::int32_t), cudaMemcpyHostToDevice));
@@ -301,7 +301,8 @@ public:
         la::MatrixCSR<T, std::vector<T>, std::vector<std::int32_t>, std::vector<std::int32_t>>>(
         pattern);
 
-    fem::interpolation_matrix<T>(V0, V1, _A->mat_set_values());
+    // FIXME: should this be mat_add or mat_set?
+    fem::interpolation_matrix<T>(V0, V1, _A->mat_add_values());
     _A->scatter_rev();
 
     // Create HIP matrix
@@ -317,16 +318,17 @@ public:
     LOG(WARNING) << "Operator Number of rows " << num_rows;
     LOG(WARNING) << "Operator dm0 size " << V0.dofmap()->index_map->size_global();
     LOG(WARNING) << "Operator dm1 size " << V1.dofmap()->index_map->size_global();
+    LOG(WARNING) << "Max column = " << *std::max_element(_A->cols().begin(), _A->cols().end());
 
 #ifdef USE_HIP
     // Allocate data on device
-    err_check(hipMalloc((void**)&_row_ptr, num_rows * sizeof(std::int32_t)));
+    err_check(hipMalloc((void**)&_row_ptr, (num_rows + 1) * sizeof(std::int32_t)));
     err_check(hipMalloc((void**)&_off_diag_offset, num_rows * sizeof(std::int32_t)));
     err_check(hipMalloc((void**)&_cols, nnz * sizeof(std::int32_t)));
     err_check(hipMalloc((void**)&_values, nnz * sizeof(T)));
 
     // Copy data from host to device
-    err_check(hipMemcpy(_row_ptr, _A->row_ptr().data(), num_rows * sizeof(std::int32_t),
+    err_check(hipMemcpy(_row_ptr, _A->row_ptr().data(), (num_rows + 1) * sizeof(std::int32_t),
                         hipMemcpyHostToDevice));
     err_check(hipMemcpy(_off_diag_offset, _A->off_diag_offset().data(),
                         num_rows * sizeof(std::int32_t), hipMemcpyHostToDevice));
@@ -337,13 +339,13 @@ public:
     err_check(hipDeviceSynchronize());
 #elif USE_CUDA
     // Allocate data on device
-    err_check(hipMalloc((void**)&_row_ptr, num_rows * sizeof(std::int32_t)));
+    err_check(hipMalloc((void**)&_row_ptr, (num_rows + 1) * sizeof(std::int32_t)));
     err_check(hipMalloc((void**)&_off_diag_offset, num_rows * sizeof(std::int32_t)));
     err_check(hipMalloc((void**)&_cols, nnz * sizeof(std::int32_t)));
     err_check(hipMalloc((void**)&_values, nnz * sizeof(T)));
 
     // Copy data from host to device
-    err_check(hipMemcpy(_row_ptr, _A->row_ptr().data(), num_rows * sizeof(std::int32_t),
+    err_check(hipMemcpy(_row_ptr, _A->row_ptr().data(), (num_rows + 1) * sizeof(std::int32_t),
                         hipMemcpyHostToDevice));
     err_check(hipMemcpy(_off_diag_offset, _A->off_diag_offset().data(),
                         num_rows * sizeof(std::int32_t), hipMemcpyHostToDevice));

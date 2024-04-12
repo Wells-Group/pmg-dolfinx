@@ -49,6 +49,11 @@ public:
     _interpolation = interpolators;
   }
 
+  void set_restriction_interpolators(std::vector<std::shared_ptr<Restriction>>& interpolators)
+  {
+    _res_interpolation = interpolators;
+  }
+
   // Apply M^{-1}x = y
   void apply(Vector& x, const Vector& y, bool verbose = false)
   {
@@ -75,8 +80,11 @@ public:
       (*_operators[i])(*_u[i], *_r[i]);
       axpy(*_r[i], T(-1), *_r[i], *_b[i]);
 
-      // Interpolate residual from level i to level i - 1
-      (*_interpolation[i - 1])(*_r[i], *_b[i - 1], true);
+      double rn = acc::norm(*_r[i]);
+      LOG(INFO) << "Residual norm (" << i << ") = " << rn;
+
+      // Restrict residual from level i to level (i - 1)
+      (*_res_interpolation[i - 1])(*_r[i], *_b[i - 1], false);
     }
 
     // Solve coarse problem
@@ -113,6 +121,8 @@ private:
   // Prologation and restriction operatos
   // Size should be nlevels - 1
   std::vector<std::shared_ptr<Prolongation>> _interpolation;
+
+  std::vector<std::shared_ptr<Restriction>> _res_interpolation;
 
   // Operators used to compute the residual
   std::vector<std::shared_ptr<Operator>> _operators;
