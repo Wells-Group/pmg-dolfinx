@@ -52,8 +52,8 @@ int main(int argc, char* argv[])
     MPI_Comm_rank(comm, &rank);
     MPI_Comm_size(comm, &size);
 
-    //    if (rank == 0)
-    //      loguru::g_stderr_verbosity = loguru::Verbosity_INFO;
+    if (rank == 0)
+      loguru::g_stderr_verbosity = loguru::Verbosity_INFO;
 
     const int order = 3;
     double nx_approx = (std::pow(ndofs * size, 1.0 / 3.0) - 1) / order;
