@@ -302,7 +302,7 @@ public:
         pattern);
 
     // FIXME: should this be mat_add or mat_set?
-    fem::interpolation_matrix<T>(V0, V1, _A->mat_add_values());
+    fem::interpolation_matrix<T>(V0, V1, _A->mat_set_values());
     _A->scatter_rev();
 
     // Create HIP matrix

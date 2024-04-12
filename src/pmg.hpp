@@ -73,6 +73,13 @@ public:
 
     for (int i = num_levels - 1; i > 0; i--)
     {
+      // r = b[i] - A[i] * u[i]
+      (*_operators[i])(*_u[i], *_r[i]);
+      axpy(*_r[i], T(-1), *_r[i], *_b[i]);
+
+      double rn = acc::norm(*_r[i]);
+      LOG(INFO) << "Residual norm before (" << i << ") = " << rn;
+
       // u[i] = M^-1 b[i]
       _solvers[i]->solve(*_operators[i], *_u[i], *_b[i], false);
 
@@ -80,8 +87,8 @@ public:
       (*_operators[i])(*_u[i], *_r[i]);
       axpy(*_r[i], T(-1), *_r[i], *_b[i]);
 
-      double rn = acc::norm(*_r[i]);
-      LOG(INFO) << "Residual norm (" << i << ") = " << rn;
+      rn = acc::norm(*_r[i]);
+      LOG(INFO) << "Residual norm after (" << i << ") = " << rn;
 
       // Restrict residual from level i to level (i - 1)
       (*_res_interpolation[i - 1])(*_r[i], *_b[i - 1], false);
@@ -98,8 +105,20 @@ public:
       // update U
       axpy(*_u[i + 1], T(1), *_u[i + 1], *_du[i + 1]);
 
+      // r = b[i] - A[i] * u[i]
+      (*_operators[i + 1])(*_u[i + 1], *_r[i + 1]);
+      axpy(*_r[i + 1], T(-1), *_r[i + 1], *_b[i + 1]);
+      double rn = acc::norm(*_r[i + 1]);
+      LOG(INFO) << "Residual norm after u+du (" << i + 1 << ") = " << rn;
+
       // [fine] Post-smooth
       _solvers[i + 1]->solve(*_operators[i + 1], *_u[i + 1], *_b[i + 1], false);
+
+      // r = b[i] - A[i] * u[i]
+      (*_operators[i + 1])(*_u[i + 1], *_r[i + 1]);
+      axpy(*_r[i + 1], T(-1), *_r[i + 1], *_b[i + 1]);
+      rn = acc::norm(*_r[i + 1]);
+      LOG(INFO) << "Residual norm after post-smoothing (" << i + 1 << ") = " << rn;
     }
 
     acc::copy(x, *_u.back());
