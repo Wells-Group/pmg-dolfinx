@@ -139,7 +139,6 @@ __global__ void spmv_impl(int N, const T* values, const std::int32_t* row_begin,
     for (std::int32_t j = row_begin[i]; j < row_end[i]; j++)
       vi += values[j] * x[indices[j]];
     y[i] += vi;
-    //    printf("spmv row %d %d-%d\n", i, row_begin[i], row_end[i]);
   }
 }
 
@@ -302,6 +301,7 @@ public:
         la::MatrixCSR<T, std::vector<T>, std::vector<std::int32_t>, std::vector<std::int32_t>>>(
         pattern);
 
+    // FIXME: should this be mat_add or mat_set?
     fem::interpolation_matrix<T>(V0, V1, _A->mat_add_values());
     _A->scatter_rev();
 
@@ -375,12 +375,6 @@ public:
     T* _x = x.mutable_array().data();
     T* _y = y.mutable_array().data();
 
-    std::string strT = transpose ? "^T" : "";
-
-    LOG(WARNING) << "MatVec y[" << y.array().size() << "] = A[" << _row_map->size_local() << ","
-                 << _col_map->size_local() + _col_map->num_ghosts() << "]" << strT << ".x["
-                 << x.array().size() << "]";
-
     if (transpose)
     {
 #ifdef USE_HIPSPARSE
@@ -439,8 +433,6 @@ public:
       err_check(hipDeviceSynchronize());
 #else
       int num_rows = _row_map->size_local();
-      LOG(WARNING) << "Launch spmv: " << y.array().size() << " = " << num_rows;
-
       dim3 block_size(256);
       dim3 grid_size((num_rows + block_size.x - 1) / block_size.x);
       x.scatter_fwd_begin();
@@ -471,7 +463,6 @@ public:
 #endif
 #endif
     }
-    LOG(WARNING) << "Done MatVec";
   }
 
   template <typename Vector>

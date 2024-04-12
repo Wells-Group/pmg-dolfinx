@@ -81,7 +81,7 @@ public:
       axpy(*_r[i], T(-1), *_r[i], *_b[i]);
 
       double rn = acc::norm(*_r[i]);
-      LOG(WARNING) << "LEVEL " << i << " Residual norm = " << rn;
+      LOG(INFO) << "Residual norm (" << i << ") = " << rn;
 
       // Restrict residual from level i to level (i - 1)
       (*_res_interpolation[i - 1])(*_r[i], *_b[i - 1], false);
@@ -90,27 +90,17 @@ public:
     // Solve coarse problem
     _solvers[0]->solve(*_operators[0], *_u[0], *_b[0], false);
 
-    double unorm = acc::norm(*_u[0]);
-    LOG(WARNING) << "LEVEL 0: unorm" << unorm;
-
     for (int i = 0; i < num_levels - 1; i++)
     {
-      LOG(WARNING) << "Going up..., level " << i << "->" << i + 1;
       // [coarse->fine] Prolong correction
       (*_interpolation[i])(*_u[i], *_du[i + 1], false);
 
-      LOG(WARNING) << "AXPY u += du (" << i + 1 << ")";
       // update U
       axpy(*_u[i + 1], T(1), *_u[i + 1], *_du[i + 1]);
-
-      LOG(WARNING) << "Compute norm";
-      double ndu = acc::norm(*_du[i + 1]);
-      LOG(WARNING) << "Level " << i + 1 << " norm(du) = " << ndu;
 
       // [fine] Post-smooth
       _solvers[i + 1]->solve(*_operators[i + 1], *_u[i + 1], *_b[i + 1], false);
     }
-    LOG(WARNING) << "Copy back to x";
 
     acc::copy(x, *_u.back());
   }
