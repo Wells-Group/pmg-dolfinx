@@ -327,12 +327,18 @@ auto inner_product(const Vector& a, const Vector& b)
   std::span<const T> x_a = a.array().subspan(0, local_size);
   std::span<const T> x_b = b.array().subspan(0, local_size);
 
+  LOG(WARNING) << "a.b sizes = " << local_size << ", " << b.map()->size_local() * b.bs();
+
   if (local_size != b.bs() * b.map()->size_local())
     throw std::runtime_error("Incompatible vector sizes");
+
+  LOG(WARNING) << "ptr = " << std::hex << x_a.data() << ", " << x_b.data();
 
   T local = 0;
   if constexpr (Vector::device != Device::CPP)
     local = thrust::inner_product(thrust::device, x_a.begin(), x_a.end(), x_b.begin(), T{0.0});
+
+  LOG(WARNING) << "Local result = " << local;
 
   T result;
   MPI_Allreduce(&local, &result, 1, dolfinx::MPI::mpi_type<T>(), MPI_SUM, a.map()->comm());

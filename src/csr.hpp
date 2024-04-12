@@ -139,6 +139,7 @@ __global__ void spmv_impl(int N, const T* values, const std::int32_t* row_begin,
     for (std::int32_t j = row_begin[i]; j < row_end[i]; j++)
       vi += values[j] * x[indices[j]];
     y[i] += vi;
+    //    printf("spmv row %d %d-%d\n", i, row_begin[i], row_end[i]);
   }
 }
 
@@ -233,13 +234,13 @@ public:
 
     // Allocate data on device
 #ifdef USE_HIP
-    err_check(hipMalloc((void**)&_row_ptr, num_rows * sizeof(std::int32_t)));
+    err_check(hipMalloc((void**)&_row_ptr, (num_rows + 1) * sizeof(std::int32_t)));
     err_check(hipMalloc((void**)&_off_diag_offset, num_rows * sizeof(std::int32_t)));
     err_check(hipMalloc((void**)&_cols, nnz * sizeof(std::int32_t)));
     err_check(hipMalloc((void**)&_values, nnz * sizeof(T)));
 
     // Copy data from host to device
-    err_check(hipMemcpy(_row_ptr, _A->row_ptr().data(), num_rows * sizeof(std::int32_t),
+    err_check(hipMemcpy(_row_ptr, _A->row_ptr().data(), (num_rows + 1) * sizeof(std::int32_t),
                         hipMemcpyHostToDevice));
     err_check(hipMemcpy(_off_diag_offset, _A->off_diag_offset().data(),
                         num_rows * sizeof(std::int32_t), hipMemcpyHostToDevice));
@@ -249,13 +250,13 @@ public:
     err_check(hipMemcpy(_values, _A->values().data(), nnz * sizeof(T), hipMemcpyHostToDevice));
     err_check(hipDeviceSynchronize());
 #elif USE_CUDA
-    err_check(cudaMalloc((void**)&_row_ptr, num_rows * sizeof(std::int32_t)));
+    err_check(cudaMalloc((void**)&_row_ptr, (num_rows + 1) * sizeof(std::int32_t)));
     err_check(cudaMalloc((void**)&_off_diag_offset, num_rows * sizeof(std::int32_t)));
     err_check(cudaMalloc((void**)&_cols, nnz * sizeof(std::int32_t)));
     err_check(cudaMalloc((void**)&_values, nnz * sizeof(T)));
 
     // Copy data from host to device
-    err_check(cudaMemcpy(_row_ptr, _A->row_ptr().data(), num_rows * sizeof(std::int32_t),
+    err_check(cudaMemcpy(_row_ptr, _A->row_ptr().data(), (num_rows + 1) * sizeof(std::int32_t),
                          cudaMemcpyHostToDevice));
     err_check(cudaMemcpy(_off_diag_offset, _A->off_diag_offset().data(),
                          num_rows * sizeof(std::int32_t), cudaMemcpyHostToDevice));
@@ -301,7 +302,7 @@ public:
         la::MatrixCSR<T, std::vector<T>, std::vector<std::int32_t>, std::vector<std::int32_t>>>(
         pattern);
 
-    fem::interpolation_matrix<T>(V0, V1, _A->mat_set_values());
+    fem::interpolation_matrix<T>(V0, V1, _A->mat_add_values());
     _A->scatter_rev();
 
     // Create HIP matrix
@@ -317,16 +318,17 @@ public:
     LOG(WARNING) << "Operator Number of rows " << num_rows;
     LOG(WARNING) << "Operator dm0 size " << V0.dofmap()->index_map->size_global();
     LOG(WARNING) << "Operator dm1 size " << V1.dofmap()->index_map->size_global();
+    LOG(WARNING) << "Max column = " << *std::max_element(_A->cols().begin(), _A->cols().end());
 
 #ifdef USE_HIP
     // Allocate data on device
-    err_check(hipMalloc((void**)&_row_ptr, num_rows * sizeof(std::int32_t)));
+    err_check(hipMalloc((void**)&_row_ptr, (num_rows + 1) * sizeof(std::int32_t)));
     err_check(hipMalloc((void**)&_off_diag_offset, num_rows * sizeof(std::int32_t)));
     err_check(hipMalloc((void**)&_cols, nnz * sizeof(std::int32_t)));
     err_check(hipMalloc((void**)&_values, nnz * sizeof(T)));
 
     // Copy data from host to device
-    err_check(hipMemcpy(_row_ptr, _A->row_ptr().data(), num_rows * sizeof(std::int32_t),
+    err_check(hipMemcpy(_row_ptr, _A->row_ptr().data(), (num_rows + 1) * sizeof(std::int32_t),
                         hipMemcpyHostToDevice));
     err_check(hipMemcpy(_off_diag_offset, _A->off_diag_offset().data(),
                         num_rows * sizeof(std::int32_t), hipMemcpyHostToDevice));
@@ -337,13 +339,13 @@ public:
     err_check(hipDeviceSynchronize());
 #elif USE_CUDA
     // Allocate data on device
-    err_check(hipMalloc((void**)&_row_ptr, num_rows * sizeof(std::int32_t)));
+    err_check(hipMalloc((void**)&_row_ptr, (num_rows + 1) * sizeof(std::int32_t)));
     err_check(hipMalloc((void**)&_off_diag_offset, num_rows * sizeof(std::int32_t)));
     err_check(hipMalloc((void**)&_cols, nnz * sizeof(std::int32_t)));
     err_check(hipMalloc((void**)&_values, nnz * sizeof(T)));
 
     // Copy data from host to device
-    err_check(hipMemcpy(_row_ptr, _A->row_ptr().data(), num_rows * sizeof(std::int32_t),
+    err_check(hipMemcpy(_row_ptr, _A->row_ptr().data(), (num_rows + 1) * sizeof(std::int32_t),
                         hipMemcpyHostToDevice));
     err_check(hipMemcpy(_off_diag_offset, _A->off_diag_offset().data(),
                         num_rows * sizeof(std::int32_t), hipMemcpyHostToDevice));
@@ -372,6 +374,12 @@ public:
     y.set(T{0});
     T* _x = x.mutable_array().data();
     T* _y = y.mutable_array().data();
+
+    std::string strT = transpose ? "^T" : "";
+
+    LOG(WARNING) << "MatVec y[" << y.array().size() << "] = A[" << _row_map->size_local() << ","
+                 << _col_map->size_local() + _col_map->num_ghosts() << "]" << strT << ".x["
+                 << x.array().size() << "]";
 
     if (transpose)
     {
@@ -431,6 +439,8 @@ public:
       err_check(hipDeviceSynchronize());
 #else
       int num_rows = _row_map->size_local();
+      LOG(WARNING) << "Launch spmv: " << y.array().size() << " = " << num_rows;
+
       dim3 block_size(256);
       dim3 grid_size((num_rows + block_size.x - 1) / block_size.x);
       x.scatter_fwd_begin();
@@ -461,6 +471,7 @@ public:
 #endif
 #endif
     }
+    LOG(WARNING) << "Done MatVec";
   }
 
   template <typename Vector>
