@@ -62,14 +62,16 @@ public:
 
     [[maybe_unused]] int num_levels = _maps.size();
     // Compute initial residual r0 = b - Ax0
-    auto& A_fine = *_operators.back(); // Get reference to the finest operator
-    auto& b_fine = *_b.back();         // get reference to the finest b
-    A_fine(x, *_b.back());
-    axpy(b_fine, T(-1), b_fine, y);
+    //    auto& A_fine = *_operators.back(); // Get reference to the finest operator
+    //    auto& b_fine = *_b.back();         // get reference to the finest b
+    //    A_fine(x, *_b.back());
+    //    axpy(b_fine, T(-1), b_fine, y);
 
     // Set RHS to zeros
-    for (int i = 0; i < num_levels; i++)
+    for (int i = 0; i < num_levels - 1; i++)
       _u[i]->set(T{0});
+
+    acc::copy(*_u.back(), x);
 
     for (int i = num_levels - 1; i > 0; i--)
     {
@@ -94,8 +96,22 @@ public:
       (*_res_interpolation[i - 1])(*_r[i], *_b[i - 1], false);
     }
 
+    // r = b[i] - A[i] * u[i]
+    (*_operators[0])(*_u[0], *_r[0]);
+    axpy(*_r[0], T(-1), *_r[0], *_b[0]);
+
+    double rn = acc::norm(*_r[0]);
+    LOG(INFO) << "Residual norm before (0) = " << rn;
+
     // Solve coarse problem
     _solvers[0]->solve(*_operators[0], *_u[0], *_b[0], false);
+
+    // r = b[i] - A[i] * u[i]
+    (*_operators[0])(*_u[0], *_r[0]);
+    axpy(*_r[0], T(-1), *_r[0], *_b[0]);
+
+    rn = acc::norm(*_r[0]);
+    LOG(INFO) << "Residual norm after (0) = " << rn;
 
     for (int i = 0; i < num_levels - 1; i++)
     {
