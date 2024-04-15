@@ -62,9 +62,10 @@ public:
 
     [[maybe_unused]] int num_levels = _maps.size();
 
-    // Set RHS to zeros
+    // Set to zeros
     for (int i = 0; i < num_levels - 1; i++)
       _u[i]->set(T{0});
+    acc::copy(*_u.back(), y);
 
     acc::copy(*_b.back(), x);
 
