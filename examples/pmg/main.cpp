@@ -46,15 +46,16 @@ int main(int argc, char* argv[])
   std::vector form_L = {form_poisson_L1, form_poisson_L2, form_poisson_L2};
 
   init_logging(argc, argv);
-  MPI_Init(&argc, &argv);
+  PetscInitialize(&argc, &argv, nullptr, nullptr);
   {
     MPI_Comm comm{MPI_COMM_WORLD};
     int rank = 0, size = 0;
     MPI_Comm_rank(comm, &rank);
     MPI_Comm_size(comm, &size);
 
-    if (rank == 0)
-      loguru::g_stderr_verbosity = loguru::Verbosity_INFO;
+    std::string thread_name = "RANK: " + std::to_string(rank);
+    loguru::set_thread_name(thread_name.c_str());
+    loguru::g_stderr_verbosity = loguru::Verbosity_INFO;
 
     const int order = 3;
     double nx_approx = (std::pow(ndofs * size, 1.0 / 3.0) - 1) / order;
@@ -242,10 +243,12 @@ int main(int argc, char* argv[])
                        std::shared_ptr<const fem::DirichletBC<T, T>> bcs)
       {
         auto V = a->function_spaces()[0];
-        MPI_Comm comm = V->mesh()->comm();
+        MPI_Comm comm = a->mesh()->comm();
 
         // Create Coarse Operator using PETSc and Hypre
+        LOG(INFO) << "Create PETScOperator";
         PETScOperator coarse_op(a, {bcs});
+
         LOG(INFO) << "Get device matrix";
         _A = coarse_op.device_matrix();
         LOG(INFO) << "Create Petsc KSP";
@@ -254,6 +257,8 @@ int main(int argc, char* argv[])
         KSPSetType(_solver, KSPCG);
         LOG(INFO) << "Set Operators";
         KSPSetOperators(_solver, _A, _A);
+        LOG(INFO) << "Set iteration count";
+        KSPSetTolerances(_solver, PETSC_DEFAULT, PETSC_DEFAULT, PETSC_DEFAULT, 10);
         LOG(INFO) << "Set PC Type";
         PC prec;
         KSPGetPC(_solver, &prec);
@@ -262,11 +267,18 @@ int main(int argc, char* argv[])
         LOG(INFO) << "KSP Setup";
         KSPSetUp(_solver);
 
-        LOG(INFO) << "Create Petsc HIP arrays";
         const PetscInt local_size = V->dofmap()->index_map->size_local();
         const PetscInt global_size = V->dofmap()->index_map->size_global();
         VecCreateMPIHIPWithArray(comm, PetscInt(1), local_size, global_size, NULL, &_x);
         VecCreateMPIHIPWithArray(comm, PetscInt(1), local_size, global_size, NULL, &_b);
+      }
+
+      ~CoarseSolverType()
+      {
+        VecDestroy(&_x);
+        VecDestroy(&_b);
+        KSPDestroy(&_solver);
+        MatDestroy(&_A);
       }
 
       void solve(DeviceVector& x, DeviceVector& y)
@@ -303,14 +315,17 @@ int main(int argc, char* argv[])
     using PMG = acc::MultigridPreconditioner<DeviceVector, OpType, OpType, OpType, SolverType,
                                              CoarseSolverType>;
 
+    LOG(INFO) << "Create PMG";
     PMG pmg(maps, 1);
     pmg.set_solvers(smoothers);
     pmg.set_operators(operators);
+    LOG(INFO) << "Set Coarse Solver";
     pmg.set_coarse_solver(coarse_solver);
     pmg.set_interpolators(prolongation);
     pmg.set_restriction_interpolators(restriction);
 
     // Create solution vector
+    LOG(INFO) << "Create x";
     DeviceVector x(maps.back(), 1);
     x.set(T{0.0});
 
@@ -321,6 +336,6 @@ int main(int argc, char* argv[])
     dolfinx::list_timings(MPI_COMM_WORLD, {dolfinx::TimingType::wall});
   }
 
-  MPI_Finalize();
+  PetscFinalize();
   return 0;
 }

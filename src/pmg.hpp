@@ -69,12 +69,15 @@ public:
       _u[i]->set(T{0});
     acc::copy(*_u.back(), y);
 
+    LOG(INFO) << "Copy x to b";
     acc::copy(*_b.back(), x);
 
     for (int i = num_levels - 1; i > 0; i--)
     {
       // r = b[i] - A[i] * u[i]
+      LOG(INFO) << "Operator " << i << " on u -> r";
       (*_operators[i])(*_u[i], *_r[i]);
+      LOG(INFO) << "axpy";
       axpy(*_r[i], T(-1), *_r[i], *_b[i]);
 
       double rn = acc::norm(*_r[i]);
@@ -102,7 +105,7 @@ public:
     LOG(INFO) << "Residual norm before (0) = " << rn;
 
     // Solve coarse problem
-    _solvers[0]->solve(*_operators[0], *_u[0], *_b[0], false);
+    _coarse_solver->solve(*_u[0], *_b[0]);
 
     // r = b[i] - A[i] * u[i]
     (*_operators[0])(*_u[0], *_r[0]);
@@ -134,6 +137,8 @@ public:
       rn = acc::norm(*_r[i + 1]);
       LOG(INFO) << "Residual norm after post-smoothing (" << i + 1 << ") = " << rn;
     }
+
+    LOG(INFO) << "----------- end of iteration ---------";
 
     acc::copy(y, *_u.back());
   }
