@@ -12,7 +12,7 @@ namespace dolfinx::acc
 {
 /// Conjugate gradient method
 template <typename Vector, typename Operator, typename Prolongation, typename Restriction,
-          typename Solver>
+          typename Solver, typename CoarseSolver>
 class MultigridPreconditioner
 {
   /// The value type
@@ -41,6 +41,8 @@ public:
   }
 
   void set_solvers(std::vector<std::shared_ptr<Solver>>& solvers) { _solvers = solvers; }
+
+  void set_coarse_solver(std::shared_ptr<CoarseSolver> solver) { _coarse_solver = solver; }
 
   void set_operators(std::vector<std::shared_ptr<Operator>>& operators) { _operators = operators; }
 
@@ -157,6 +159,8 @@ private:
 
   // Operators used to compute the residual
   std::vector<std::shared_ptr<Operator>> _operators;
+
+  std::shared_ptr<CoarseSolver> _coarse_solver;
 
   // Solvers for each level
   std::vector<std::shared_ptr<Solver>> _solvers;

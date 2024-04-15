@@ -1,6 +1,7 @@
 #include "../../src/cg.hpp"
 #include "../../src/chebyshev.hpp"
 #include "../../src/csr.hpp"
+#include "../../src/operators.hpp"
 #include "../../src/pmg.hpp"
 #include "../../src/vector.hpp"
 #include "poisson.h"
@@ -234,11 +235,78 @@ int main(int argc, char* argv[])
     using OpType = acc::MatrixOperator<T>;
     using SolverType = acc::Chebyshev<DeviceVector>;
 
-    using PMG = acc::MultigridPreconditioner<DeviceVector, OpType, OpType, OpType, SolverType>;
+    class CoarseSolverType
+    {
+    public:
+      CoarseSolverType(std::shared_ptr<fem::Form<T, T>> a,
+                       std::shared_ptr<const fem::DirichletBC<T, T>> bcs)
+      {
+        auto V = a->function_spaces()[0];
+        MPI_Comm comm = V->mesh()->comm();
+
+        // Create Coarse Operator using PETSc and Hypre
+        PETScOperator coarse_op(a, {bcs});
+        LOG(INFO) << "Get device matrix";
+        _A = coarse_op.device_matrix();
+        LOG(INFO) << "Create Petsc KSP";
+        KSPCreate(comm, &_solver);
+        LOG(INFO) << "Set KSP Type";
+        KSPSetType(_solver, KSPCG);
+        LOG(INFO) << "Set Operators";
+        KSPSetOperators(_solver, _A, _A);
+        LOG(INFO) << "Set PC Type";
+        PC prec;
+        KSPGetPC(_solver, &prec);
+        PCSetType(prec, PCHYPRE);
+        KSPSetFromOptions(_solver);
+        LOG(INFO) << "KSP Setup";
+        KSPSetUp(_solver);
+
+        LOG(INFO) << "Create Petsc HIP arrays";
+        const PetscInt local_size = V->dofmap()->index_map->size_local();
+        const PetscInt global_size = V->dofmap()->index_map->size_global();
+        VecCreateMPIHIPWithArray(comm, PetscInt(1), local_size, global_size, NULL, &_x);
+        VecCreateMPIHIPWithArray(comm, PetscInt(1), local_size, global_size, NULL, &_b);
+      }
+
+      void solve(DeviceVector& x, DeviceVector& y)
+      {
+        VecHIPPlaceArray(_b, y.array().data());
+        VecHIPPlaceArray(_x, x.array().data());
+
+        KSPSolve(_solver, _b, _x);
+        KSPView(_solver, PETSC_VIEWER_STDOUT_WORLD);
+
+        KSPConvergedReason reason;
+        KSPGetConvergedReason(_solver, &reason);
+
+        PetscInt num_iterations = 0;
+        int ierr = KSPGetIterationNumber(_solver, &num_iterations);
+        if (ierr != 0)
+          LOG(ERROR) << "KSPGetIterationNumber Error:" << ierr;
+
+        LOG(INFO) << "Converged reason: " << reason;
+        LOG(INFO) << "Num iterations: " << num_iterations;
+
+        VecHIPResetArray(_b);
+        VecHIPResetArray(_x);
+      }
+
+    private:
+      Vec _b, _x;
+      KSP _solver;
+      Mat _A;
+    };
+
+    auto coarse_solver = std::make_shared<CoarseSolverType>(a[0], bcs[0]);
+
+    using PMG = acc::MultigridPreconditioner<DeviceVector, OpType, OpType, OpType, SolverType,
+                                             CoarseSolverType>;
 
     PMG pmg(maps, 1);
     pmg.set_solvers(smoothers);
     pmg.set_operators(operators);
+    pmg.set_coarse_solver(coarse_solver);
     pmg.set_interpolators(prolongation);
     pmg.set_restriction_interpolators(restriction);
 
