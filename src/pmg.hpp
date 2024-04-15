@@ -55,24 +55,29 @@ public:
   }
 
   // Apply M^{-1}x = y
-  void apply(Vector& x, const Vector& y, bool verbose = false)
+  void apply(const Vector& x, Vector& y, bool verbose = false)
   {
 
     dolfinx::common::Timer t0("~apply MultigridPreconditioner preconditioner");
 
     [[maybe_unused]] int num_levels = _maps.size();
-    // Compute initial residual r0 = b - Ax0
-    auto& A_fine = *_operators.back(); // Get reference to the finest operator
-    auto& b_fine = *_b.back();         // get reference to the finest b
-    A_fine(x, *_b.back());
-    axpy(b_fine, T(-1), b_fine, y);
 
-    // Set RHS to zeros
-    for (int i = 0; i < num_levels; i++)
+    // Set to zeros
+    for (int i = 0; i < num_levels - 1; i++)
       _u[i]->set(T{0});
+    acc::copy(*_u.back(), y);
+
+    acc::copy(*_b.back(), x);
 
     for (int i = num_levels - 1; i > 0; i--)
     {
+      // r = b[i] - A[i] * u[i]
+      (*_operators[i])(*_u[i], *_r[i]);
+      axpy(*_r[i], T(-1), *_r[i], *_b[i]);
+
+      double rn = acc::norm(*_r[i]);
+      LOG(INFO) << "Residual norm before (" << i << ") = " << rn;
+
       // u[i] = M^-1 b[i]
       _solvers[i]->solve(*_operators[i], *_u[i], *_b[i], false);
 
@@ -80,15 +85,29 @@ public:
       (*_operators[i])(*_u[i], *_r[i]);
       axpy(*_r[i], T(-1), *_r[i], *_b[i]);
 
-      double rn = acc::norm(*_r[i]);
-      LOG(INFO) << "Residual norm (" << i << ") = " << rn;
+      rn = acc::norm(*_r[i]);
+      LOG(INFO) << "Residual norm after (" << i << ") = " << rn;
 
       // Restrict residual from level i to level (i - 1)
       (*_res_interpolation[i - 1])(*_r[i], *_b[i - 1], false);
     }
 
+    // r = b[i] - A[i] * u[i]
+    (*_operators[0])(*_u[0], *_r[0]);
+    axpy(*_r[0], T(-1), *_r[0], *_b[0]);
+
+    double rn = acc::norm(*_r[0]);
+    LOG(INFO) << "Residual norm before (0) = " << rn;
+
     // Solve coarse problem
     _solvers[0]->solve(*_operators[0], *_u[0], *_b[0], false);
+
+    // r = b[i] - A[i] * u[i]
+    (*_operators[0])(*_u[0], *_r[0]);
+    axpy(*_r[0], T(-1), *_r[0], *_b[0]);
+
+    rn = acc::norm(*_r[0]);
+    LOG(INFO) << "Residual norm after (0) = " << rn;
 
     for (int i = 0; i < num_levels - 1; i++)
     {
@@ -98,11 +117,23 @@ public:
       // update U
       axpy(*_u[i + 1], T(1), *_u[i + 1], *_du[i + 1]);
 
+      // r = b[i] - A[i] * u[i]
+      (*_operators[i + 1])(*_u[i + 1], *_r[i + 1]);
+      axpy(*_r[i + 1], T(-1), *_r[i + 1], *_b[i + 1]);
+      double rn = acc::norm(*_r[i + 1]);
+      LOG(INFO) << "Residual norm after u+du (" << i + 1 << ") = " << rn;
+
       // [fine] Post-smooth
       _solvers[i + 1]->solve(*_operators[i + 1], *_u[i + 1], *_b[i + 1], false);
+
+      // r = b[i] - A[i] * u[i]
+      (*_operators[i + 1])(*_u[i + 1], *_r[i + 1]);
+      axpy(*_r[i + 1], T(-1), *_r[i + 1], *_b[i + 1]);
+      rn = acc::norm(*_r[i + 1]);
+      LOG(INFO) << "Residual norm after post-smoothing (" << i + 1 << ") = " << rn;
     }
 
-    acc::copy(x, *_u.back());
+    acc::copy(y, *_u.back());
   }
 
 private:

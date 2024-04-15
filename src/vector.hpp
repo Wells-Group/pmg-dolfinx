@@ -121,8 +121,6 @@ public:
     int size = bs * (map->size_local() + map->num_ghosts());
     _x = container<T, D>(size, 0);
 
-    LOG(INFO) << "Created Vector of size " << _x.size() << " at " << _x.data();
-
     _buffer_local = container<T, D>(_scatterer->local_buffer_size(), 0);
     _buffer_remote = container<T, D>(_scatterer->remote_buffer_size(), 0);
     _local_indices = container<std::int32_t, D>(_scatterer->local_indices());
