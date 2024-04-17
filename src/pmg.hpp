@@ -59,7 +59,6 @@ public:
   // Apply M^{-1}x = y
   void apply(const Vector& x, Vector& y, bool verbose = false)
   {
-
     dolfinx::common::Timer t0("~apply MultigridPreconditioner preconditioner");
 
     [[maybe_unused]] int num_levels = _maps.size();
@@ -77,6 +76,7 @@ public:
       // r = b[i] - A[i] * u[i]
       LOG(INFO) << "Operator " << i << " on u -> r";
       (*_operators[i])(*_u[i], *_r[i]);
+
       LOG(INFO) << "axpy";
       axpy(*_r[i], T(-1), *_r[i], *_b[i]);
 
@@ -106,6 +106,7 @@ public:
 
     // Solve coarse problem
     _coarse_solver->solve(*_u[0], *_b[0]);
+    // _solvers[0]->solve(*_operators[0], *_u[0], *_b[0], false);
 
     // r = b[i] - A[i] * u[i]
     (*_operators[0])(*_u[0], *_r[0]);

@@ -53,8 +53,8 @@ else()
 endif()
 
 set(CMAKE_CXX_STANDARD 20)
-set(CMAKE_CXX_FLAGS "-Ofast -march=native -stdlib=libstdc++ --gcc-toolchain=/opt/cray/pe/gcc/11.2.0/snos ${CMAKE_CXX_FLAGS} -DNDEBUG -Wall")
-set(CMAKE_C_FLAGS "-Ofast -march=native ${CMAKE_C_FLAGS} -DNDEBUG -Wall")
+set(CMAKE_CXX_FLAGS "-g -O3 -march=native -stdlib=libstdc++ --gcc-toolchain=/opt/cray/pe/gcc/11.2.0/snos ${CMAKE_CXX_FLAGS} -DNDEBUG -Wall")
+set(CMAKE_C_FLAGS "-g -O3 -march=native ${CMAKE_C_FLAGS} -DNDEBUG -Wall")
 
 
 # ------------------------------------------------------------------------------
@@ -106,7 +106,7 @@ if(omnitrace)
 	find_path(OMNITRACE_INCLUDE omnitrace/user.h "${OMNITRACE_DIR}/include")
 	include_directories(${OMNITRACE_INCLUDE})
 	find_library(OMNITRACE_LIBRARY NAMES omnitrace HINTS "${OMNITRACE_DIR}/lib")
-	find_library(OMNITRACE_USER_LIBRARY NAMES omnitrace-user HINTS "${OMNITRACE_DIR}/lib")	
+	find_library(OMNITRACE_USER_LIBRARY NAMES omnitrace-user HINTS "${OMNITRACE_DIR}/lib")
 	add_definitions(-DOMNITRACE=1)
 endif()
 if(amd)

@@ -23,6 +23,87 @@ using T = double;
 using DeviceVector = dolfinx::acc::Vector<T, acc::Device::HIP>;
 namespace po = boost::program_options;
 
+class CoarseSolverType
+{
+public:
+  CoarseSolverType(std::shared_ptr<fem::Form<T, T>> a,
+                   std::shared_ptr<const fem::DirichletBC<T, T>> bcs)
+  {
+    auto V = a->function_spaces()[0];
+    MPI_Comm comm = a->mesh()->comm();
+
+    // Create Coarse Operator using PETSc and Hypre
+    LOG(INFO) << "Create PETScOperator";
+    coarse_op = std::make_unique<PETScOperator<T>>(a, std::vector{bcs});
+    err_check(hipDeviceSynchronize());
+
+    auto im_op = coarse_op->index_map();
+    LOG(INFO) << "OP:" << im_op->size_global() << "/" << im_op->size_local() << "/"
+              << im_op->num_ghosts();
+    auto im_V = V->dofmap()->index_map;
+    LOG(INFO) << "V:" << im_V->size_global() << "/" << im_V->size_local() << "/"
+              << im_V->num_ghosts();
+
+    LOG(INFO) << "Get device matrix";
+    Mat A = coarse_op->device_matrix();
+    LOG(INFO) << "Create Petsc KSP";
+    KSPCreate(comm, &_solver);
+    LOG(INFO) << "Set KSP Type";
+    KSPSetType(_solver, KSPCG);
+    LOG(INFO) << "Set Operators";
+    KSPSetOperators(_solver, A, A);
+    LOG(INFO) << "Set iteration count";
+    KSPSetTolerances(_solver, PETSC_DEFAULT, PETSC_DEFAULT, PETSC_DEFAULT, 10);
+    LOG(INFO) << "Set PC Type";
+    PC prec;
+    KSPGetPC(_solver, &prec);
+    PCSetType(prec, PCHYPRE);
+    KSPSetFromOptions(_solver);
+    LOG(INFO) << "KSP Setup";
+    KSPSetUp(_solver);
+
+    const PetscInt local_size = V->dofmap()->index_map->size_local();
+    const PetscInt global_size = V->dofmap()->index_map->size_global();
+    VecCreateMPIHIPWithArray(comm, PetscInt(1), local_size, global_size, NULL, &_x);
+    VecCreateMPIHIPWithArray(comm, PetscInt(1), local_size, global_size, NULL, &_b);
+  }
+
+  ~CoarseSolverType()
+  {
+    VecDestroy(&_x);
+    VecDestroy(&_b);
+    KSPDestroy(&_solver);
+  }
+
+  void solve(DeviceVector& x, DeviceVector& y)
+  {
+    VecHIPPlaceArray(_b, y.array().data());
+    VecHIPPlaceArray(_x, x.array().data());
+
+    KSPSolve(_solver, _b, _x);
+    KSPView(_solver, PETSC_VIEWER_STDOUT_WORLD);
+
+    KSPConvergedReason reason;
+    KSPGetConvergedReason(_solver, &reason);
+
+    PetscInt num_iterations = 0;
+    int ierr = KSPGetIterationNumber(_solver, &num_iterations);
+    if (ierr != 0)
+      LOG(ERROR) << "KSPGetIterationNumber Error:" << ierr;
+
+    LOG(INFO) << "Converged reason: " << reason;
+    LOG(INFO) << "Num iterations: " << num_iterations;
+
+    VecHIPResetArray(_b);
+    VecHIPResetArray(_x);
+  }
+
+private:
+  Vec _b, _x;
+  KSP _solver;
+  std::unique_ptr<PETScOperator<T>> coarse_op;
+};
+
 int main(int argc, char* argv[])
 {
   po::options_description desc("Allowed options");
@@ -138,6 +219,9 @@ int main(int argc, char* argv[])
       bcs[i] = std::make_shared<const fem::DirichletBC<T, T>>(0.0, bdofs, V[i]);
     }
 
+    std::shared_ptr<CoarseSolverType> coarse_solver
+        = std::make_shared<CoarseSolverType>(a[0], bcs[0]);
+
     // RHS
     std::size_t ncells = mesh->topology()->index_map(3)->size_global();
     if (rank == 0)
@@ -235,82 +319,6 @@ int main(int argc, char* argv[])
 
     using OpType = acc::MatrixOperator<T>;
     using SolverType = acc::Chebyshev<DeviceVector>;
-
-    class CoarseSolverType
-    {
-    public:
-      CoarseSolverType(std::shared_ptr<fem::Form<T, T>> a,
-                       std::shared_ptr<const fem::DirichletBC<T, T>> bcs)
-      {
-        auto V = a->function_spaces()[0];
-        MPI_Comm comm = a->mesh()->comm();
-
-        // Create Coarse Operator using PETSc and Hypre
-        LOG(INFO) << "Create PETScOperator";
-        PETScOperator coarse_op(a, {bcs});
-
-        LOG(INFO) << "Get device matrix";
-        _A = coarse_op.device_matrix();
-        LOG(INFO) << "Create Petsc KSP";
-        KSPCreate(comm, &_solver);
-        LOG(INFO) << "Set KSP Type";
-        KSPSetType(_solver, KSPCG);
-        LOG(INFO) << "Set Operators";
-        KSPSetOperators(_solver, _A, _A);
-        LOG(INFO) << "Set iteration count";
-        KSPSetTolerances(_solver, PETSC_DEFAULT, PETSC_DEFAULT, PETSC_DEFAULT, 10);
-        LOG(INFO) << "Set PC Type";
-        PC prec;
-        KSPGetPC(_solver, &prec);
-        PCSetType(prec, PCHYPRE);
-        KSPSetFromOptions(_solver);
-        LOG(INFO) << "KSP Setup";
-        KSPSetUp(_solver);
-
-        const PetscInt local_size = V->dofmap()->index_map->size_local();
-        const PetscInt global_size = V->dofmap()->index_map->size_global();
-        VecCreateMPIHIPWithArray(comm, PetscInt(1), local_size, global_size, NULL, &_x);
-        VecCreateMPIHIPWithArray(comm, PetscInt(1), local_size, global_size, NULL, &_b);
-      }
-
-      ~CoarseSolverType()
-      {
-        VecDestroy(&_x);
-        VecDestroy(&_b);
-        KSPDestroy(&_solver);
-        MatDestroy(&_A);
-      }
-
-      void solve(DeviceVector& x, DeviceVector& y)
-      {
-        VecHIPPlaceArray(_b, y.array().data());
-        VecHIPPlaceArray(_x, x.array().data());
-
-        KSPSolve(_solver, _b, _x);
-        KSPView(_solver, PETSC_VIEWER_STDOUT_WORLD);
-
-        KSPConvergedReason reason;
-        KSPGetConvergedReason(_solver, &reason);
-
-        PetscInt num_iterations = 0;
-        int ierr = KSPGetIterationNumber(_solver, &num_iterations);
-        if (ierr != 0)
-          LOG(ERROR) << "KSPGetIterationNumber Error:" << ierr;
-
-        LOG(INFO) << "Converged reason: " << reason;
-        LOG(INFO) << "Num iterations: " << num_iterations;
-
-        VecHIPResetArray(_b);
-        VecHIPResetArray(_x);
-      }
-
-    private:
-      Vec _b, _x;
-      KSP _solver;
-      Mat _A;
-    };
-
-    auto coarse_solver = std::make_shared<CoarseSolverType>(a[0], bcs[0]);
 
     using PMG = acc::MultigridPreconditioner<DeviceVector, OpType, OpType, OpType, SolverType,
                                              CoarseSolverType>;

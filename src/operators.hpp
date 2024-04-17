@@ -43,8 +43,7 @@ public:
     pattern.finalize();
 
     LOG(INFO) << "Create matrix..." << pattern.index_map(0)->size_global() << "x"
-              << pattern.index_map(1)->size_global() << " " << pattern.num_nonzeros();
-
+              << pattern.index_map(1)->size_global();
     _host_mat = la::petsc::create_matrix(a->mesh()->comm(), pattern, "aijhipsparse");
 
     LOG(INFO) << "Zero matrix...";
