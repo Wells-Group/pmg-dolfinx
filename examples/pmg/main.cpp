@@ -136,7 +136,8 @@ int main(int argc, char* argv[])
 
     std::string thread_name = "RANK: " + std::to_string(rank);
     loguru::set_thread_name(thread_name.c_str());
-    loguru::g_stderr_verbosity = loguru::Verbosity_INFO;
+    if (rank == 0)
+      loguru::g_stderr_verbosity = loguru::Verbosity_INFO;
 
     const int order = 3;
     double nx_approx = (std::pow(ndofs * size, 1.0 / 3.0) - 1) / order;
