@@ -5,6 +5,8 @@
 #include "../../src/vector.hpp"
 #include "poisson.h"
 
+#include <thrust/device_vector.h>
+
 #include <array>
 #include <basix/e-lagrange.h>
 #include <boost/program_options.hpp>
@@ -230,6 +232,22 @@ int main(int argc, char* argv[])
     // From V2 to V1
     prolongation[1] = std::make_shared<acc::MatrixOperator<T>>(*V[1], *V[2]);
     restriction[1] = std::make_shared<acc::MatrixOperator<T>>(*V[2], *V[1]);
+
+    // Copy dofmaps to device
+    thrust::device_vector<std::int32_t> dofmapV0(V[0]->dofmap()->map().size());
+    err_check(hipMemcpy(thrust::raw_pointer_cast(dofmapV0.data()),
+                        V[0]->dofmap()->map().data_handle(), dofmapV0.size(),
+                        hipMemcpyHostToDevice));
+    thrust::device_vector<std::int32_t> dofmapV1(V[1]->dofmap()->map().size());
+    err_check(hipMemcpy(thrust::raw_pointer_cast(dofmapV1.data()),
+                        V[1]->dofmap()->map().data_handle(), dofmapV1.size(),
+                        hipMemcpyHostToDevice));
+    std::span<std::int32_t> dofmapV0_span(thrust::raw_pointer_cast(dofmapV0.data()),
+                                          dofmapV0.size());
+    std::span<std::int32_t> dofmapV1_span(thrust::raw_pointer_cast(dofmapV1.data()),
+                                          dofmapV1.size());
+
+    Interpolator<T> i_12(2, 1, dofmapV1_span, dofmapV0_span);
 
     using OpType = acc::MatrixOperator<T>;
     using SolverType = acc::Chebyshev<DeviceVector>;
