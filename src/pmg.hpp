@@ -1,6 +1,7 @@
 // Copyright (C) 2023 Igor A. Baratta
 // SPDX-License-Identifier:    MIT
 
+#include "interpolate.hpp"
 #include "vector.hpp"
 #include <algorithm>
 #include <dolfinx/common/IndexMap.h>
@@ -152,6 +153,8 @@ private:
   // Prologation and restriction operatos
   // Size should be nlevels - 1
   std::vector<std::shared_ptr<Prolongation>> _interpolation;
+
+  std::vector<std::shared_ptr<Interpolator<T>>> _interpolation_kernels;
 
   std::vector<std::shared_ptr<Restriction>> _res_interpolation;
 

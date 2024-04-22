@@ -1,7 +1,6 @@
 #include "../../src/cg.hpp"
 #include "../../src/chebyshev.hpp"
 #include "../../src/csr.hpp"
-#include "../../src/interpolate.hpp"
 #include "../../src/pmg.hpp"
 #include "../../src/vector.hpp"
 #include "poisson.h"

@@ -27,16 +27,16 @@ __global__ void interpolate_Q1Q2(int N, const std::int32_t* Q1dofs, int Q1_dofs_
   // Check if the row index is out of bounds.
   if (i < N)
   {
-    T* cellvalsQ1 = valuesQ1 + i * Q1_dofs_per_cell;
-    T* cellvalsQ2 = valuesQ2 + i * Q2_dofs_per_cell;
+    const std::int32_t* cellQ1 = Q1dofs + i * Q1_dofs_per_cell;
+    const std::int32_t* cellQ2 = Q2dofs + i * Q2_dofs_per_cell;
 
     for (std::int32_t j = 0; j < Q2_dofs_per_cell; j++)
     {
       T vj = 0;
       // Use small CSR matrix on cell-local dofs
       for (std::int32_t k = mat_row_offset[j]; k < mat_row_offset[j + 1]; ++k)
-        vj += mat_value[k] * cellvalsQ1[mat_column[k]];
-      cellvalsQ2[j] = vj;
+        vj += mat_value[k] * valuesQ1[cellQ1[mat_column[k]]];
+      valuesQ2[cellQ2[j]] = vj;
     }
   }
 }
