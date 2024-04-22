@@ -48,6 +48,10 @@ class Interpolator
 {
 public:
   // Set up interpolation from Q1 to Q2
+  // Q1 int - degree of input space
+  // Q2 int - degree of output space
+  // inp_dofmap - dofmap of input space (on device)
+  // out_dofmap - dofmap of output space (on device)
   Interpolator(int Q1, int Q2, std::span<const std::int32_t> inp_dofmap,
                std::span<const std::int32_t> out_dofmap)
       : input_dofmap(inp_dofmap), output_dofmap(out_dofmap)
@@ -59,8 +63,8 @@ public:
 
     if (Q1 == 2 and Q2 == 1)
     {
-      num_cell_dofs_Q1 = 8;
-      num_cell_dofs_Q2 = 27;
+      num_cell_dofs_Q1 = 27;
+      num_cell_dofs_Q2 = 8;
 
       _cols = {0, 1, 2, 3, 4, 5, 6, 7};
       _row_offset = {0, 1, 2, 3, 4, 5, 6, 7, 8};
@@ -68,8 +72,8 @@ public:
     }
     else if (Q1 == 1 and Q2 == 2)
     {
-      num_cell_dofs_Q1 = 27;
-      num_cell_dofs_Q2 = 8;
+      num_cell_dofs_Q1 = 8;
+      num_cell_dofs_Q2 = 27;
 
       _cols = {0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 0, 2, 0, 4, 1, 3, 1, 5, 2, 3, 2, 6,
                3, 7, 4, 5, 4, 6, 5, 7, 6, 7, 0, 1, 2, 3, 0, 1, 4, 5, 0, 2, 4, 6,
@@ -689,17 +693,19 @@ public:
                0.20710835055998664,
                0.512};
     }
+    else
+      throw std::runtime_error("Interpolation not available");
 
     // Checks on dofmap shapes and sizes
     assert(input_dofmap.size() % num_cell_dofs_Q1 == 0);
     assert(output_dofmap.size() % num_cell_dofs_Q2 == 0);
     assert(output_dofmap.size() / num_cell_dofs_Q2 == input_dofmap.size() / num_cell_dofs_Q1);
+    assert(_row_offset.size() == num_cell_dofs_Q2 + 1);
 
     // Copy small CSR matrix to device
     std::int32_t* _row_ptr;
     err_check(hipMalloc((void**)&_row_ptr, _row_offset.size() * sizeof(std::int32_t)));
     mat_row_offset = std::span<std::int32_t>(_row_ptr, _row_offset.size());
-
     err_check(hipMemcpy(mat_row_offset.data(), _row_offset.data(),
                         _row_offset.size() * sizeof(std::int32_t), hipMemcpyHostToDevice));
 
@@ -716,6 +722,14 @@ public:
         hipMemcpy(mat_value.data(), _vals.data(), _vals.size() * sizeof(T), hipMemcpyHostToDevice));
 
     err_check(hipDeviceSynchronize());
+  }
+
+  ~Interpolator()
+  {
+    // Free memory on destruction
+    err_check(hipFree(mat_value.data()));
+    err_check(hipFree(mat_row_offset.data()));
+    err_check(hipFree(mat_column.data()));
   }
 
   // Interpolate from input_values to output_values (both on device)
