@@ -44,7 +44,7 @@ int main(int argc, char* argv[])
   std::vector fs_poisson_a = {functionspace_form_poisson_a1, functionspace_form_poisson_a2,
                               functionspace_form_poisson_a3};
   std::vector form_a = {form_poisson_a1, form_poisson_a2, form_poisson_a3};
-  std::vector form_L = {form_poisson_L1, form_poisson_L2, form_poisson_L2};
+  std::vector form_L = {form_poisson_L1, form_poisson_L2, form_poisson_L3};
 
   init_logging(argc, argv);
   MPI_Init(&argc, &argv);
@@ -81,6 +81,8 @@ int main(int argc, char* argv[])
             }
           }
     }
+
+    LOG(INFO) << "Creating mesh of size: " << nx[0] << "x" << nx[1] << "x" << nx[2];
 
     // Create mesh
     auto mesh = std::make_shared<mesh::Mesh<T>>(mesh::create_box<T>(
@@ -170,6 +172,7 @@ int main(int argc, char* argv[])
       la::Vector<T> b(maps[i], 1);
       b.set(T(0.0));
       fem::assemble_vector(b.mutable_array(), *L[i]);
+
       fem::apply_lifting<T, T>(b.mutable_array(), {a[i]}, {{bcs[i]}}, {}, T(1));
       b.scatter_rev(std::plus<T>());
       fem::set_bc<T, T>(b.mutable_array(), {bcs[i]});
@@ -200,18 +203,18 @@ int main(int argc, char* argv[])
       DeviceVector x(maps[i], 1);
       x.set(T{0.0});
 
-      (*operators[i])(*bs[i], x);
+      //      (*operators[i])(*bs[i], x);
 
       [[maybe_unused]] int its = cg.solve(*operators[i], x, *bs[i], true);
       std::vector<T> eign = cg.compute_eigenvalues();
       std::sort(eign.begin(), eign.end());
-      std::array<T, 2> eig_range = {0.3 * eign.back(), 1.2 * eign.back()};
+      std::array<T, 2> eig_range = {0.8 * eign.front(), 1.2 * eign.back()};
       smoothers[i] = std::make_shared<acc::Chebyshev<DeviceVector>>(maps[i], 1, eig_range, 2);
 
       if (rank == 0)
       {
         std::cout << "Eigenvalues level " << i << ": ";
-        std::cout << eig_range[0] << " " << eig_range[1] << std::endl;
+        std::cout << eign.front() << " " << eign.back() << std::endl;
       }
     }
 
@@ -265,7 +268,10 @@ int main(int argc, char* argv[])
     x.set(T{0.0});
 
     for (int i = 0; i < 10; i++)
+    {
       pmg.apply(*bs.back(), x);
+      LOG(INFO) << "------ end of iteration ------";
+    }
 
     // Display timings
     dolfinx::list_timings(MPI_COMM_WORLD, {dolfinx::TimingType::wall});
