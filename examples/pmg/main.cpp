@@ -247,8 +247,6 @@ int main(int argc, char* argv[])
     std::span<std::int32_t> dofmapV1_span(thrust::raw_pointer_cast(dofmapV1.data()),
                                           dofmapV1.size());
 
-    Interpolator<T> i_12(2, 1, dofmapV1_span, dofmapV0_span);
-
     using OpType = acc::MatrixOperator<T>;
     using SolverType = acc::Chebyshev<DeviceVector>;
 
@@ -258,6 +256,11 @@ int main(int argc, char* argv[])
     pmg.set_solvers(smoothers);
     pmg.set_operators(operators);
     pmg.set_interpolators(prolongation);
+
+    auto interpolator_V1_V0 = std::make_shared<Interpolator<T>>(2, 1, dofmapV1_span, dofmapV0_span);
+    std::vector<std::shared_ptr<Interpolator<T>>> int_kerns = {nullptr, interpolator_V1_V0};
+    pmg.set_interpolation_kernels(int_kerns);
+
     pmg.set_restriction_interpolators(restriction);
 
     // Create solution vector

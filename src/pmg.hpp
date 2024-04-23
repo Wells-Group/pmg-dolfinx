@@ -45,6 +45,11 @@ public:
 
   void set_operators(std::vector<std::shared_ptr<Operator>>& operators) { _operators = operators; }
 
+  void set_interpolation_kernels(std::vector<std::shared_ptr<Interpolator<T>>>& interpolators)
+  {
+    _interpolation_kernels = interpolators;
+  }
+
   void set_interpolators(std::vector<std::shared_ptr<Prolongation>>& interpolators)
   {
     _interpolation = interpolators;
