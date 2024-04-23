@@ -82,6 +82,8 @@ int main(int argc, char* argv[])
           }
     }
 
+    LOG(INFO) << "Creating mesh of size: " << nx[0] << "x" << nx[1] << "x" << nx[2];
+
     // Create mesh
     auto mesh = std::make_shared<mesh::Mesh<T>>(mesh::create_box<T>(
         comm, {{{0, 0, 0}, {1, 1, 1}}}, {nx[0], nx[1], nx[2]}, mesh::CellType::hexahedron));
