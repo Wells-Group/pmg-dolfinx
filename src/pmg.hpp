@@ -50,6 +50,11 @@ public:
     _interpolation_kernels = interpolators;
   }
 
+  void set_prolongation_kernels(std::vector<std::shared_ptr<Interpolator<T>>>& prolong)
+  {
+    _prolongation_kernels = prolong;
+  }
+
   void set_interpolators(std::vector<std::shared_ptr<Prolongation>>& interpolators)
   {
     _interpolation = interpolators;
@@ -127,7 +132,17 @@ public:
     for (int i = 0; i < num_levels - 1; i++)
     {
       // [coarse->fine] Prolong correction
-      (*_interpolation[i])(*_u[i], *_du[i + 1], false);
+      if (_prolongation_kernels[i])
+      {
+        LOG(INFO) << "***** Using prolongation kernel " << i;
+        // Use "prolongation kernel" if available. Interpolate u[i] into du[i+1].
+        _prolongation_kernels[i]->interpolate(_u[i]->mutable_array().data(),
+                                              _du[i + 1]->mutable_array().data());
+      }
+      else
+      {
+        (*_interpolation[i])(*_u[i], *_du[i + 1], false);
+      }
 
       // update U
       axpy(*_u[i + 1], T(1), *_u[i + 1], *_du[i + 1]);
@@ -169,6 +184,7 @@ private:
   std::vector<std::shared_ptr<Prolongation>> _interpolation;
 
   std::vector<std::shared_ptr<Interpolator<T>>> _interpolation_kernels;
+  std::vector<std::shared_ptr<Interpolator<T>>> _prolongation_kernels;
 
   std::vector<std::shared_ptr<Restriction>> _res_interpolation;
 

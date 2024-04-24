@@ -270,9 +270,15 @@ int main(int argc, char* argv[])
     // when fully working
     auto interpolator_V1_V0 = std::make_shared<Interpolator<T>>(2, 1, dofmapV1_span, dofmapV0_span);
     auto interpolator_V2_V1 = std::make_shared<Interpolator<T>>(3, 2, dofmapV2_span, dofmapV1_span);
+    auto interpolator_V0_V1 = std::make_shared<Interpolator<T>>(1, 2, dofmapV0_span, dofmapV1_span);
+    auto interpolator_V1_V2 = std::make_shared<Interpolator<T>>(2, 3, dofmapV1_span, dofmapV2_span);
     std::vector<std::shared_ptr<Interpolator<T>>> int_kerns
         = {interpolator_V1_V0, interpolator_V2_V1};
     pmg.set_interpolation_kernels(int_kerns);
+    //    std::vector<std::shared_ptr<Interpolator<T>>> prolong_kerns
+    //        = {interpolator_V0_V1, interpolator_V1_V2};
+    std::vector<std::shared_ptr<Interpolator<T>>> prolong_kerns = {nullptr, nullptr};
+    pmg.set_prolongation_kernels(prolong_kerns);
 
     pmg.set_restriction_interpolators(restriction);
 
