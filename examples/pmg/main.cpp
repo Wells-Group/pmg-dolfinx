@@ -91,6 +91,16 @@ int main(int argc, char* argv[])
     int tdim = topology->dim();
     int fdim = tdim - 1;
     topology->create_connectivity(fdim, tdim);
+    const std::vector<std::int32_t>& ip_facets = topology->interprocess_facets();
+    auto f_to_c = topology->connectivity(fdim, tdim);
+    // Create list of cells attached to the inter-process boundary (needed for matrix-free updates)
+    std::vector<std::int32_t> ip_cells;
+    for (std::int32_t f : ip_facets)
+    {
+      assert(f_to_c.num_links(f) == 1);
+      ip_cells.push_back(f_to_c->links(f)[0]);
+    }
+    LOG(INFO) << "Got " << ip_cells.size() << " boundary cells.";
 
     std::vector<std::shared_ptr<fem::FunctionSpace<T>>> V(form_a.size());
     std::vector<std::shared_ptr<fem::Form<T, T>>> a(V.size());
@@ -205,17 +215,13 @@ int main(int argc, char* argv[])
 
       //      (*operators[i])(*bs[i], x);
 
-      [[maybe_unused]] int its = cg.solve(*operators[i], x, *bs[i], true);
+      [[maybe_unused]] int its = cg.solve(*operators[i], x, *bs[i], false);
       std::vector<T> eign = cg.compute_eigenvalues();
       std::sort(eign.begin(), eign.end());
       std::array<T, 2> eig_range = {0.8 * eign.front(), 1.2 * eign.back()};
       smoothers[i] = std::make_shared<acc::Chebyshev<DeviceVector>>(maps[i], 1, eig_range, 2);
 
-      if (rank == 0)
-      {
-        LOG(INFO) << "Eigenvalues level " << i << ": " << eign.front() << " " << eign.back()
-                  << std::endl;
-      }
+      LOG(INFO) << "Eigenvalues level " << i << ": " << eign.front() << " " << eign.back();
     }
 
     smoothers[0]->set_max_iterations(20);
@@ -284,7 +290,6 @@ int main(int argc, char* argv[])
     pmg.set_interpolation_kernels(int_kerns);
     std::vector<std::shared_ptr<Interpolator<T>>> prolong_kerns
         = {interpolator_V0_V1, interpolator_V1_V2};
-    // std::vector<std::shared_ptr<Interpolator<T>>> prolong_kerns = {nullptr, nullptr};
     pmg.set_prolongation_kernels(prolong_kerns);
 
     // Create solution vector
