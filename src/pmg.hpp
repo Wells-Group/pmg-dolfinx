@@ -95,7 +95,16 @@ public:
       LOG(INFO) << "Residual norm after (" << i << ") = " << rn;
 
       // Restrict residual from level i to level (i - 1)
-      (*_res_interpolation[i - 1])(*_r[i], *_b[i - 1], false);
+      if (_interpolation_kernels[i - 1])
+      {
+        LOG(INFO) << "***** Using interpolation kernel " << i - 1;
+
+        // Use "interpolation kernel" if available. Interpolate r[i] into b[i-1].
+        _interpolation_kernels[i - 1]->interpolate(_r[i]->mutable_array().data(),
+                                                   _b[i - 1]->mutable_array().data());
+      }
+      else
+        (*_res_interpolation[i - 1])(*_r[i], *_b[i - 1], false);
     }
 
     // r = b[i] - A[i] * u[i]

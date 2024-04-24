@@ -17,18 +17,18 @@ namespace
 //        mat_value: CSR matrix values for local interpolation matrix
 // Output: vector valuesQ2
 template <typename T>
-__global__ void interpolate_Q1Q2(int N, const std::int32_t* Q1dofs, int Q1_dofs_per_cell,
-                                 const std::int32_t* Q2dofs, int Q2_dofs_per_cell,
+__global__ void interpolate_Q1Q2(int N, const std::int32_t* Q1dofmap, int Q1_dofs_per_cell,
+                                 const std::int32_t* Q2dofmap, int Q2_dofs_per_cell,
                                  const T* valuesQ1, T* valuesQ2, const std::int32_t* mat_row_offset,
                                  const std::int32_t* mat_column, const T* mat_value)
 {
-  // Calculate the row index for this thread.
+  // Calculate the cell index for this thread.
   int i = blockIdx.x * blockDim.x + threadIdx.x;
   // Check if the row index is out of bounds.
   if (i < N)
   {
-    const std::int32_t* cellQ1 = Q1dofs + i * Q1_dofs_per_cell;
-    const std::int32_t* cellQ2 = Q2dofs + i * Q2_dofs_per_cell;
+    const std::int32_t* cellQ1 = Q1dofmap + i * Q1_dofs_per_cell;
+    const std::int32_t* cellQ2 = Q2dofmap + i * Q2_dofs_per_cell;
 
     for (std::int32_t j = 0; j < Q2_dofs_per_cell; j++)
     {
@@ -733,7 +733,7 @@ public:
   }
 
   // Interpolate from input_values to output_values (both on device)
-  void interpolate(std::span<const T> input_values, std::span<T> output_values)
+  void interpolate(const T* input_values, T* output_values)
   {
     int ncells = input_dofmap.size() / num_cell_dofs_Q1;
     assert(ncells == output_dofmap.size() / num_cell_dofs_Q2);
@@ -741,10 +741,15 @@ public:
     dim3 block_size(256);
     dim3 grid_size((ncells + block_size.x - 1) / block_size.x);
 
+    LOG(INFO) << "From " << num_cell_dofs_Q1 << " dofs/cell to " << num_cell_dofs_Q2 << " on "
+              << ncells << " cells";
+
     hipLaunchKernelGGL(interpolate_Q1Q2<T>, grid_size, block_size, 0, 0, ncells,
                        input_dofmap.data(), num_cell_dofs_Q1, output_dofmap.data(),
-                       num_cell_dofs_Q2, input_values.data(), output_values.data(),
-                       mat_row_offset.data(), mat_column.data(), mat_value.data());
+                       num_cell_dofs_Q2, input_values, output_values, mat_row_offset.data(),
+                       mat_column.data(), mat_value.data());
+
+    err_check(hipDeviceSynchronize());
 
     err_check(hipGetLastError());
   }
