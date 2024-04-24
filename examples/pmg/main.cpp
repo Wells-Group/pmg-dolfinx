@@ -238,17 +238,23 @@ int main(int argc, char* argv[])
 
     // Copy dofmaps to device
     thrust::device_vector<std::int32_t> dofmapV0(V[0]->dofmap()->map().size());
-    err_check(hipMemcpy(thrust::raw_pointer_cast(dofmapV0.data()),
-                        V[0]->dofmap()->map().data_handle(), dofmapV0.size(),
-                        hipMemcpyHostToDevice));
+    LOG(INFO) << "Copy dofmap (V0) :" << dofmapV0.size();
+    thrust::copy(V[0]->dofmap()->map().data_handle(),
+                 V[0]->dofmap()->map().data_handle() + V[0]->dofmap()->map().size(),
+                 dofmapV0.begin());
+
     thrust::device_vector<std::int32_t> dofmapV1(V[1]->dofmap()->map().size());
-    err_check(hipMemcpy(thrust::raw_pointer_cast(dofmapV1.data()),
-                        V[1]->dofmap()->map().data_handle(), dofmapV1.size(),
-                        hipMemcpyHostToDevice));
+    LOG(INFO) << "Copy dofmap (V1) :" << dofmapV1.size();
+    thrust::copy(V[1]->dofmap()->map().data_handle(),
+                 V[1]->dofmap()->map().data_handle() + V[1]->dofmap()->map().size(),
+                 dofmapV1.begin());
+
     thrust::device_vector<std::int32_t> dofmapV2(V[2]->dofmap()->map().size());
-    err_check(hipMemcpy(thrust::raw_pointer_cast(dofmapV2.data()),
-                        V[2]->dofmap()->map().data_handle(), dofmapV2.size(),
-                        hipMemcpyHostToDevice));
+    LOG(INFO) << "Copy dofmap (V2) :" << dofmapV2.size();
+    thrust::copy(V[2]->dofmap()->map().data_handle(),
+                 V[2]->dofmap()->map().data_handle() + V[2]->dofmap()->map().size(),
+                 dofmapV2.begin());
+
     std::span<std::int32_t> dofmapV0_span(thrust::raw_pointer_cast(dofmapV0.data()),
                                           dofmapV0.size());
     std::span<std::int32_t> dofmapV1_span(thrust::raw_pointer_cast(dofmapV1.data()),
@@ -265,6 +271,7 @@ int main(int argc, char* argv[])
     pmg.set_solvers(smoothers);
     pmg.set_operators(operators);
     pmg.set_interpolators(prolongation);
+    pmg.set_restriction_interpolators(restriction);
 
     // These are alternative restriction/prolongation kernels, which should replace the CSR matrices
     // when fully working
@@ -275,12 +282,10 @@ int main(int argc, char* argv[])
     std::vector<std::shared_ptr<Interpolator<T>>> int_kerns
         = {interpolator_V1_V0, interpolator_V2_V1};
     pmg.set_interpolation_kernels(int_kerns);
-    //    std::vector<std::shared_ptr<Interpolator<T>>> prolong_kerns
-    //        = {interpolator_V0_V1, interpolator_V1_V2};
-    std::vector<std::shared_ptr<Interpolator<T>>> prolong_kerns = {nullptr, nullptr};
+    std::vector<std::shared_ptr<Interpolator<T>>> prolong_kerns
+        = {interpolator_V0_V1, interpolator_V1_V2};
+    // std::vector<std::shared_ptr<Interpolator<T>>> prolong_kerns = {nullptr, nullptr};
     pmg.set_prolongation_kernels(prolong_kerns);
-
-    pmg.set_restriction_interpolators(restriction);
 
     // Create solution vector
     DeviceVector x(maps.back(), 1);
