@@ -213,8 +213,8 @@ int main(int argc, char* argv[])
 
       if (rank == 0)
       {
-        std::cout << "Eigenvalues level " << i << ": ";
-        std::cout << eign.front() << " " << eign.back() << std::endl;
+        LOG(INFO) << "Eigenvalues level " << i << ": " << eign.front() << " " << eign.back()
+                  << std::endl;
       }
     }
 

@@ -733,8 +733,13 @@ public:
   }
 
   // Interpolate from input_values to output_values (both on device)
-  void interpolate(const T* input_values, T* output_values)
+  template <typename Vector>
+  void interpolate(Vector& input_vector, Vector& output_vector)
   {
+    // Input vector is also changed by MPI vector update
+    T* input_values = input_vector.mutable_array().data();
+    T* output_values = output_vector.mutable_array().data();
+
     int ncells = input_dofmap.size() / num_cell_dofs_Q1;
     assert(ncells == output_dofmap.size() / num_cell_dofs_Q2);
 

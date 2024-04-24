@@ -105,8 +105,7 @@ public:
         LOG(INFO) << "***** Using interpolation kernel " << i - 1;
 
         // Use "interpolation kernel" if available. Interpolate r[i] into b[i-1].
-        _interpolation_kernels[i - 1]->interpolate(_r[i]->mutable_array().data(),
-                                                   _b[i - 1]->mutable_array().data());
+        _interpolation_kernels[i - 1]->interpolate(*_r[i], *_b[i - 1]);
       }
       else
         (*_res_interpolation[i - 1])(*_r[i], *_b[i - 1], false);
@@ -136,8 +135,7 @@ public:
       {
         LOG(INFO) << "***** Using prolongation kernel " << i;
         // Use "prolongation kernel" if available. Interpolate u[i] into du[i+1].
-        _prolongation_kernels[i]->interpolate(_u[i]->mutable_array().data(),
-                                              _du[i + 1]->mutable_array().data());
+        _prolongation_kernels[i]->interpolate(*_u[i], *_du[i + 1]);
       }
       else
       {
