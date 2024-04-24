@@ -43,7 +43,9 @@ make
 Get a GPU node:
 
 ```
-salloc --gpus=8 --nodes=1 --exclusive --time=00:20:00 --account=ACCOUNT --partition=g-dev
+salloc --nodes=1 --ntasks-per-node=8 --gpus-per-node=8 --time=01:0:00 --partition=dev-g --account=ACCOUNT
 export MPICH_GPU_SUPPORT_ENABLED=1
 srun --ntasks=1 ./pmg --ndofs=50000
 ```
+
+There are some instructions on running on GPU on the LUMI documentation, especially about [selecting GPU/CPU affinity](https://docs.lumi-supercomputer.eu/runjobs/scheduled-jobs/lumig-job/).
