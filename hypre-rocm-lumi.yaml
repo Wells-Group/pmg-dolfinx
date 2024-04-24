@@ -1,0 +1,142 @@
+# This is a Spack Environment file.
+#
+# It describes a set of packages to be installed, along with
+# configuration settings.
+
+spack:
+  # add package specs to the `specs` list
+  compilers:
+  - compiler:
+      spec: gcc@12.2.0-env
+      paths:
+        cc: /opt/cray/pe/gcc/12.2.0/snos/bin/gcc
+        cxx: /opt/cray/pe/gcc/12.2.0/snos/bin/g++
+        f77: /opt/cray/pe/gcc/12.2.0/snos/bin/gfortran
+        fc: /opt/cray/pe/gcc/12.2.0/snos/bin/gfortran
+      flags:
+        cflags: -Ofast
+        cxxflags: -Ofast
+        fflags: -Ofast
+        ldflags: -L/opt/cray/pe/mpich/8.1.27/ofi/GNU/9.1/lib -lmpi -L/opt/cray/libfabric/1.15.2.0/lib64 -lfabric
+      operating_system: sles15
+      target: any
+      modules:
+      - craype-x86-trento
+      - craype-accel-amd-gfx90a
+      - lifabric/1.15.2.0
+      - cray-mpich/8.1.27
+      environment:
+        prepend_path: # Similar for append|remove_path
+          LD_LIBRARY_PATH: /opt/cray/libfabric/1.15.2.0/lib64
+      extra_rpaths: []
+  specs:
+  - py-fenics-ffcx@main%gcc@12.2.0
+  - fenics-dolfinx@main%gcc@12.2.0 ^cray-mpich
+  view: true
+  concretizer:
+    unify: true
+  packages:
+    cray-libsci:
+      externals:
+      - spec: cray-libsci@23.09.1.1
+        prefix: /opt/cray/pe/libsci/23.09.1.1/GNU/10.3/x86_64
+      buildable: false
+    cray-mpich:
+      buildable: false
+      externals:
+      - spec: cray-mpich@8.1.27
+        modules: [cray-mpich/8.1.27, libfabric/1.15.2.0]
+    krb5:
+      externals:
+      - spec: krb5@1.20.1
+        prefix: /usr
+      buildable: false
+    hip:
+      externals:
+      - spec: hip@5.2.3
+        prefix: /opt/rocm/hip
+        extra_attributes:
+          compilers:
+            c: /opt/rocm/llvm/bin/clang++
+            c++: /opt/rocm/llvm/bin/clang++
+            hip: /opt/rocm/hip/bin/hipcc
+      buildable: false
+    hsa-rocr-dev:
+      externals:
+      - spec: hsa-rocr-dev@5.2.3
+        prefix: /opt/rocm
+        extra_attributes:
+          compilers:
+            c: /opt/rocm/llvm/bin/clang++
+            cxx: /opt/rocm/llvm/bin/clang++
+      buildable: false
+    llvm-amdgpu:
+      externals:
+      - spec: llvm-amdgpu@5.2.3
+        prefix: /opt/rocm/llvm
+        extra_attributes:
+          compilers:
+            c: /opt/rocm/llvm/bin/clang++
+            cxx: /opt/rocm/llvm/bin/clang++
+      buildable: false
+    rocprim:
+      externals:
+      - spec: rocprim@5.2.3
+        prefix: /opt/rocm/rocprim
+      buildable: false
+    rocsparse:
+      externals:
+      - spec: rocsparse@5.2.3
+        prefix: /opt/rocm/rocsparse
+      buildable: false
+    rocrand:
+      externals:
+      - spec: rocrand@5.2.3
+        prefix: /opt/rocm/rocrand
+      buildable: false
+    rocthrust:
+      externals:
+      - spec: rocthrust@5.2.3
+        prefix: /opt/rocm/rocthrust
+      buildable: false
+    openssh:
+      externals:
+      - spec: openssh@8.4p1
+        prefix: /usr
+      buildable: false
+    openssl:
+      externals:
+      - spec: openssl@1.1.1l
+        prefix: /usr
+      buildable: false
+    ncurses:
+      externals:
+      - spec: ncurses@6.1
+        prefix: /usr
+      buildable: false
+    petsc:
+      variants: +hypre
+    slepc:
+      variants: ~arpack
+    metis:
+      variants: +int64
+    parmetis:
+      variants: +int64
+    scotch:
+      variants: +int64
+    hypre:
+      variants: +rocm amdgpu_target=gfx90a
+    fenics-basix:
+      variants: build_type=Release
+    fenics-dolfinx:
+      variants: build_type=Release
+    all:
+      compiler:
+      - gcc@11.2.0-env
+      providers:
+        mpi:
+        - cray-mpich
+        blas:
+        - cray-libsci
+        lapack:
+        - cray-libsci
