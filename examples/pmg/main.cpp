@@ -245,10 +245,16 @@ int main(int argc, char* argv[])
     err_check(hipMemcpy(thrust::raw_pointer_cast(dofmapV1.data()),
                         V[1]->dofmap()->map().data_handle(), dofmapV1.size(),
                         hipMemcpyHostToDevice));
+    thrust::device_vector<std::int32_t> dofmapV2(V[2]->dofmap()->map().size());
+    err_check(hipMemcpy(thrust::raw_pointer_cast(dofmapV2.data()),
+                        V[2]->dofmap()->map().data_handle(), dofmapV2.size(),
+                        hipMemcpyHostToDevice));
     std::span<std::int32_t> dofmapV0_span(thrust::raw_pointer_cast(dofmapV0.data()),
                                           dofmapV0.size());
     std::span<std::int32_t> dofmapV1_span(thrust::raw_pointer_cast(dofmapV1.data()),
                                           dofmapV1.size());
+    std::span<std::int32_t> dofmapV2_span(thrust::raw_pointer_cast(dofmapV2.data()),
+                                          dofmapV2.size());
 
     using OpType = acc::MatrixOperator<T>;
     using SolverType = acc::Chebyshev<DeviceVector>;
@@ -260,8 +266,12 @@ int main(int argc, char* argv[])
     pmg.set_operators(operators);
     pmg.set_interpolators(prolongation);
 
+    // These are alternative restriction/prolongation kernels, which should replace the CSR matrices
+    // when fully working
     auto interpolator_V1_V0 = std::make_shared<Interpolator<T>>(2, 1, dofmapV1_span, dofmapV0_span);
-    std::vector<std::shared_ptr<Interpolator<T>>> int_kerns = {nullptr, interpolator_V1_V0};
+    auto interpolator_V2_V1 = std::make_shared<Interpolator<T>>(3, 2, dofmapV2_span, dofmapV1_span);
+    std::vector<std::shared_ptr<Interpolator<T>>> int_kerns
+        = {interpolator_V1_V0, interpolator_V2_V1};
     pmg.set_interpolation_kernels(int_kerns);
 
     pmg.set_restriction_interpolators(restriction);
