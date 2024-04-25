@@ -265,6 +265,9 @@ int main(int argc, char* argv[])
                                             V_dofmap_d.size());
 
     MatFreeOp<T> op(c_span, x_span, x_dofmap_d_span, V_dofmap_d_span);
+    op.matrix_free_assemble(num_cells_local, u, y);
+
+    std::cout << "Norm of y = " << acc::norm(y) << "\n";
 
     // acc::MatrixOperator<T> op(a, {bc});
     // auto map = op.column_index_map();
