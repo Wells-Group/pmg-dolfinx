@@ -228,7 +228,7 @@ int main(int argc, char* argv[])
     // Input vector
     auto map = V->dofmap()->index_map;
     DeviceVector u(map, 1);
-    u.set(T{1.0});
+    u.set(T{0.0});
 
     // Output vector
     DeviceVector y(map, 1);
