@@ -205,17 +205,17 @@ int main(int argc, char* argv[])
 
       //      (*operators[i])(*bs[i], x);
 
-      [[maybe_unused]] int its = cg.solve(*operators[i], x, *bs[i], true);
+      [[maybe_unused]] int its = cg.solve(*operators[i], x, *bs[i], false);
       std::vector<T> eign = cg.compute_eigenvalues();
       std::sort(eign.begin(), eign.end());
       std::array<T, 2> eig_range = {0.8 * eign.front(), 1.2 * eign.back()};
       smoothers[i] = std::make_shared<acc::Chebyshev<DeviceVector>>(maps[i], 1, eig_range, 2);
 
-      if (rank == 0)
-      {
-        LOG(INFO) << "Eigenvalues level " << i << ": " << eign.front() << " " << eign.back()
-                  << std::endl;
-      }
+      // if (rank == 0)
+      // {
+      //   LOG(INFO) << "Eigenvalues level " << i << ": " << eign.front() << " " << eign.back()
+      //             << std::endl;
+      // }
     }
 
     smoothers[0]->set_max_iterations(20);
@@ -238,19 +238,19 @@ int main(int argc, char* argv[])
 
     // Copy dofmaps to device
     thrust::device_vector<std::int32_t> dofmapV0(V[0]->dofmap()->map().size());
-    LOG(INFO) << "Copy dofmap (V0) :" << dofmapV0.size();
+    // LOG(INFO) << "Copy dofmap (V0) :" << dofmapV0.size();
     thrust::copy(V[0]->dofmap()->map().data_handle(),
                  V[0]->dofmap()->map().data_handle() + V[0]->dofmap()->map().size(),
                  dofmapV0.begin());
 
     thrust::device_vector<std::int32_t> dofmapV1(V[1]->dofmap()->map().size());
-    LOG(INFO) << "Copy dofmap (V1) :" << dofmapV1.size();
+    // LOG(INFO) << "Copy dofmap (V1) :" << dofmapV1.size();
     thrust::copy(V[1]->dofmap()->map().data_handle(),
                  V[1]->dofmap()->map().data_handle() + V[1]->dofmap()->map().size(),
                  dofmapV1.begin());
 
     thrust::device_vector<std::int32_t> dofmapV2(V[2]->dofmap()->map().size());
-    LOG(INFO) << "Copy dofmap (V2) :" << dofmapV2.size();
+    // LOG(INFO) << "Copy dofmap (V2) :" << dofmapV2.size();
     thrust::copy(V[2]->dofmap()->map().data_handle(),
                  V[2]->dofmap()->map().data_handle() + V[2]->dofmap()->map().size(),
                  dofmapV2.begin());
@@ -293,8 +293,8 @@ int main(int argc, char* argv[])
 
     for (int i = 0; i < 10; i++)
     {
-      pmg.apply(*bs.back(), x);
-      LOG(INFO) << "------ end of iteration ------";
+      pmg.apply(*bs.back(), x, true);
+      // LOG(INFO) << "------ end of iteration ------";
     }
 
     // Display timings

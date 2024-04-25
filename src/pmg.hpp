@@ -87,7 +87,7 @@ public:
       axpy(*_r[i], T(-1), *_r[i], *_b[i]);
 
       double rn = acc::norm(*_r[i]);
-      LOG(INFO) << "Residual norm before (" << i << ") = " << rn;
+      // LOG(INFO) << "Residual norm before (" << i << ") = " << rn;
 
       // u[i] = M^-1 b[i]
       _solvers[i]->solve(*_operators[i], *_u[i], *_b[i], false);
@@ -97,12 +97,12 @@ public:
       axpy(*_r[i], T(-1), *_r[i], *_b[i]);
 
       rn = acc::norm(*_r[i]);
-      LOG(INFO) << "Residual norm after (" << i << ") = " << rn;
+      // LOG(INFO) << "Residual norm after (" << i << ") = " << rn;
 
       // Restrict residual from level i to level (i - 1)
       if (_interpolation_kernels[i - 1])
       {
-        LOG(INFO) << "***** Using interpolation kernel " << i - 1;
+        // LOG(INFO) << "***** Using interpolation kernel " << i - 1;
 
         // Use "interpolation kernel" if available. Interpolate r[i] into b[i-1].
         _interpolation_kernels[i - 1]->interpolate(*_r[i], *_b[i - 1]);
@@ -116,7 +116,7 @@ public:
     axpy(*_r[0], T(-1), *_r[0], *_b[0]);
 
     double rn = acc::norm(*_r[0]);
-    LOG(INFO) << "Residual norm before (0) = " << rn;
+    // LOG(INFO) << "Residual norm before (0) = " << rn;
 
     // Solve coarse problem
     _solvers[0]->solve(*_operators[0], *_u[0], *_b[0], false);
@@ -126,14 +126,14 @@ public:
     axpy(*_r[0], T(-1), *_r[0], *_b[0]);
 
     rn = acc::norm(*_r[0]);
-    LOG(INFO) << "Residual norm after (0) = " << rn;
+    // LOG(INFO) << "Residual norm after (0) = " << rn;
 
     for (int i = 0; i < num_levels - 1; i++)
     {
       // [coarse->fine] Prolong correction
       if (_prolongation_kernels[i])
       {
-        LOG(INFO) << "***** Using prolongation kernel " << i;
+        // LOG(INFO) << "***** Using prolongation kernel " << i;
         // Use "prolongation kernel" if available. Interpolate u[i] into du[i+1].
         _prolongation_kernels[i]->interpolate(*_u[i], *_du[i + 1]);
       }
@@ -149,7 +149,7 @@ public:
       (*_operators[i + 1])(*_u[i + 1], *_r[i + 1]);
       axpy(*_r[i + 1], T(-1), *_r[i + 1], *_b[i + 1]);
       double rn = acc::norm(*_r[i + 1]);
-      LOG(INFO) << "Residual norm after u+du (" << i + 1 << ") = " << rn;
+      // LOG(INFO) << "Residual norm after u+du (" << i + 1 << ") = " << rn;
 
       // [fine] Post-smooth
       _solvers[i + 1]->solve(*_operators[i + 1], *_u[i + 1], *_b[i + 1], false);
@@ -158,7 +158,12 @@ public:
       (*_operators[i + 1])(*_u[i + 1], *_r[i + 1]);
       axpy(*_r[i + 1], T(-1), *_r[i + 1], *_b[i + 1]);
       rn = acc::norm(*_r[i + 1]);
-      LOG(INFO) << "Residual norm after post-smoothing (" << i + 1 << ") = " << rn;
+      // LOG(INFO) << "Residual norm after post-smoothing (" << i + 1 << ") = " << rn;
+    }
+
+    if (verbose == true)
+    {
+      std::cout << "rnorm after PMG = " << acc::norm(*_r[num_levels - 1]) << "\n";
     }
 
     acc::copy(y, *_u.back());

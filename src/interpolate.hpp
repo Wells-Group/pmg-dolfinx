@@ -746,8 +746,8 @@ public:
     dim3 block_size(256);
     dim3 grid_size((ncells + block_size.x - 1) / block_size.x);
 
-    LOG(INFO) << "From " << num_cell_dofs_Q1 << " dofs/cell to " << num_cell_dofs_Q2 << " on "
-              << ncells << " cells";
+    // LOG(INFO) << "From " << num_cell_dofs_Q1 << " dofs/cell to " << num_cell_dofs_Q2 << " on "
+    //           << ncells << " cells";
 
     hipLaunchKernelGGL(interpolate_Q1Q2<T>, grid_size, block_size, 0, 0, ncells,
                        input_dofmap.data(), num_cell_dofs_Q1, output_dofmap.data(),
