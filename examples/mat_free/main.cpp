@@ -264,7 +264,7 @@ int main(int argc, char* argv[])
     std::span<std::int32_t> V_dofmap_d_span(thrust::raw_pointer_cast(V_dofmap_d.data()),
                                             V_dofmap_d.size());
 
-    MatFreeOp<T> op(c_span, x_span, x_dofmap_d_span, V_dofmap_d_span);
+    acc::MatFreeLaplace<T> op(c_span, x_span, x_dofmap_d_span, V_dofmap_d_span);
 
     // fem::Function<T> u(V);
     la::Vector<T> b(map, 1);

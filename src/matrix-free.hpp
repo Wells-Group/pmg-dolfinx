@@ -365,20 +365,20 @@ __global__ void tabulate_tensor(int N, T* Aglobal, const T* wglobal, const T* c,
 }
 } // namespace
 
+namespace dolfinx::acc
+{
 template <typename T>
-class MatFreeOp
+class MatFreeLaplace
 {
 public:
-  MatFreeOp(std::span<const T> consts, std::span<const T> x, std::span<const std::int32_t> x_dofmap,
-            std::span<const std::int32_t> V_dofmap)
+  MatFreeLaplace(std::span<const T> consts, std::span<const T> x,
+                 std::span<const std::int32_t> x_dofmap, std::span<const std::int32_t> V_dofmap)
       : c(consts), geometry(x), geom_dofmap(x_dofmap), dofmap(V_dofmap)
   {
+    // TODO Add option to set deg
   }
 
-  ~MatFreeOp()
-  {
-    // TODO hipfree
-  }
+  ~MatFreeLaplace() {}
 
   template <typename Vector>
   void matrix_free_assemble(int num_cells, Vector& in, Vector& out)
@@ -399,3 +399,4 @@ private:
   std::span<const std::int32_t> geom_dofmap;
   std::span<const std::int32_t> dofmap;
 };
+} // namespace dolfinx::acc
