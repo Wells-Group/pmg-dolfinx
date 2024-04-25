@@ -371,9 +371,9 @@ template <typename T>
 class MatFreeLaplace
 {
 public:
-  MatFreeLaplace(std::span<const T> consts, std::span<const T> x,
+  MatFreeLaplace(int num_cells, std::span<const T> consts, std::span<const T> x,
                  std::span<const std::int32_t> x_dofmap, std::span<const std::int32_t> V_dofmap)
-      : c(consts), geometry(x), geom_dofmap(x_dofmap), dofmap(V_dofmap)
+      : num_cells(num_cells), c(consts), geometry(x), geom_dofmap(x_dofmap), dofmap(V_dofmap)
   {
     // TODO Add option to set deg
   }
@@ -381,7 +381,7 @@ public:
   ~MatFreeLaplace() {}
 
   template <typename Vector>
-  void matrix_free_assemble(int num_cells, Vector& in, Vector& out)
+  void operator()(Vector& in, Vector& out)
   {
     T* wglobal = in.mutable_array().data();
     T* Aglobal = out.mutable_array().data();
@@ -394,6 +394,7 @@ public:
   }
 
 private:
+  int num_cells;
   std::span<const T> c;
   std::span<const T> geometry;
   std::span<const std::int32_t> geom_dofmap;
