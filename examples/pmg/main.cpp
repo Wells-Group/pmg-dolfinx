@@ -91,6 +91,8 @@ int main(int argc, char* argv[])
     int tdim = topology->dim();
     int fdim = tdim - 1;
     topology->create_connectivity(fdim, tdim);
+
+    // Compute boundary cells
     const std::vector<std::int32_t>& ip_facets = topology->interprocess_facets();
     auto f_to_c = topology->connectivity(fdim, tdim);
     // Create list of cells attached to the inter-process boundary (needed for matrix-free updates)
@@ -102,15 +104,14 @@ int main(int argc, char* argv[])
     }
     std::sort(ip_cells.begin(), ip_cells.end());
     LOG(INFO) << "Got " << ip_cells.size() << " boundary cells.";
+
+    // Compute local cells
     std::vector<std::int32_t> local_cells(topology->index_map(tdim)->size_local()
                                           + topology->index_map(tdim)->num_ghosts());
     std::iota(local_cells.begin(), local_cells.end(), 0);
     for (std::int32_t c : ip_cells)
       local_cells[c] = -1;
     std::erase(local_cells, -1);
-    for (auto q : local_cells)
-      std::cout << q << " ";
-    std::cout << "\n";
     LOG(INFO) << "Got " << local_cells.size() << " local cells";
 
     std::vector<std::shared_ptr<fem::FunctionSpace<T>>> V(form_a.size());

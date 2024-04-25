@@ -28,8 +28,9 @@ __global__ void interpolate_Q1Q2(int N, const std::int32_t* cell_list, const std
   // Check if the row index is out of bounds.
   if (i < N)
   {
-    const std::int32_t* cellQ1 = Q1dofmap + i * Q1_dofs_per_cell;
-    const std::int32_t* cellQ2 = Q2dofmap + i * Q2_dofs_per_cell;
+    const std::int32_t cell = cell_list[i];
+    const std::int32_t* cellQ1 = Q1dofmap + cell * Q1_dofs_per_cell;
+    const std::int32_t* cellQ2 = Q2dofmap + cell * Q2_dofs_per_cell;
 
     for (std::int32_t j = 0; j < Q2_dofs_per_cell; j++)
     {
@@ -750,6 +751,8 @@ public:
     dim3 block_size(256);
     dim3 grid_size((ncells + block_size.x - 1) / block_size.x);
 
+    // TODO: Start vector update of input_vector
+
     LOG(INFO) << "From " << num_cell_dofs_Q1 << " dofs/cell to " << num_cell_dofs_Q2 << " on "
               << ncells << " cells";
 
@@ -759,6 +762,15 @@ public:
                        mat_column.data(), mat_value.data());
 
     err_check(hipDeviceSynchronize());
+
+    // TODO: Wait for vector update of input_vector to complete
+
+    const std::int32_t* b_cell_list = boundary_cells.data();
+    ncells = boundary_cells.size();
+    hipLaunchKernelGGL(interpolate_Q1Q2<T>, grid_size, block_size, 0, 0, ncells, b_cell_list,
+                       input_dofmap.data(), num_cell_dofs_Q1, output_dofmap.data(),
+                       num_cell_dofs_Q2, input_values, output_values, mat_row_offset.data(),
+                       mat_column.data(), mat_value.data());
 
     err_check(hipGetLastError());
   }
