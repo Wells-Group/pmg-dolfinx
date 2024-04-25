@@ -236,35 +236,8 @@ int main(int argc, char* argv[])
 
     // Constants
     // TODO Pack these properly
-    std::vector<T> c{2.0};
-    thrust::device_vector<T> c_d(c.size());
-    thrust::copy(c.data(), c.data() + c.size(), c_d.begin());
-
-    // Coordinate DOFs
-    std::span<const T> x = mesh->geometry().x();
-    thrust::device_vector<T> x_d(x.size());
-    thrust::copy(x.data(), x.data() + x.size(), x_d.begin());
-
-    // Geomerty dofmap
-    thrust::device_vector<std::int32_t> x_dofmap_d(mesh->geometry().dofmap().size());
-    thrust::copy(mesh->geometry().dofmap().data_handle(),
-                 mesh->geometry().dofmap().data_handle() + mesh->geometry().dofmap().size(),
-                 x_dofmap_d.begin());
-
-    // V dofmap
-    thrust::device_vector<std::int32_t> V_dofmap_d(V->dofmap()->map().size());
-    thrust::copy(V->dofmap()->map().data_handle(),
-                 V->dofmap()->map().data_handle() + V->dofmap()->map().size(), V_dofmap_d.begin());
-
-    // Make spans
-    std::span<T> c_span(thrust::raw_pointer_cast(c_d.data()), c_d.size());
-    std::span<T> x_span(thrust::raw_pointer_cast(x_d.data()), x_d.size());
-    std::span<std::int32_t> x_dofmap_d_span(thrust::raw_pointer_cast(x_dofmap_d.data()),
-                                            x_dofmap_d.size());
-    std::span<std::int32_t> V_dofmap_d_span(thrust::raw_pointer_cast(V_dofmap_d.data()),
-                                            V_dofmap_d.size());
-
-    acc::MatFreeLaplace<T> op(num_cells_local, c_span, x_span, x_dofmap_d_span, V_dofmap_d_span);
+    std::vector<T> c{kappa->value};
+    acc::MatFreeLaplace<T> op(1, c, *V);
 
     // fem::Function<T> u(V);
     la::Vector<T> b(map, 1);
