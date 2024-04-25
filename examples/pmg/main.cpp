@@ -100,7 +100,18 @@ int main(int argc, char* argv[])
       assert(f_to_c.num_links(f) == 1);
       ip_cells.push_back(f_to_c->links(f)[0]);
     }
+    std::sort(ip_cells.begin(), ip_cells.end());
     LOG(INFO) << "Got " << ip_cells.size() << " boundary cells.";
+    std::vector<std::int32_t> local_cells(topology->index_map(tdim)->size_local()
+                                          + topology->index_map(tdim)->num_ghosts());
+    std::iota(local_cells.begin(), local_cells.end(), 0);
+    for (std::int32_t c : ip_cells)
+      local_cells[c] = -1;
+    std::erase(local_cells, -1);
+    for (auto q : local_cells)
+      std::cout << q << " ";
+    std::cout << "\n";
+    LOG(INFO) << "Got " << local_cells.size() << " local cells";
 
     std::vector<std::shared_ptr<fem::FunctionSpace<T>>> V(form_a.size());
     std::vector<std::shared_ptr<fem::Form<T, T>>> a(V.size());
@@ -261,12 +272,23 @@ int main(int argc, char* argv[])
                  V[2]->dofmap()->map().data_handle() + V[2]->dofmap()->map().size(),
                  dofmapV2.begin());
 
+    thrust::device_vector<std::int32_t> ipcells_device(ip_cells.size());
+    LOG(INFO) << "Copy IP_cells :" << ip_cells.size();
+    thrust::copy(ip_cells.begin(), ip_cells.end(), ipcells_device.begin());
+    thrust::device_vector<std::int32_t> lcells_device(local_cells.size());
+    LOG(INFO) << "Copy local_cells :" << local_cells.size();
+    thrust::copy(local_cells.begin(), local_cells.end(), lcells_device.begin());
+
     std::span<std::int32_t> dofmapV0_span(thrust::raw_pointer_cast(dofmapV0.data()),
                                           dofmapV0.size());
     std::span<std::int32_t> dofmapV1_span(thrust::raw_pointer_cast(dofmapV1.data()),
                                           dofmapV1.size());
     std::span<std::int32_t> dofmapV2_span(thrust::raw_pointer_cast(dofmapV2.data()),
                                           dofmapV2.size());
+    std::span<std::int32_t> ipcells_span(thrust::raw_pointer_cast(ipcells_device.data()),
+                                         ipcells_device.size());
+    std::span<std::int32_t> lcells_span(thrust::raw_pointer_cast(lcells_device.data()),
+                                        lcells_device.size());
 
     using OpType = acc::MatrixOperator<T>;
     using SolverType = acc::Chebyshev<DeviceVector>;
@@ -281,10 +303,14 @@ int main(int argc, char* argv[])
 
     // These are alternative restriction/prolongation kernels, which should replace the CSR matrices
     // when fully working
-    auto interpolator_V1_V0 = std::make_shared<Interpolator<T>>(2, 1, dofmapV1_span, dofmapV0_span);
-    auto interpolator_V2_V1 = std::make_shared<Interpolator<T>>(3, 2, dofmapV2_span, dofmapV1_span);
-    auto interpolator_V0_V1 = std::make_shared<Interpolator<T>>(1, 2, dofmapV0_span, dofmapV1_span);
-    auto interpolator_V1_V2 = std::make_shared<Interpolator<T>>(2, 3, dofmapV1_span, dofmapV2_span);
+    auto interpolator_V1_V0 = std::make_shared<Interpolator<T>>(2, 1, dofmapV1_span, dofmapV0_span,
+                                                                ipcells_span, lcells_span);
+    auto interpolator_V2_V1 = std::make_shared<Interpolator<T>>(3, 2, dofmapV2_span, dofmapV1_span,
+                                                                ipcells_span, lcells_span);
+    auto interpolator_V0_V1 = std::make_shared<Interpolator<T>>(1, 2, dofmapV0_span, dofmapV1_span,
+                                                                ipcells_span, lcells_span);
+    auto interpolator_V1_V2 = std::make_shared<Interpolator<T>>(2, 3, dofmapV1_span, dofmapV2_span,
+                                                                ipcells_span, lcells_span);
     std::vector<std::shared_ptr<Interpolator<T>>> int_kerns
         = {interpolator_V1_V0, interpolator_V2_V1};
     pmg.set_interpolation_kernels(int_kerns);
