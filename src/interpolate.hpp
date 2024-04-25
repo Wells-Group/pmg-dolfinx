@@ -740,6 +740,8 @@ public:
   template <typename Vector>
   void interpolate(Vector& input_vector, Vector& output_vector)
   {
+    dolfinx::common::Timer tt("% Interpolate Kernel");
+
     // Input vector is also changed by MPI vector update
     T* input_values = input_vector.mutable_array().data();
     T* output_values = output_vector.mutable_array().data();
