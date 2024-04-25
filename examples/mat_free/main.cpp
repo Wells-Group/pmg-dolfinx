@@ -266,15 +266,13 @@ int main(int argc, char* argv[])
 
     MatFreeOp<T> op(c_span, x_span, x_dofmap_d_span, V_dofmap_d_span);
 
-    std::cout << "Norm of u = " << acc::norm(u) << "\n";
-
     // fem::Function<T> u(V);
     la::Vector<T> b(map, 1);
     b.set(T(0.0));
     fem::assemble_vector(b.mutable_array(), *L);
-    fem::apply_lifting<T, T>(b.mutable_array(), {a}, {{bc}}, {}, T(1));
-    b.scatter_rev(std::plus<T>());
-    fem::set_bc<T, T>(b.mutable_array(), {bc});
+    // fem::apply_lifting<T, T>(b.mutable_array(), {a}, {{bc}}, {}, T(1));
+    // b.scatter_rev(std::plus<T>());
+    // fem::set_bc<T, T>(b.mutable_array(), {bc});
 
     // DeviceVector x(map, 1);
     // x.set(T{0.0});
@@ -283,16 +281,17 @@ int main(int argc, char* argv[])
     u.copy_from_host(b); // Copy data from host vector to device vector
 
     // TODO BCs
+    std::cout << "Norm of u = " << acc::norm(u) << "\n";
     op.matrix_free_assemble(num_cells_local, u, y);
-
     std::cout << "Norm of y = " << acc::norm(y) << "\n";
 
     DeviceVector z(map, 1);
     z.set(T{0.0});
 
-    acc::MatrixOperator<T> mat_op(a, {bc});
+    std::cout << "Norm of u = " << acc::norm(u) << "\n";
+    acc::MatrixOperator<T> mat_op(a, {});
     mat_op(u, z);
-    std::cout << "Norm of z = " << acc::norm(y) << "\n";
+    std::cout << "Norm of z = " << acc::norm(z) << "\n";
 
     // T norm = acc::norm(x);
     // if (rank == 0)
