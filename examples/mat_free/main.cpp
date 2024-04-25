@@ -4,6 +4,7 @@
 #include "src/csr.hpp"
 #include "src/operators.hpp"
 #include "src/vector.hpp"
+#include "src/matrix-free.hpp"
 
 #include <array>
 #include <basix/e-lagrange.h>
@@ -221,38 +222,74 @@ int main(int argc, char* argv[])
 
     // Define vectors
     using DeviceVector = dolfinx::acc::Vector<T, acc::Device::HIP>;
-    acc::MatrixOperator<T> op(a, {bc});
-    auto map = op.column_index_map();
 
-    fem::Function<T> u(V);
-    la::Vector<T> b(map, 1);
+    const int num_cells_local = mesh->topology()->index_map(tdim)->size_local();
 
-#ifdef ROCM_TRACING
-    add_profiling_annotation("assembling and scattering");
-#endif
-#ifdef ROCM_SMI
-    mem = print_amd_gpu_memory_percentage_used("assembling and scattering");
-    if (mem > peak_mem)
-      peak_mem = mem;
-#endif
-    b.set(T(0.0));
-    fem::assemble_vector(b.mutable_array(), *L);
-    fem::apply_lifting<T, T>(b.mutable_array(), {a}, {{bc}}, {}, T(1));
-    b.scatter_rev(std::plus<T>());
-    fem::set_bc<T, T>(b.mutable_array(), {bc});
+    // Input vector
+    auto map = V->dofmap()->index_map;
+    DeviceVector u(map, 1);
+    u.set(T{1.0});
 
-    DeviceVector x(map, 1);
-    x.set(T{0.0});
-
+    // Output vector
     DeviceVector y(map, 1);
-    y.copy_from_host(b); // Copy data from host vector to device vector
+    y.set(T{0.0});
 
-    T norm = acc::norm(x);
-    if (rank == 0)
-    {
-      std::cout << "Norm x vector initial " << norm << std::endl;
-      std::cout << std::flush;
-    }
+    // Constants
+    // TODO Pack these properly
+    std::vector<T> c{2.0};
+    thrust::device_vector<T> c_d(c.size());
+    thrust::copy(c.data(), c.data() + c.size(), c_d.begin());
+
+    // Coordinate DOFs
+    std::span<const T> x = mesh->geometry().x();
+    thrust::device_vector<T> x_d(x.size());
+    thrust::copy(x.data(), x.data() + x.size(), x_d.begin());
+
+    // Geomerty dofmap
+    thrust::device_vector<std::int32_t> x_dofmap_d(mesh->geometry().dofmap().size());
+    thrust::copy(mesh->geometry().dofmap().data_handle(),
+                 mesh->geometry().dofmap().data_handle() + mesh->geometry().dofmap().size(),
+                 x_dofmap_d.begin());
+
+    // V dofmap
+    thrust::device_vector<std::int32_t> V_dofmap_d(V->dofmap()->map().size());
+    thrust::copy(V->dofmap()->map().data_handle(),
+                 V->dofmap()->map().data_handle() + V->dofmap()->map().size(), V_dofmap_d.begin());
+
+    // Make spans
+    std::span<T> c_span(thrust::raw_pointer_cast(c_d.data()), c_d.size());
+    std::span<T> x_span(thrust::raw_pointer_cast(x_d.data()), x_d.size());
+    std::span<std::int32_t> x_dofmap_d_span(thrust::raw_pointer_cast(x_dofmap_d.data()),
+                                            x_dofmap_d.size());
+    std::span<std::int32_t> V_dofmap_d_span(thrust::raw_pointer_cast(V_dofmap_d.data()),
+                                            V_dofmap_d.size());
+
+    MatFreeOp<T> op(c_span, x_span, x_dofmap_d_span, V_dofmap_d_span);
+
+    // acc::MatrixOperator<T> op(a, {bc});
+    // auto map = op.column_index_map();
+
+    // fem::Function<T> u(V);
+    // la::Vector<T> b(map, 1);
+
+    // b.set(T(0.0));
+    // fem::assemble_vector(b.mutable_array(), *L);
+    // fem::apply_lifting<T, T>(b.mutable_array(), {a}, {{bc}}, {}, T(1));
+    // b.scatter_rev(std::plus<T>());
+    // fem::set_bc<T, T>(b.mutable_array(), {bc});
+
+    // DeviceVector x(map, 1);
+    // x.set(T{0.0});
+
+    // DeviceVector y(map, 1);
+    // y.copy_from_host(b); // Copy data from host vector to device vector
+
+    // T norm = acc::norm(x);
+    // if (rank == 0)
+    // {
+    //   std::cout << "Norm x vector initial " << norm << std::endl;
+    //   std::cout << std::flush;
+    // }
 
     // Display timings
     dolfinx::list_timings(MPI_COMM_WORLD, {dolfinx::TimingType::wall});
