@@ -371,8 +371,9 @@ template <typename T>
 class MatFreeLaplace
 {
 public:
-  MatFreeLaplace(int degree, int num_cells, std::span<T> constants, std::span<T> geometry,
-                 std::span<std::int32_t> geom_dofmap, std::span<std::int32_t> dofmap)
+  MatFreeLaplace(int degree, int num_cells, std::span<const T> constants,
+                 std::span<const T> geometry, std::span<const std::int32_t> geom_dofmap,
+                 std::span<const std::int32_t> dofmap)
       : num_cells(num_cells), c(constants), geometry(geometry), geom_dofmap(geom_dofmap),
         dofmap(dofmap)
   {
@@ -397,9 +398,9 @@ public:
 
 private:
   int num_cells;
-  std::span<T> c;
-  std::span<T> geometry;
-  std::span<std::int32_t> geom_dofmap;
-  std::span<std::int32_t> dofmap;
+  std::span<const T> c;
+  std::span<const T> geometry;
+  std::span<const std::int32_t> geom_dofmap;
+  std::span<const std::int32_t> dofmap;
 };
 } // namespace dolfinx::acc
