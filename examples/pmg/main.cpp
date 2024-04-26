@@ -111,7 +111,9 @@ int main(int argc, char* argv[])
   po::options_description desc("Allowed options");
   desc.add_options()("help,h", "print usage message")(
       "ndofs", po::value<std::size_t>()->default_value(50000), "number of dofs per rank")(
-      "amg", po::bool_switch()->default_value(false), "Use AMG solver on coarse level");
+      "amg", po::bool_switch()->default_value(false), "Use AMG solver on coarse level")(
+      "csr-interpolation", po::bool_switch()->default_value(false),
+      "Use CSR matrices to interpolate between levels");
 
   po::variables_map vm;
   po::store(po::command_line_parser(argc, argv).options(desc).allow_unregistered().run(), vm);
@@ -124,6 +126,7 @@ int main(int argc, char* argv[])
   }
   const std::size_t ndofs = vm["ndofs"].as<std::size_t>();
   bool use_amg = vm["amg"].as<bool>();
+  bool use_csr_interpolation = vm["csr-interpolation"].as<bool>();
 
   std::vector fs_poisson_a = {functionspace_form_poisson_a1, functionspace_form_poisson_a2,
                               functionspace_form_poisson_a3};
@@ -337,13 +340,9 @@ int main(int argc, char* argv[])
     // Create Prolongation operator
     std::vector<std::shared_ptr<acc::MatrixOperator<T>>> prolongation(V.size() - 1);
 
-    // From V1 to V0
-    LOG(WARNING) << "Creating Prolongation Operators";
-    prolongation[0] = std::make_shared<acc::MatrixOperator<T>>(*V[0], *V[1]);
-    restriction[0] = std::make_shared<acc::MatrixOperator<T>>(*V[1], *V[0]);
-    // From V2 to V1
-    prolongation[1] = std::make_shared<acc::MatrixOperator<T>>(*V[1], *V[2]);
-    restriction[1] = std::make_shared<acc::MatrixOperator<T>>(*V[2], *V[1]);
+    // Interpolation and prolongation kernels
+    std::vector<std::shared_ptr<Interpolator<T>>> int_kerns(V.size() - 1);
+    std::vector<std::shared_ptr<Interpolator<T>>> prolong_kerns(V.size() - 1);
 
     // Copy dofmaps to device
     thrust::device_vector<std::int32_t> dofmapV0(V[0]->dofmap()->map().size());
@@ -364,6 +363,7 @@ int main(int argc, char* argv[])
                  V[2]->dofmap()->map().data_handle() + V[2]->dofmap()->map().size(),
                  dofmapV2.begin());
 
+    // Copy lists of local and boundary cells to device
     thrust::device_vector<std::int32_t> ipcells_device(ip_cells.size());
     LOG(INFO) << "Copy IP_cells :" << ip_cells.size();
     thrust::copy(ip_cells.begin(), ip_cells.end(), ipcells_device.begin());
@@ -371,16 +371,43 @@ int main(int argc, char* argv[])
     LOG(INFO) << "Copy local_cells :" << local_cells.size();
     thrust::copy(local_cells.begin(), local_cells.end(), lcells_device.begin());
 
-    std::span<std::int32_t> dofmapV0_span(thrust::raw_pointer_cast(dofmapV0.data()),
-                                          dofmapV0.size());
-    std::span<std::int32_t> dofmapV1_span(thrust::raw_pointer_cast(dofmapV1.data()),
-                                          dofmapV1.size());
-    std::span<std::int32_t> dofmapV2_span(thrust::raw_pointer_cast(dofmapV2.data()),
-                                          dofmapV2.size());
-    std::span<std::int32_t> ipcells_span(thrust::raw_pointer_cast(ipcells_device.data()),
-                                         ipcells_device.size());
-    std::span<std::int32_t> lcells_span(thrust::raw_pointer_cast(lcells_device.data()),
-                                        lcells_device.size());
+    // From V1 to V0
+    if (use_csr_interpolation)
+    {
+      LOG(WARNING) << "Creating Prolongation Operators";
+      prolongation[0] = std::make_shared<acc::MatrixOperator<T>>(*V[0], *V[1]);
+      restriction[0] = std::make_shared<acc::MatrixOperator<T>>(*V[1], *V[0]);
+      // From V2 to V1
+      prolongation[1] = std::make_shared<acc::MatrixOperator<T>>(*V[1], *V[2]);
+      restriction[1] = std::make_shared<acc::MatrixOperator<T>>(*V[2], *V[1]);
+    }
+    else
+    {
+      std::span<std::int32_t> dofmapV0_span(thrust::raw_pointer_cast(dofmapV0.data()),
+                                            dofmapV0.size());
+      std::span<std::int32_t> dofmapV1_span(thrust::raw_pointer_cast(dofmapV1.data()),
+                                            dofmapV1.size());
+      std::span<std::int32_t> dofmapV2_span(thrust::raw_pointer_cast(dofmapV2.data()),
+                                            dofmapV2.size());
+      std::span<std::int32_t> ipcells_span(thrust::raw_pointer_cast(ipcells_device.data()),
+                                           ipcells_device.size());
+      std::span<std::int32_t> lcells_span(thrust::raw_pointer_cast(lcells_device.data()),
+                                          lcells_device.size());
+
+      // These are alternative restriction/prolongation kernels, which should replace the CSR
+      // matrices when fully working
+      auto interpolator_V1_V0 = std::make_shared<Interpolator<T>>(
+          2, 1, dofmapV1_span, dofmapV0_span, ipcells_span, lcells_span);
+      auto interpolator_V2_V1 = std::make_shared<Interpolator<T>>(
+          3, 2, dofmapV2_span, dofmapV1_span, ipcells_span, lcells_span);
+      auto interpolator_V0_V1 = std::make_shared<Interpolator<T>>(
+          1, 2, dofmapV0_span, dofmapV1_span, ipcells_span, lcells_span);
+      auto interpolator_V1_V2 = std::make_shared<Interpolator<T>>(
+          2, 3, dofmapV1_span, dofmapV2_span, ipcells_span, lcells_span);
+
+      int_kerns = {interpolator_V1_V0, interpolator_V2_V1};
+      prolong_kerns = {interpolator_V0_V1, interpolator_V1_V2};
+    }
 
     using OpType = acc::MatrixOperator<T>;
     using SolverType = acc::Chebyshev<DeviceVector>;
@@ -394,24 +421,11 @@ int main(int argc, char* argv[])
     pmg.set_operators(operators);
     LOG(INFO) << "Set Coarse Solver";
     pmg.set_coarse_solver(coarse_solver);
+
+    // Sets CSR matrices or matrix-free kernels to do interpolation
     pmg.set_interpolators(prolongation);
     pmg.set_restriction_interpolators(restriction);
-
-    // These are alternative restriction/prolongation kernels, which should replace the CSR matrices
-    // when fully working
-    auto interpolator_V1_V0 = std::make_shared<Interpolator<T>>(2, 1, dofmapV1_span, dofmapV0_span,
-                                                                ipcells_span, lcells_span);
-    auto interpolator_V2_V1 = std::make_shared<Interpolator<T>>(3, 2, dofmapV2_span, dofmapV1_span,
-                                                                ipcells_span, lcells_span);
-    auto interpolator_V0_V1 = std::make_shared<Interpolator<T>>(1, 2, dofmapV0_span, dofmapV1_span,
-                                                                ipcells_span, lcells_span);
-    auto interpolator_V1_V2 = std::make_shared<Interpolator<T>>(2, 3, dofmapV1_span, dofmapV2_span,
-                                                                ipcells_span, lcells_span);
-    std::vector<std::shared_ptr<Interpolator<T>>> int_kerns
-        = {interpolator_V1_V0, interpolator_V2_V1};
     pmg.set_interpolation_kernels(int_kerns);
-    std::vector<std::shared_ptr<Interpolator<T>>> prolong_kerns
-        = {interpolator_V0_V1, interpolator_V1_V2};
     pmg.set_prolongation_kernels(prolong_kerns);
 
     // Create solution vector
