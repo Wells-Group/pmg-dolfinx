@@ -266,13 +266,6 @@ int main(int argc, char* argv[])
     mat_op(u, z);
     std::cout << "Norm of z = " << acc::norm(z) << "\n";
 
-    // T norm = acc::norm(x);
-    // if (rank == 0)
-    // {
-    //   std::cout << "Norm x vector initial " << norm << std::endl;
-    //   std::cout << std::flush;
-    // }
-
     // Display timings
     dolfinx::list_timings(MPI_COMM_WORLD, {dolfinx::TimingType::wall});
 

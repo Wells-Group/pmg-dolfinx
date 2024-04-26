@@ -376,13 +376,13 @@ public:
         geom_dofmap(V.mesh()->geometry().dofmap().size()),
         dofmap(V.dofmap()->map().size())
   {
-    // TODO Add option to set deg
+    // TODO Add option to set degree
+    assert(degree == 1);
 
     auto mesh = V.mesh();
     const int tdim = mesh->topology()->dim();
     num_cells = mesh->topology()->index_map(tdim)->size_local();
 
-    // TODO Just store dev vecs (or acc::vecs?)
     // Constants
     thrust::copy(constants.data(), constants.data() + constants.size(), c.begin());
 
