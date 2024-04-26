@@ -236,22 +236,21 @@ int main(int argc, char* argv[])
 
     // Constants
     // TODO Pack these properly
-    thrust::device_vector<T> c_d{kappa->value};
-    std::span<const T> c_d_span(thrust::raw_pointer_cast(c_d.data()), c_d.size());
+    thrust::device_vector<T> constants_d{kappa->value};
+    std::span<const T> constants_d_span(thrust::raw_pointer_cast(constants_d.data()),
+                                        constants_d.size());
 
     // Coordinate DOFs
     std::span<const T> x = mesh->geometry().x();
-    // Begin / end?
-    thrust::device_vector<T> geometry_d(x.begin(), x.end());
-    std::span<const T> geometry_d_span(thrust::raw_pointer_cast(geometry_d.data()),
-                                       geometry_d.size());
+    thrust::device_vector<T> x_d(x.begin(), x.end());
+    std::span<const T> x_d_span(thrust::raw_pointer_cast(x_d.data()), x_d.size());
 
     // Geomerty dofmap
-    auto geom_dofmap = mesh->geometry().dofmap();
-    thrust::device_vector<std::int32_t> geom_dofmap_d(
-        geom_dofmap.data_handle(), geom_dofmap.data_handle() + geom_dofmap.size());
-    std::span<const std::int32_t> geom_dofmap_d_span(thrust::raw_pointer_cast(geom_dofmap_d.data()),
-                                                     geom_dofmap_d.size());
+    auto x_dofmap = mesh->geometry().dofmap();
+    thrust::device_vector<std::int32_t> x_dofmap_d(x_dofmap.data_handle(),
+                                                   x_dofmap.data_handle() + x_dofmap.size());
+    std::span<const std::int32_t> x_dofmap_d_span(thrust::raw_pointer_cast(x_dofmap_d.data()),
+                                                  x_dofmap_d.size());
 
     // V dofmap
     thrust::device_vector<std::int32_t> dofmap_d(
@@ -259,7 +258,7 @@ int main(int argc, char* argv[])
     std::span<const std::int32_t> dofmap_d_span(thrust::raw_pointer_cast(dofmap_d.data()),
                                                 dofmap_d.size());
 
-    acc::MatFreeLaplace<T> op(1, num_cells_local, c_d_span, geometry_d_span, geom_dofmap_d_span,
+    acc::MatFreeLaplace<T> op(1, num_cells_local, constants_d_span, x_d_span, x_dofmap_d_span,
                               dofmap_d_span);
 
     // fem::Function<T> u(V);
@@ -269,9 +268,6 @@ int main(int argc, char* argv[])
     // fem::apply_lifting<T, T>(b.mutable_array(), {a}, {{bc}}, {}, T(1));
     // b.scatter_rev(std::plus<T>());
     // fem::set_bc<T, T>(b.mutable_array(), {bc});
-
-    // DeviceVector x(map, 1);
-    // x.set(T{0.0});
 
     // DeviceVector y(map, 1);
     u.copy_from_host(b); // Copy data from host vector to device vector
