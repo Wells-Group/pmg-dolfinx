@@ -371,33 +371,13 @@ template <typename T>
 class MatFreeLaplace
 {
 public:
-  MatFreeLaplace(int degree, std::span<const T> constants, const fem::FunctionSpace<T>& V)
-      : c(constants.size()), geometry(V.mesh()->geometry().x().size()),
-        geom_dofmap(V.mesh()->geometry().dofmap().size()),
-        dofmap(V.dofmap()->map().size())
+  MatFreeLaplace(int degree, int num_cells, std::span<T> constants, std::span<T> geometry,
+                 std::span<std::int32_t> geom_dofmap, std::span<std::int32_t> dofmap)
+      : num_cells(num_cells), c(constants), geometry(geometry), geom_dofmap(geom_dofmap),
+        dofmap(dofmap)
   {
     // TODO Add option to set degree
     assert(degree == 1);
-
-    auto mesh = V.mesh();
-    const int tdim = mesh->topology()->dim();
-    num_cells = mesh->topology()->index_map(tdim)->size_local();
-
-    // Constants
-    thrust::copy(constants.data(), constants.data() + constants.size(), c.begin());
-
-    // Coordinate DOFs
-    std::span<const T> x = mesh->geometry().x();
-    thrust::copy(x.data(), x.data() + x.size(), geometry.begin());
-
-    // Geomerty dofmap
-    thrust::copy(mesh->geometry().dofmap().data_handle(),
-                 mesh->geometry().dofmap().data_handle() + mesh->geometry().dofmap().size(),
-                 geom_dofmap.begin());
-
-    // V dofmap
-    thrust::copy(V.dofmap()->map().data_handle(),
-                 V.dofmap()->map().data_handle() + V.dofmap()->map().size(), dofmap.begin());
   }
 
   ~MatFreeLaplace() {}
@@ -410,18 +390,16 @@ public:
 
     dim3 block_size(256);
     dim3 grid_size((num_cells + block_size.x - 1) / block_size.x);
-    hipLaunchKernelGGL(
-        tabulate_tensor, grid_size, block_size, 0, 0, num_cells, Aglobal, wglobal,
-        thrust::raw_pointer_cast(c.data()), thrust::raw_pointer_cast(geometry.data()),
-        thrust::raw_pointer_cast(geom_dofmap.data()), thrust::raw_pointer_cast(dofmap.data()));
+    hipLaunchKernelGGL(tabulate_tensor, grid_size, block_size, 0, 0, num_cells, Aglobal, wglobal,
+                       c.data(), geometry.data(), geom_dofmap.data(), dofmap.data());
     err_check(hipGetLastError());
   }
 
 private:
   int num_cells;
-  thrust::device_vector<T> c;
-  thrust::device_vector<T> geometry;
-  thrust::device_vector<std::int32_t> geom_dofmap;
-  thrust::device_vector<std::int32_t> dofmap;
+  std::span<T> c;
+  std::span<T> geometry;
+  std::span<std::int32_t> geom_dofmap;
+  std::span<std::int32_t> dofmap;
 };
 } // namespace dolfinx::acc
