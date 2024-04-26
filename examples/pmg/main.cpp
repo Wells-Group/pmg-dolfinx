@@ -3,6 +3,7 @@
 #include "../../src/csr.hpp"
 #include "../../src/pmg.hpp"
 #include "../../src/vector.hpp"
+#include "mesh.hpp"
 #include "poisson.h"
 
 #include <thrust/device_vector.h>
@@ -85,8 +86,14 @@ int main(int argc, char* argv[])
     LOG(INFO) << "Creating mesh of size: " << nx[0] << "x" << nx[1] << "x" << nx[2];
 
     // Create mesh
-    auto mesh = std::make_shared<mesh::Mesh<T>>(mesh::create_box<T>(
-        comm, {{{0, 0, 0}, {1, 1, 1}}}, {nx[0], nx[1], nx[2]}, mesh::CellType::hexahedron));
+    std::shared_ptr<mesh::Mesh<T>> mesh;
+    {
+      mesh::Mesh<T> base_mesh = mesh::create_box<T>(
+          comm, {{{0, 0, 0}, {1, 1, 1}}}, {nx[0], nx[1], nx[2]}, mesh::CellType::hexahedron);
+
+      mesh = std::make_shared<mesh::Mesh<T>>(ghost_layer_mesh(base_mesh));
+    }
+
     auto topology = mesh->topology_mutable();
     int tdim = topology->dim();
     int fdim = tdim - 1;
@@ -95,7 +102,8 @@ int main(int argc, char* argv[])
     // Compute boundary cells
     const std::vector<std::int32_t>& ip_facets = topology->interprocess_facets();
     auto f_to_c = topology->connectivity(fdim, tdim);
-    // Create list of cells attached to the inter-process boundary (needed for matrix-free updates)
+    // Create list of cells attached to the inter-process boundary (needed for matrix-free
+    // updates)
     std::vector<std::int32_t> ip_cells;
     for (std::int32_t f : ip_facets)
     {
@@ -198,6 +206,12 @@ int main(int argc, char* argv[])
       fem::apply_lifting<T, T>(b.mutable_array(), {a[i]}, {{bcs[i]}}, {}, T(1));
       b.scatter_rev(std::plus<T>());
       fem::set_bc<T, T>(b.mutable_array(), {bcs[i]});
+
+      std::stringstream s;
+      s << "b = ";
+      for (auto q : b.mutable_array())
+        s << q << " ";
+      std::cout << s.str() << "\n";
 
       bs[i] = std::make_shared<DeviceVector>(maps[i], 1);
       bs[i]->copy_from_host(b);
@@ -302,8 +316,8 @@ int main(int argc, char* argv[])
     pmg.set_interpolators(prolongation);
     pmg.set_restriction_interpolators(restriction);
 
-    // These are alternative restriction/prolongation kernels, which should replace the CSR matrices
-    // when fully working
+    // These are alternative restriction/prolongation kernels, which should replace the CSR
+    // matrices when fully working
     auto interpolator_V1_V0 = std::make_shared<Interpolator<T>>(2, 1, dofmapV1_span, dofmapV0_span,
                                                                 ipcells_span, lcells_span);
     auto interpolator_V2_V1 = std::make_shared<Interpolator<T>>(3, 2, dofmapV2_span, dofmapV1_span,
