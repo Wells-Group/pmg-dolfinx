@@ -371,11 +371,9 @@ template <typename T>
 class MatFreeLaplace
 {
 public:
-  MatFreeLaplace(int degree, int num_cells, std::span<const T> constants,
-                 std::span<const T> geometry, std::span<const std::int32_t> geom_dofmap,
-                 std::span<const std::int32_t> dofmap)
-      : num_cells(num_cells), c(constants), geometry(geometry), geom_dofmap(geom_dofmap),
-        dofmap(dofmap)
+  MatFreeLaplace(int degree, int num_cells, std::span<const T> constants, std::span<const T> x,
+                 std::span<const std::int32_t> x_dofmap, std::span<const std::int32_t> dofmap)
+      : num_cells(num_cells), constants(constants), x(x), x_dofmap(x_dofmap), dofmap(dofmap)
   {
     // TODO Add option to set degree
     assert(degree == 1);
@@ -392,15 +390,15 @@ public:
     dim3 block_size(256);
     dim3 grid_size((num_cells + block_size.x - 1) / block_size.x);
     hipLaunchKernelGGL(tabulate_tensor, grid_size, block_size, 0, 0, num_cells, Aglobal, wglobal,
-                       c.data(), geometry.data(), geom_dofmap.data(), dofmap.data());
+                       constants.data(), x.data(), x_dofmap.data(), dofmap.data());
     err_check(hipGetLastError());
   }
 
 private:
   int num_cells;
-  std::span<const T> c;
-  std::span<const T> geometry;
-  std::span<const std::int32_t> geom_dofmap;
+  std::span<const T> constants;
+  std::span<const T> x;
+  std::span<const std::int32_t> x_dofmap;
   std::span<const std::int32_t> dofmap;
 };
 } // namespace dolfinx::acc

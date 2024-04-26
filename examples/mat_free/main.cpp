@@ -242,7 +242,7 @@ int main(int argc, char* argv[])
     // Coordinate DOFs
     std::span<const T> x = mesh->geometry().x();
     // Begin / end?
-    thrust::device_vector<T> geometry_d(x.data(), x.data() + x.size());
+    thrust::device_vector<T> geometry_d(x.begin(), x.end());
     std::span<const T> geometry_d_span(thrust::raw_pointer_cast(geometry_d.data()),
                                        geometry_d.size());
 
