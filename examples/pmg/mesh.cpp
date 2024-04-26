@@ -56,7 +56,7 @@ dolfinx::mesh::Mesh<T> ghost_layer_mesh(dolfinx::mesh::Mesh<T>& mesh)
   };
 
   std::array<std::size_t, 2> xshape = {num_vertices, gdim};
-  std::span<const T> x = mesh.geometry().x();
+  std::span<const T> x(mesh.geometry().x().data(), xshape[0] * xshape[1]);
 
   // Convert topology to global indexing, and restrict to non-ghost cells
   std::vector<std::int32_t> topo = mesh.topology()->connectivity(tdim, 0)->array();

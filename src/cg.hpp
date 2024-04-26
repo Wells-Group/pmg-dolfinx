@@ -151,9 +151,6 @@ public:
 
     // TODO: check sizes
 
-    T bnorm = squared_norm(b);
-    LOG(INFO) << "bnorm0 = " << bnorm;
-
     // Compute initial residual r0 = b - Ax0
     A(x, *_y);
     axpy(*_r, T(-1), *_y, b);

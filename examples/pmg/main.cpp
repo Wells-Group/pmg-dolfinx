@@ -207,12 +207,6 @@ int main(int argc, char* argv[])
       b.scatter_rev(std::plus<T>());
       fem::set_bc<T, T>(b.mutable_array(), {bcs[i]});
 
-      std::stringstream s;
-      s << "b = ";
-      for (auto q : b.mutable_array())
-        s << q << " ";
-      std::cout << s.str() << "\n";
-
       bs[i] = std::make_shared<DeviceVector>(maps[i], 1);
       bs[i]->copy_from_host(b);
     }
