@@ -124,8 +124,10 @@ public:
     LOG(INFO) << "Residual norm before (0) = " << rn;
 
     // Solve coarse problem
-    _coarse_solver->solve(*_u[0], *_b[0]);
-    // _solvers[0]->solve(*_operators[0], *_u[0], *_b[0], false);
+    if (_coarse_solver)
+      _coarse_solver->solve(*_u[0], *_b[0]);
+    else
+      _solvers[0]->solve(*_operators[0], *_u[0], *_b[0], false);
 
     // r = b[i] - A[i] * u[i]
     (*_operators[0])(*_u[0], *_r[0]);

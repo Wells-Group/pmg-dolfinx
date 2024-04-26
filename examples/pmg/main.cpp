@@ -110,7 +110,8 @@ int main(int argc, char* argv[])
 {
   po::options_description desc("Allowed options");
   desc.add_options()("help,h", "print usage message")(
-      "ndofs", po::value<std::size_t>()->default_value(50000), "number of dofs per rank");
+      "ndofs", po::value<std::size_t>()->default_value(50000), "number of dofs per rank")(
+      "amg", po::bool_switch()->default_value(false), "Use AMG solver on coarse level");
 
   po::variables_map vm;
   po::store(po::command_line_parser(argc, argv).options(desc).allow_unregistered().run(), vm);
@@ -122,6 +123,7 @@ int main(int argc, char* argv[])
     return 0;
   }
   const std::size_t ndofs = vm["ndofs"].as<std::size_t>();
+  bool use_amg = vm["amg"].as<bool>();
 
   std::vector fs_poisson_a = {functionspace_form_poisson_a1, functionspace_form_poisson_a2,
                               functionspace_form_poisson_a3};
@@ -246,8 +248,10 @@ int main(int argc, char* argv[])
       bcs[i] = std::make_shared<const fem::DirichletBC<T, T>>(0.0, bdofs, V[i]);
     }
 
-    std::shared_ptr<CoarseSolverType> coarse_solver
-        = std::make_shared<CoarseSolverType>(a[0], bcs[0]);
+    std::shared_ptr<CoarseSolverType> coarse_solver;
+
+    if (use_amg)
+      coarse_solver = std::make_shared<CoarseSolverType>(a[0], bcs[0]);
 
     // RHS
     std::size_t ncells = mesh->topology()->index_map(3)->size_global();
