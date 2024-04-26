@@ -114,8 +114,8 @@ public:
 
   void store_coefficients(bool val) { _store_coeffs = val; }
 
-  std::vector<T> alphas() { return _alphas;}
-  std::vector<T> betas() { return _betas;}
+  std::vector<T> alphas() { return _alphas; }
+  std::vector<T> betas() { return _betas; }
 
   std::vector<T> compute_eigenvalues()
   {
@@ -158,6 +158,8 @@ public:
 
     T rnorm0 = squared_norm(*_r);
     T rnorm = rnorm0;
+
+    LOG(INFO) << "rnorm0 = " << rnorm0;
 
     // Iterations of CG
     const T rtol2 = _rtol * _rtol;
@@ -205,7 +207,7 @@ public:
         _betas.push_back(beta);
         _residuals.push_back(rnorm);
       }
-      remove_profiling_annotation("cg solver iteration");  
+      remove_profiling_annotation("cg solver iteration");
     }
     return k;
   }

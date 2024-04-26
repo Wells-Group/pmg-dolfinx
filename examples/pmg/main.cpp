@@ -6,6 +6,8 @@
 #include "../../src/vector.hpp"
 #include "poisson.h"
 
+#include <thrust/device_vector.h>
+
 #include <array>
 #include <basix/e-lagrange.h>
 #include <boost/program_options.hpp>
@@ -124,7 +126,7 @@ int main(int argc, char* argv[])
   std::vector fs_poisson_a = {functionspace_form_poisson_a1, functionspace_form_poisson_a2,
                               functionspace_form_poisson_a3};
   std::vector form_a = {form_poisson_a1, form_poisson_a2, form_poisson_a3};
-  std::vector form_L = {form_poisson_L1, form_poisson_L2, form_poisson_L2};
+  std::vector form_L = {form_poisson_L1, form_poisson_L2, form_poisson_L3};
 
   init_logging(argc, argv);
   PetscInitialize(&argc, &argv, nullptr, nullptr);
@@ -164,6 +166,8 @@ int main(int argc, char* argv[])
           }
     }
 
+    LOG(INFO) << "Creating mesh of size: " << nx[0] << "x" << nx[1] << "x" << nx[2];
+
     // Create mesh
     auto mesh = std::make_shared<mesh::Mesh<T>>(mesh::create_box<T>(
         comm, {{{0, 0, 0}, {1, 1, 1}}}, {nx[0], nx[1], nx[2]}, mesh::CellType::hexahedron));
@@ -171,6 +175,28 @@ int main(int argc, char* argv[])
     int tdim = topology->dim();
     int fdim = tdim - 1;
     topology->create_connectivity(fdim, tdim);
+
+    // Compute boundary cells
+    const std::vector<std::int32_t>& ip_facets = topology->interprocess_facets();
+    auto f_to_c = topology->connectivity(fdim, tdim);
+    // Create list of cells attached to the inter-process boundary (needed for matrix-free updates)
+    std::vector<std::int32_t> ip_cells;
+    for (std::int32_t f : ip_facets)
+    {
+      assert(f_to_c.num_links(f) == 1);
+      ip_cells.push_back(f_to_c->links(f)[0]);
+    }
+    std::sort(ip_cells.begin(), ip_cells.end());
+    LOG(INFO) << "Got " << ip_cells.size() << " boundary cells.";
+
+    // Compute local cells
+    std::vector<std::int32_t> local_cells(topology->index_map(tdim)->size_local()
+                                          + topology->index_map(tdim)->num_ghosts());
+    std::iota(local_cells.begin(), local_cells.end(), 0);
+    for (std::int32_t c : ip_cells)
+      local_cells[c] = -1;
+    std::erase(local_cells, -1);
+    LOG(INFO) << "Got " << local_cells.size() << " local cells";
 
     std::vector<std::shared_ptr<fem::FunctionSpace<T>>> V(form_a.size());
     std::vector<std::shared_ptr<fem::Form<T, T>>> a(V.size());
@@ -255,6 +281,7 @@ int main(int argc, char* argv[])
       la::Vector<T> b(maps[i], 1);
       b.set(T(0.0));
       fem::assemble_vector(b.mutable_array(), *L[i]);
+
       fem::apply_lifting<T, T>(b.mutable_array(), {a[i]}, {{bcs[i]}}, {}, T(1));
       b.scatter_rev(std::plus<T>());
       fem::set_bc<T, T>(b.mutable_array(), {bcs[i]});
@@ -285,19 +312,15 @@ int main(int argc, char* argv[])
       DeviceVector x(maps[i], 1);
       x.set(T{0.0});
 
-      (*operators[i])(*bs[i], x);
+      //      (*operators[i])(*bs[i], x);
 
-      [[maybe_unused]] int its = cg.solve(*operators[i], x, *bs[i], true);
+      [[maybe_unused]] int its = cg.solve(*operators[i], x, *bs[i], false);
       std::vector<T> eign = cg.compute_eigenvalues();
       std::sort(eign.begin(), eign.end());
-      std::array<T, 2> eig_range = {0.3 * eign.back(), 1.2 * eign.back()};
+      std::array<T, 2> eig_range = {0.8 * eign.front(), 1.2 * eign.back()};
       smoothers[i] = std::make_shared<acc::Chebyshev<DeviceVector>>(maps[i], 1, eig_range, 2);
 
-      if (rank == 0)
-      {
-        std::cout << "Eigenvalues level " << i << ": ";
-        std::cout << eig_range[0] << " " << eig_range[1] << std::endl;
-      }
+      LOG(INFO) << "Eigenvalues level " << i << ": " << eign.front() << " " << eign.back();
     }
 
     smoothers[0]->set_max_iterations(20);
@@ -318,6 +341,43 @@ int main(int argc, char* argv[])
     prolongation[1] = std::make_shared<acc::MatrixOperator<T>>(*V[1], *V[2]);
     restriction[1] = std::make_shared<acc::MatrixOperator<T>>(*V[2], *V[1]);
 
+    // Copy dofmaps to device
+    thrust::device_vector<std::int32_t> dofmapV0(V[0]->dofmap()->map().size());
+    LOG(INFO) << "Copy dofmap (V0) :" << dofmapV0.size();
+    thrust::copy(V[0]->dofmap()->map().data_handle(),
+                 V[0]->dofmap()->map().data_handle() + V[0]->dofmap()->map().size(),
+                 dofmapV0.begin());
+
+    thrust::device_vector<std::int32_t> dofmapV1(V[1]->dofmap()->map().size());
+    LOG(INFO) << "Copy dofmap (V1) :" << dofmapV1.size();
+    thrust::copy(V[1]->dofmap()->map().data_handle(),
+                 V[1]->dofmap()->map().data_handle() + V[1]->dofmap()->map().size(),
+                 dofmapV1.begin());
+
+    thrust::device_vector<std::int32_t> dofmapV2(V[2]->dofmap()->map().size());
+    LOG(INFO) << "Copy dofmap (V2) :" << dofmapV2.size();
+    thrust::copy(V[2]->dofmap()->map().data_handle(),
+                 V[2]->dofmap()->map().data_handle() + V[2]->dofmap()->map().size(),
+                 dofmapV2.begin());
+
+    thrust::device_vector<std::int32_t> ipcells_device(ip_cells.size());
+    LOG(INFO) << "Copy IP_cells :" << ip_cells.size();
+    thrust::copy(ip_cells.begin(), ip_cells.end(), ipcells_device.begin());
+    thrust::device_vector<std::int32_t> lcells_device(local_cells.size());
+    LOG(INFO) << "Copy local_cells :" << local_cells.size();
+    thrust::copy(local_cells.begin(), local_cells.end(), lcells_device.begin());
+
+    std::span<std::int32_t> dofmapV0_span(thrust::raw_pointer_cast(dofmapV0.data()),
+                                          dofmapV0.size());
+    std::span<std::int32_t> dofmapV1_span(thrust::raw_pointer_cast(dofmapV1.data()),
+                                          dofmapV1.size());
+    std::span<std::int32_t> dofmapV2_span(thrust::raw_pointer_cast(dofmapV2.data()),
+                                          dofmapV2.size());
+    std::span<std::int32_t> ipcells_span(thrust::raw_pointer_cast(ipcells_device.data()),
+                                         ipcells_device.size());
+    std::span<std::int32_t> lcells_span(thrust::raw_pointer_cast(lcells_device.data()),
+                                        lcells_device.size());
+
     using OpType = acc::MatrixOperator<T>;
     using SolverType = acc::Chebyshev<DeviceVector>;
 
@@ -333,13 +393,33 @@ int main(int argc, char* argv[])
     pmg.set_interpolators(prolongation);
     pmg.set_restriction_interpolators(restriction);
 
+    // These are alternative restriction/prolongation kernels, which should replace the CSR matrices
+    // when fully working
+    auto interpolator_V1_V0 = std::make_shared<Interpolator<T>>(2, 1, dofmapV1_span, dofmapV0_span,
+                                                                ipcells_span, lcells_span);
+    auto interpolator_V2_V1 = std::make_shared<Interpolator<T>>(3, 2, dofmapV2_span, dofmapV1_span,
+                                                                ipcells_span, lcells_span);
+    auto interpolator_V0_V1 = std::make_shared<Interpolator<T>>(1, 2, dofmapV0_span, dofmapV1_span,
+                                                                ipcells_span, lcells_span);
+    auto interpolator_V1_V2 = std::make_shared<Interpolator<T>>(2, 3, dofmapV1_span, dofmapV2_span,
+                                                                ipcells_span, lcells_span);
+    std::vector<std::shared_ptr<Interpolator<T>>> int_kerns
+        = {interpolator_V1_V0, interpolator_V2_V1};
+    pmg.set_interpolation_kernels(int_kerns);
+    std::vector<std::shared_ptr<Interpolator<T>>> prolong_kerns
+        = {interpolator_V0_V1, interpolator_V1_V2};
+    pmg.set_prolongation_kernels(prolong_kerns);
+
     // Create solution vector
     LOG(INFO) << "Create x";
     DeviceVector x(maps.back(), 1);
     x.set(T{0.0});
 
     for (int i = 0; i < 10; i++)
+    {
       pmg.apply(*bs.back(), x);
+      LOG(INFO) << "------ end of iteration ------";
+    }
 
     // Display timings
     dolfinx::list_timings(MPI_COMM_WORLD, {dolfinx::TimingType::wall});

@@ -1,6 +1,7 @@
 // Copyright (C) 2023 Igor A. Baratta
 // SPDX-License-Identifier:    MIT
 
+#include "interpolate.hpp"
 #include "vector.hpp"
 #include <algorithm>
 #include <dolfinx/common/IndexMap.h>
@@ -45,6 +46,16 @@ public:
   void set_coarse_solver(std::shared_ptr<CoarseSolver> solver) { _coarse_solver = solver; }
 
   void set_operators(std::vector<std::shared_ptr<Operator>>& operators) { _operators = operators; }
+
+  void set_interpolation_kernels(std::vector<std::shared_ptr<Interpolator<T>>>& interpolators)
+  {
+    _interpolation_kernels = interpolators;
+  }
+
+  void set_prolongation_kernels(std::vector<std::shared_ptr<Interpolator<T>>>& prolong)
+  {
+    _prolongation_kernels = prolong;
+  }
 
   void set_interpolators(std::vector<std::shared_ptr<Prolongation>>& interpolators)
   {
@@ -94,7 +105,15 @@ public:
       LOG(INFO) << "Residual norm after (" << i << ") = " << rn;
 
       // Restrict residual from level i to level (i - 1)
-      (*_res_interpolation[i - 1])(*_r[i], *_b[i - 1], false);
+      if (_interpolation_kernels[i - 1])
+      {
+        LOG(INFO) << "***** Using interpolation kernel " << i - 1;
+
+        // Use "interpolation kernel" if available. Interpolate r[i] into b[i-1].
+        _interpolation_kernels[i - 1]->interpolate(*_r[i], *_b[i - 1]);
+      }
+      else
+        (*_res_interpolation[i - 1])(*_r[i], *_b[i - 1], false);
     }
 
     // r = b[i] - A[i] * u[i]
@@ -118,7 +137,16 @@ public:
     for (int i = 0; i < num_levels - 1; i++)
     {
       // [coarse->fine] Prolong correction
-      (*_interpolation[i])(*_u[i], *_du[i + 1], false);
+      if (_prolongation_kernels[i])
+      {
+        LOG(INFO) << "***** Using prolongation kernel " << i;
+        // Use "prolongation kernel" if available. Interpolate u[i] into du[i+1].
+        _prolongation_kernels[i]->interpolate(*_u[i], *_du[i + 1]);
+      }
+      else
+      {
+        (*_interpolation[i])(*_u[i], *_du[i + 1], false);
+      }
 
       // update U
       axpy(*_u[i + 1], T(1), *_u[i + 1], *_du[i + 1]);
@@ -160,6 +188,9 @@ private:
   // Prologation and restriction operatos
   // Size should be nlevels - 1
   std::vector<std::shared_ptr<Prolongation>> _interpolation;
+
+  std::vector<std::shared_ptr<Interpolator<T>>> _interpolation_kernels;
+  std::vector<std::shared_ptr<Interpolator<T>>> _prolongation_kernels;
 
   std::vector<std::shared_ptr<Restriction>> _res_interpolation;
 
