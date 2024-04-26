@@ -4,9 +4,9 @@
 namespace
 {
 template <typename T>
-__global__ void tabulate_tensor(int N, T* Aglobal, const T* wglobal, const T* c,
-                                const T* coordinate_dofs_global, const std::int32_t* geom_dofmap,
-                                const std::int32_t* dofmap)
+__global__ void tabulate_tensor_Q1(int N, T* Aglobal, const T* wglobal, const T* c,
+                                   const T* coordinate_dofs_global, const std::int32_t* geom_dofmap,
+                                   const std::int32_t* dofmap)
 {
   // Calculate the row index for this thread.
   int id = blockIdx.x * blockDim.x + threadIdx.x;
@@ -375,8 +375,11 @@ public:
                  std::span<const std::int32_t> x_dofmap, std::span<const std::int32_t> dofmap)
       : num_cells(num_cells), constants(constants), x(x), x_dofmap(x_dofmap), dofmap(dofmap)
   {
-    // TODO Add option to set degree
-    assert(degree == 1);
+    if (degree == 1)
+    {
+      tabulate_tensor = tabulate_tensor_Q1;
+    }
+    // TODO Other degrees
   }
 
   ~MatFreeLaplace() {}
@@ -400,5 +403,7 @@ private:
   std::span<const T> x;
   std::span<const std::int32_t> x_dofmap;
   std::span<const std::int32_t> dofmap;
+  void (*tabulate_tensor)(int, T*, const T*, const T*, const T*, const std::int32_t*,
+                          const std::int32_t*);
 };
 } // namespace dolfinx::acc
