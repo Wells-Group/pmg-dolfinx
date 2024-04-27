@@ -7,7 +7,7 @@
 #include "src/vector.hpp"
 
 #include <array>
-#include <basix/e-lagrange.h>
+#include <basix/finite-element.h>
 #include <boost/program_options.hpp>
 #include <dolfinx.h>
 #include <dolfinx/fem/dolfinx_fem.h>
@@ -134,8 +134,13 @@ int main(int argc, char* argv[])
     if (mem > peak_mem)
       peak_mem = mem;
 #endif
+    // TODO Update
+    auto element = basix::create_element<T>(
+        basix::element::family::P, basix::cell::type::hexahedron, 1,
+        basix::element::lagrange_variant::unset,
+        basix::element::dpc_variant::unset, false);
     auto V = std::make_shared<fem::FunctionSpace<T>>(
-        fem::create_functionspace(functionspace_form_poisson_a, "u", mesh));
+        fem::create_functionspace(mesh, element));
 #ifdef ROCM_TRACING
     remove_profiling_annotation("making V");
 #endif
@@ -230,36 +235,37 @@ int main(int argc, char* argv[])
     DeviceVector u(map, 1);
     u.set(T{0.0});
 
-    // Output vector
-    DeviceVector y(map, 1);
-    y.set(T{0.0});
+    // TODO Uncomment
+    // // Output vector
+    // DeviceVector y(map, 1);
+    // y.set(T{0.0});
 
-    // Constants
-    // TODO Pack these properly
-    thrust::device_vector<T> constants_d{kappa->value};
-    std::span<const T> constants_d_span(thrust::raw_pointer_cast(constants_d.data()),
-                                        constants_d.size());
+    // // Constants
+    // // TODO Pack these properly
+    // thrust::device_vector<T> constants_d{kappa->value};
+    // std::span<const T> constants_d_span(thrust::raw_pointer_cast(constants_d.data()),
+    //                                     constants_d.size());
 
-    // Coordinate DOFs
-    std::span<const T> x = mesh->geometry().x();
-    thrust::device_vector<T> x_d(x.begin(), x.end());
-    std::span<const T> x_d_span(thrust::raw_pointer_cast(x_d.data()), x_d.size());
+    // // Coordinate DOFs
+    // std::span<const T> x = mesh->geometry().x();
+    // thrust::device_vector<T> x_d(x.begin(), x.end());
+    // std::span<const T> x_d_span(thrust::raw_pointer_cast(x_d.data()), x_d.size());
 
-    // Geomerty dofmap
-    auto x_dofmap = mesh->geometry().dofmap();
-    thrust::device_vector<std::int32_t> x_dofmap_d(x_dofmap.data_handle(),
-                                                   x_dofmap.data_handle() + x_dofmap.size());
-    std::span<const std::int32_t> x_dofmap_d_span(thrust::raw_pointer_cast(x_dofmap_d.data()),
-                                                  x_dofmap_d.size());
+    // // Geomerty dofmap
+    // auto x_dofmap = mesh->geometry().dofmap();
+    // thrust::device_vector<std::int32_t> x_dofmap_d(x_dofmap.data_handle(),
+    //                                                x_dofmap.data_handle() + x_dofmap.size());
+    // std::span<const std::int32_t> x_dofmap_d_span(thrust::raw_pointer_cast(x_dofmap_d.data()),
+    //                                               x_dofmap_d.size());
 
-    // V dofmap
-    thrust::device_vector<std::int32_t> dofmap_d(
-        dofmap->map().data_handle(), dofmap->map().data_handle() + dofmap->map().size());
-    std::span<const std::int32_t> dofmap_d_span(thrust::raw_pointer_cast(dofmap_d.data()),
-                                                dofmap_d.size());
+    // // V dofmap
+    // thrust::device_vector<std::int32_t> dofmap_d(
+    //     dofmap->map().data_handle(), dofmap->map().data_handle() + dofmap->map().size());
+    // std::span<const std::int32_t> dofmap_d_span(thrust::raw_pointer_cast(dofmap_d.data()),
+    //                                             dofmap_d.size());
 
-    acc::MatFreeLaplace<T> op(1, num_cells_local, constants_d_span, x_d_span, x_dofmap_d_span,
-                              dofmap_d_span);
+    // acc::MatFreeLaplace<T> op(1, num_cells_local, constants_d_span, x_d_span, x_dofmap_d_span,
+    //                           dofmap_d_span);
 
     // fem::Function<T> u(V);
     la::Vector<T> b(map, 1);
@@ -273,9 +279,9 @@ int main(int argc, char* argv[])
     u.copy_from_host(b); // Copy data from host vector to device vector
 
     // TODO BCs
-    std::cout << "Norm of u = " << acc::norm(u) << "\n";
-    op(u, y);
-    std::cout << "Norm of y = " << acc::norm(y) << "\n";
+    // std::cout << "Norm of u = " << acc::norm(u) << "\n";
+    // op(u, y);
+    // std::cout << "Norm of y = " << acc::norm(y) << "\n";
 
     DeviceVector z(map, 1);
     z.set(T{0.0});
