@@ -134,10 +134,9 @@ int main(int argc, char* argv[])
     if (mem > peak_mem)
       peak_mem = mem;
 #endif
-    // TODO Update
-    auto element = basix::create_element<T>(
+    auto element = basix::create_tp_element<T>(
         basix::element::family::P, basix::cell::type::hexahedron, 1,
-        basix::element::lagrange_variant::unset,
+        basix::element::lagrange_variant::gll_warped,
         basix::element::dpc_variant::unset, false);
     auto V = std::make_shared<fem::FunctionSpace<T>>(
         fem::create_functionspace(mesh, element));
