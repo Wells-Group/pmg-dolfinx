@@ -27,12 +27,6 @@ namespace po = boost::program_options;
 
 int main(int argc, char* argv[])
 {
-  int err;
-  uint32_t num_devices;
-  float peak_mem = 0.0;
-  float global_peak_mem = 0.0;
-  float mem = 0.0;
-
   po::options_description desc("Allowed options");
   desc.add_options()("help,h", "print usage message")(
       "ndofs", po::value<std::size_t>()->default_value(500), "number of dofs per rank")(
@@ -58,93 +52,41 @@ int main(int argc, char* argv[])
     MPI_Comm_rank(comm, &rank);
     MPI_Comm_size(comm, &size);
 
-#ifdef ROCM_SMI
-    err = initialise_rocm_smi();
-    num_devices = num_monitored_devices();
-    std::cout << "MPI rank " << rank << " can see " << num_devices << " AMD GPUs\n";
-    mem = print_amd_gpu_memory_percentage_used("Beginning");
-    if (mem > peak_mem)
-      peak_mem = mem;
-#endif
+    const int order = 2;
+    double nx_approx = (std::pow(ndofs * size, 1.0 / 3.0) - 1) / order;
+    std::size_t n0 = static_cast<int>(nx_approx);
+    std::array<std::size_t, 3> nx = {n0, n0, n0};
 
-#ifdef ROCM_TRACING
-    if (rank == 0)
+    // Try to improve fit to ndofs +/- 5 in each direction
+    if (n0 > 5)
     {
-      std::cout << "Using roctx tracing ranges for visulising trace data\n";
-    }
-#endif
-    // Create a hexahedral mesh
-#ifdef ROCM_TRACING
-    add_profiling_annotation("making mesh");
-#endif
-#ifdef ROCM_SMI
-    mem = print_amd_gpu_memory_percentage_used("making mesh");
-    if (mem > peak_mem)
-      peak_mem = mem;
-#endif
-
-    std::shared_ptr<mesh::Mesh<T>> mesh;
-
-    if (filename.size() > 0)
-    {
-      dolfinx::fem::CoordinateElement<T> element(mesh::CellType::tetrahedron, 1);
-      dolfinx::io::XDMFFile xdmf(MPI_COMM_WORLD, filename, "r");
-      mesh = std::make_shared<dolfinx::mesh::Mesh<T>>(
-          xdmf.read_mesh(element, mesh::GhostMode::none, "mesh"));
-    }
-    else
-    {
-      const int order = 2;
-      double nx_approx = (std::pow(ndofs * size, 1.0 / 3.0) - 1) / order;
-      std::size_t n0 = static_cast<int>(nx_approx);
-      std::array<std::size_t, 3> nx = {n0, n0, n0};
-
-      // Try to improve fit to ndofs +/- 5 in each direction
-      if (n0 > 5)
-      {
-        std::int64_t best_misfit
-            = (n0 * order + 1) * (n0 * order + 1) * (n0 * order + 1) - ndofs * size;
-        best_misfit = std::abs(best_misfit);
-        for (std::size_t nx0 = n0 - 5; nx0 < n0 + 6; ++nx0)
-          for (std::size_t ny0 = n0 - 5; ny0 < n0 + 6; ++ny0)
-            for (std::size_t nz0 = n0 - 5; nz0 < n0 + 6; ++nz0)
+      std::int64_t best_misfit
+          = (n0 * order + 1) * (n0 * order + 1) * (n0 * order + 1) - ndofs * size;
+      best_misfit = std::abs(best_misfit);
+      for (std::size_t nx0 = n0 - 5; nx0 < n0 + 6; ++nx0)
+        for (std::size_t ny0 = n0 - 5; ny0 < n0 + 6; ++ny0)
+          for (std::size_t nz0 = n0 - 5; nz0 < n0 + 6; ++nz0)
+          {
+            std::int64_t misfit
+                = (nx0 * order + 1) * (ny0 * order + 1) * (nz0 * order + 1) - ndofs * size;
+            if (std::abs(misfit) < best_misfit)
             {
-              std::int64_t misfit
-                  = (nx0 * order + 1) * (ny0 * order + 1) * (nz0 * order + 1) - ndofs * size;
-              if (std::abs(misfit) < best_misfit)
-              {
-                best_misfit = std::abs(misfit);
-                nx = {nx0, ny0, nz0};
-              }
+              best_misfit = std::abs(misfit);
+              nx = {nx0, ny0, nz0};
             }
-      }
-      mesh = std::make_shared<mesh::Mesh<T>>(mesh::create_box<T>(
-          comm, {{{0, 0, 0}, {1, 1, 1}}}, {nx[0], nx[1], nx[2]}, mesh::CellType::hexahedron));
+          }
     }
+    auto mesh = std::make_shared<mesh::Mesh<T>>(mesh::create_box<T>(
+        comm, {{{0, 0, 0}, {1, 1, 1}}}, {nx[0], nx[1], nx[2]}, mesh::CellType::hexahedron));
 
-#ifdef ROCM_TRACING
-    remove_profiling_annotation("making mesh");
-#endif
-
-#ifdef ROCM_TRACING
-    add_profiling_annotation("making V");
-#endif
-#ifdef ROCM_SMI
-    mem = print_amd_gpu_memory_percentage_used("making V");
-    if (mem > peak_mem)
-      peak_mem = mem;
-#endif
     auto element = basix::create_tp_element<T>(
         basix::element::family::P, basix::cell::type::hexahedron, 1,
-        basix::element::lagrange_variant::gll_warped,
-        basix::element::dpc_variant::unset, false);
-    auto V = std::make_shared<fem::FunctionSpace<T>>(
-        fem::create_functionspace(mesh, element));
-#ifdef ROCM_TRACING
-    remove_profiling_annotation("making V");
-#endif
+        basix::element::lagrange_variant::gll_warped, basix::element::dpc_variant::unset, false);
+    auto V = std::make_shared<fem::FunctionSpace<T>>(fem::create_functionspace(mesh, element));
 
-    std::size_t ncells = mesh->topology()->index_map(3)->size_global();
+    auto topology = V->mesh()->topology_mutable();
+    int tdim = topology->dim();
+    std::size_t ncells = mesh->topology()->index_map(tdim)->size_global();
     std::size_t ndofs = V->dofmap()->index_map->size_global();
     if (rank == 0)
     {
@@ -163,21 +105,11 @@ int main(int argc, char* argv[])
     auto f = std::make_shared<fem::Function<T>>(V);
 
     // Define variational forms
-#ifdef ROCM_TRACING
-    add_profiling_annotation("making forms");
-#endif
-#ifdef ROCM_SMI
-    mem = print_amd_gpu_memory_percentage_used("making forms");
-    if (mem > peak_mem)
-      peak_mem = mem;
-#endif
     auto a = std::make_shared<fem::Form<T>>(
         fem::create_form<T>(*form_poisson_a, {V, V}, {}, {{"kappa", kappa}}, {}));
     auto L = std::make_shared<fem::Form<T>>(
         fem::create_form<T>(*form_poisson_L, {V}, {{"f", f}}, {}, {}));
-#ifdef ROCM_TRACING
-    remove_profiling_annotation("making forms");
-#endif
+
     f->interpolate(
         [](auto x) -> std::pair<std::vector<T>, std::vector<std::size_t>>
         {
@@ -192,37 +124,13 @@ int main(int argc, char* argv[])
           return {out, {out.size()}};
         });
 
-#ifdef ROCM_TRACING
-    add_profiling_annotation("doing topology");
-#endif
-#ifdef ROCM_SMI
-    mem = print_amd_gpu_memory_percentage_used("doing topology");
-    if (mem > peak_mem)
-      peak_mem = mem;
-#endif
-    auto topology = V->mesh()->topology_mutable();
-    int tdim = topology->dim();
     int fdim = tdim - 1;
     topology->create_connectivity(fdim, tdim);
-#ifdef ROCM_TRACING
-    remove_profiling_annotation("doing topology");
-#endif
 
-#ifdef ROCM_TRACING
-    add_profiling_annotation("doing boundary conditions");
-#endif
-#ifdef ROCM_SMI
-    mem = print_amd_gpu_memory_percentage_used("doing boundary conditions");
-    if (mem > peak_mem)
-      peak_mem = mem;
-#endif
     auto dofmap = V->dofmap();
     auto facets = dolfinx::mesh::exterior_facet_indices(*topology);
     auto bdofs = fem::locate_dofs_topological(*topology, *dofmap, fdim, facets);
     auto bc = std::make_shared<const fem::DirichletBC<T>>(0.0, bdofs, V);
-#ifdef ROCM_TRACING
-    remove_profiling_annotation("doing boundary conditions");
-#endif
 
     // Define vectors
     using DeviceVector = dolfinx::acc::Vector<T, acc::Device::HIP>;
@@ -266,7 +174,6 @@ int main(int argc, char* argv[])
     acc::MatFreeLaplace<T> op(1, num_cells_local, constants_d_span, x_d_span, x_dofmap_d_span,
                               dofmap_d_span);
 
-    // fem::Function<T> u(V);
     la::Vector<T> b(map, 1);
     b.set(T(0.0));
     fem::assemble_vector(b.mutable_array(), *L);
@@ -292,18 +199,7 @@ int main(int argc, char* argv[])
 
     // Display timings
     dolfinx::list_timings(MPI_COMM_WORLD, {dolfinx::TimingType::wall});
-
-    MPI_Reduce(&peak_mem, &global_peak_mem, 1, MPI_FLOAT, MPI_MAX, 0, MPI_COMM_WORLD);
-    if (rank == 0)
-    {
-      std::cout
-          << "peak memory used during the run (as a percentage of the total memory available): "
-          << global_peak_mem << "%\n";
-    }
   }
-#ifdef ROCM_SMI
-  err = shutdown_rocm_smi();
-#endif
 
   MPI_Finalize();
 
