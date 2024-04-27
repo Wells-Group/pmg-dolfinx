@@ -17,18 +17,20 @@ namespace
 //        mat_value: CSR matrix values for local interpolation matrix
 // Output: vector valuesQ2
 template <typename T>
-__global__ void interpolate_Q1Q2(int N, const std::int32_t* Q1dofmap, int Q1_dofs_per_cell,
-                                 const std::int32_t* Q2dofmap, int Q2_dofs_per_cell,
-                                 const T* valuesQ1, T* valuesQ2, const std::int32_t* mat_row_offset,
-                                 const std::int32_t* mat_column, const T* mat_value)
+__global__ void interpolate_Q1Q2(int N, const std::int32_t* cell_list, const std::int32_t* Q1dofmap,
+                                 int Q1_dofs_per_cell, const std::int32_t* Q2dofmap,
+                                 int Q2_dofs_per_cell, const T* valuesQ1, T* valuesQ2,
+                                 const std::int32_t* mat_row_offset, const std::int32_t* mat_column,
+                                 const T* mat_value)
 {
   // Calculate the cell index for this thread.
   int i = blockIdx.x * blockDim.x + threadIdx.x;
   // Check if the row index is out of bounds.
   if (i < N)
   {
-    const std::int32_t* cellQ1 = Q1dofmap + i * Q1_dofs_per_cell;
-    const std::int32_t* cellQ2 = Q2dofmap + i * Q2_dofs_per_cell;
+    const std::int32_t cell = cell_list[i];
+    const std::int32_t* cellQ1 = Q1dofmap + cell * Q1_dofs_per_cell;
+    const std::int32_t* cellQ2 = Q2dofmap + cell * Q2_dofs_per_cell;
 
     for (std::int32_t j = 0; j < Q2_dofs_per_cell; j++)
     {
@@ -53,8 +55,10 @@ public:
   // inp_dofmap - dofmap of input space (on device)
   // out_dofmap - dofmap of output space (on device)
   Interpolator(int Q1, int Q2, std::span<const std::int32_t> inp_dofmap,
-               std::span<const std::int32_t> out_dofmap)
-      : input_dofmap(inp_dofmap), output_dofmap(out_dofmap)
+               std::span<const std::int32_t> out_dofmap, std::span<const std::int32_t> b_cells,
+               std::span<const std::int32_t> l_cells)
+      : input_dofmap(inp_dofmap), output_dofmap(out_dofmap), boundary_cells(b_cells),
+        local_cells(l_cells)
   {
     // Local CSR data to be copied to device
     std::vector<std::int32_t> _cols;
@@ -736,26 +740,45 @@ public:
   template <typename Vector>
   void interpolate(Vector& input_vector, Vector& output_vector)
   {
+    dolfinx::common::Timer tt("% Interpolate Kernel");
+
     // Input vector is also changed by MPI vector update
     T* input_values = input_vector.mutable_array().data();
     T* output_values = output_vector.mutable_array().data();
 
-    int ncells = input_dofmap.size() / num_cell_dofs_Q1;
-    assert(ncells == output_dofmap.size() / num_cell_dofs_Q2);
+    int ncells = local_cells.size();
+    const std::int32_t* cell_list = local_cells.data();
+    assert(ncells <= output_dofmap.size() / num_cell_dofs_Q2);
 
     dim3 block_size(256);
     dim3 grid_size((ncells + block_size.x - 1) / block_size.x);
 
-    // LOG(INFO) << "From " << num_cell_dofs_Q1 << " dofs/cell to " << num_cell_dofs_Q2 << " on "
-    //           << ncells << " cells";
+    // Start vector update of input_vector
+    input_vector.scatter_fwd_begin();
 
-    hipLaunchKernelGGL(interpolate_Q1Q2<T>, grid_size, block_size, 0, 0, ncells,
+    LOG(INFO) << "From " << num_cell_dofs_Q1 << " dofs/cell to " << num_cell_dofs_Q2 << " on "
+              << ncells << " cells";
+
+    hipLaunchKernelGGL(interpolate_Q1Q2<T>, grid_size, block_size, 0, 0, ncells, cell_list,
+                       input_dofmap.data(), num_cell_dofs_Q1, output_dofmap.data(),
+                       num_cell_dofs_Q2, input_values, output_values, mat_row_offset.data(),
+                       mat_column.data(), mat_value.data());
+    err_check(hipGetLastError());
+
+    // Wait for vector update of input_vector to complete
+    input_vector.scatter_fwd_end();
+
+    const std::int32_t* b_cell_list = boundary_cells.data();
+    ncells = boundary_cells.size();
+    LOG(INFO) << "From " << num_cell_dofs_Q1 << " dofs/cell to " << num_cell_dofs_Q2 << " on "
+              << ncells << "(boundary) cells";
+
+    hipLaunchKernelGGL(interpolate_Q1Q2<T>, grid_size, block_size, 0, 0, ncells, b_cell_list,
                        input_dofmap.data(), num_cell_dofs_Q1, output_dofmap.data(),
                        num_cell_dofs_Q2, input_values, output_values, mat_row_offset.data(),
                        mat_column.data(), mat_value.data());
 
     err_check(hipDeviceSynchronize());
-
     err_check(hipGetLastError());
   }
 
@@ -772,4 +795,11 @@ private:
   // Dofmaps (on device)
   std::span<const std::int32_t> input_dofmap;
   std::span<const std::int32_t> output_dofmap;
+
+  // List of cells which are in the "boundary region" which need to wait for a Vector update
+  // before interpolation (on device)
+  std::span<const std::int32_t> boundary_cells;
+
+  // List of local cells, which can be updated before a Vector update
+  std::span<const std::int32_t> local_cells;
 };

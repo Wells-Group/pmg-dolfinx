@@ -13,7 +13,7 @@ namespace dolfinx::acc
 {
 /// Conjugate gradient method
 template <typename Vector, typename Operator, typename Prolongation, typename Restriction,
-          typename Solver>
+          typename Solver, typename CoarseSolver>
 class MultigridPreconditioner
 {
   /// The value type
@@ -43,6 +43,8 @@ public:
 
   void set_solvers(std::vector<std::shared_ptr<Solver>>& solvers) { _solvers = solvers; }
 
+  void set_coarse_solver(std::shared_ptr<CoarseSolver> solver) { _coarse_solver = solver; }
+
   void set_operators(std::vector<std::shared_ptr<Operator>>& operators) { _operators = operators; }
 
   void set_interpolation_kernels(std::vector<std::shared_ptr<Interpolator<T>>>& interpolators)
@@ -68,7 +70,6 @@ public:
   // Apply M^{-1}x = y
   void apply(const Vector& x, Vector& y, bool verbose = false)
   {
-
     dolfinx::common::Timer t0("~apply MultigridPreconditioner preconditioner");
 
     [[maybe_unused]] int num_levels = _maps.size();
@@ -78,12 +79,16 @@ public:
       _u[i]->set(T{0});
     acc::copy(*_u.back(), y);
 
+    LOG(INFO) << "Copy x to b";
     acc::copy(*_b.back(), x);
 
     for (int i = num_levels - 1; i > 0; i--)
     {
       // r = b[i] - A[i] * u[i]
+      LOG(INFO) << "Operator " << i << " on u -> r";
       (*_operators[i])(*_u[i], *_r[i]);
+
+      LOG(INFO) << "axpy";
       axpy(*_r[i], T(-1), *_r[i], *_b[i]);
 
       double rn = acc::norm(*_r[i]);
@@ -119,7 +124,10 @@ public:
     // LOG(INFO) << "Residual norm before (0) = " << rn;
 
     // Solve coarse problem
-    _solvers[0]->solve(*_operators[0], *_u[0], *_b[0], false);
+    if (_coarse_solver)
+      _coarse_solver->solve(*_u[0], *_b[0]);
+    else
+      _solvers[0]->solve(*_operators[0], *_u[0], *_b[0], false);
 
     // r = b[i] - A[i] * u[i]
     (*_operators[0])(*_u[0], *_r[0]);
@@ -166,6 +174,8 @@ public:
       std::cout << "rnorm after PMG = " << acc::norm(*_r[num_levels - 1]) << "\n";
     }
 
+    LOG(INFO) << "----------- end of iteration ---------";
+
     acc::copy(y, *_u.back());
   }
 
@@ -193,6 +203,8 @@ private:
 
   // Operators used to compute the residual
   std::vector<std::shared_ptr<Operator>> _operators;
+
+  std::shared_ptr<CoarseSolver> _coarse_solver;
 
   // Solvers for each level
   std::vector<std::shared_ptr<Solver>> _solvers;
