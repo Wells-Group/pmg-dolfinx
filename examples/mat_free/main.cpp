@@ -80,7 +80,7 @@ int main(int argc, char* argv[])
         comm, {{{0, 0, 0}, {1, 1, 1}}}, {nx[0], nx[1], nx[2]}, mesh::CellType::hexahedron));
 
     auto element = basix::create_tp_element<T>(
-        basix::element::family::P, basix::cell::type::hexahedron, 1,
+        basix::element::family::P, basix::cell::type::hexahedron, order,
         basix::element::lagrange_variant::gll_warped, basix::element::dpc_variant::unset, false);
     auto V = std::make_shared<fem::FunctionSpace<T>>(fem::create_functionspace(mesh, element));
 
@@ -171,7 +171,7 @@ int main(int argc, char* argv[])
     std::span<const std::int32_t> dofmap_d_span(thrust::raw_pointer_cast(dofmap_d.data()),
                                                 dofmap_d.size());
 
-    acc::MatFreeLaplace<T> op(1, num_cells_local, constants_d_span, x_d_span, x_dofmap_d_span,
+    acc::MatFreeLaplace<T> op(order, num_cells_local, constants_d_span, x_d_span, x_dofmap_d_span,
                               dofmap_d_span);
 
     la::Vector<T> b(map, 1);

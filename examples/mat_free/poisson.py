@@ -5,7 +5,7 @@ from basix.ufl import blocked_element, wrap_element
 
 family = basix.ElementFamily.P
 cell_type = basix.CellType.hexahedron
-degree = 1
+degree = 2
 variant = basix.LagrangeVariant.gll_warped
 e = wrap_element(basix.create_tp_element(family, cell_type, degree, variant))
 
