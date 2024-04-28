@@ -295,8 +295,9 @@ public:
     dim3 dim_block(block_size);
     dim3 dim_grid(num_blocks);
 
+    const std::int32_t local_size = _bs * _map->size_local();
     const std::int32_t* indices = thrust::raw_pointer_cast(_remote_indices.data());
-    const T* in = this->array().data();
+    const T* in = this->array().data() + local_size;
     T* out = thrust::raw_pointer_cast(_buffer_remote.data());
     hipLaunchKernelGGL(pack<T>, dim_grid, dim_block, 0, 0, _remote_indices.size(), indices, in,
                        out);
