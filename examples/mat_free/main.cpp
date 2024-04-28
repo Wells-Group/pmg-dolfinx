@@ -52,7 +52,7 @@ int main(int argc, char* argv[])
     MPI_Comm_rank(comm, &rank);
     MPI_Comm_size(comm, &size);
 
-    const int order = 2;
+    const int order = 3;
     double nx_approx = (std::pow(ndofs * size, 1.0 / 3.0) - 1) / order;
     std::size_t n0 = static_cast<int>(nx_approx);
     std::array<std::size_t, 3> nx = {n0, n0, n0};

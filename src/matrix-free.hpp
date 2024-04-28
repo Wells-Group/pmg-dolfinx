@@ -669,6 +669,370 @@ __global__ void tabulate_tensor_Q2(int N, T* Aglobal, const T* wglobal, const T*
       atomicAdd(&Aglobal[dofmap[id * space_dim + i]], A[i]);
   }
 }
+
+template <typename T>
+__global__ void tabulate_tensor_Q3(int N, T* Aglobal, const T* wglobal, const T* c,
+                                   const T* coordinate_dofs_global, const std::int32_t* geom_dofmap,
+                                   const std::int32_t* dofmap)
+{
+  // Calculate the row index for this thread.
+  int id = blockIdx.x * blockDim.x + threadIdx.x;
+  // Check if the row index is out of bounds.
+  if (id < N)
+  {
+    // Extract w from wglobal
+    const int space_dim = 64;
+    double w[space_dim];
+    for (int i = 0; i < space_dim; ++i)
+      w[i] = wglobal[dofmap[id * space_dim + i]];
+
+    double coordinate_dofs[24];
+    for (int i = 0; i < 8; ++i)
+    {
+      coordinate_dofs[i * 3] = coordinate_dofs_global[geom_dofmap[id * 8 + i] * 3];
+      coordinate_dofs[i * 3 + 1] = coordinate_dofs_global[geom_dofmap[id * 8 + i] * 3 + 1];
+      coordinate_dofs[i * 3 + 2] = coordinate_dofs_global[geom_dofmap[id * 8 + i] * 3 + 2];
+    }
+
+    // Quadrature rules
+    static const double weights_34a[125]
+        = {0.001662467052579079, 0.003358438595671477, 0.003991775919106033, 0.003358438595671477,
+           0.001662467052579079, 0.003358438595671477, 0.006784561404328516, 0.008063999999999995,
+           0.006784561404328516, 0.003358438595671477, 0.003991775919106033, 0.008063999999999995,
+           0.009584716258668146, 0.008063999999999995, 0.003991775919106033, 0.003358438595671477,
+           0.006784561404328516, 0.008063999999999995, 0.006784561404328516, 0.003358438595671477,
+           0.001662467052579079, 0.003358438595671477, 0.003991775919106033, 0.003358438595671477,
+           0.001662467052579079, 0.003358438595671477, 0.006784561404328516, 0.008063999999999995,
+           0.006784561404328516, 0.003358438595671477, 0.006784561404328516, 0.01370585530681735,
+           0.01629051763370603,  0.01370585530681735,  0.006784561404328516, 0.008063999999999995,
+           0.01629051763370603,  0.0193625978702756,   0.01629051763370603,  0.008063999999999995,
+           0.006784561404328516, 0.01370585530681735,  0.01629051763370603,  0.01370585530681735,
+           0.006784561404328516, 0.003358438595671477, 0.006784561404328516, 0.008063999999999995,
+           0.006784561404328516, 0.003358438595671477, 0.003991775919106033, 0.008063999999999995,
+           0.009584716258668146, 0.008063999999999995, 0.003991775919106033, 0.008063999999999995,
+           0.01629051763370603,  0.0193625978702756,   0.01629051763370603,  0.008063999999999995,
+           0.009584716258668146, 0.0193625978702756,   0.02301401371742111,  0.0193625978702756,
+           0.009584716258668146, 0.008063999999999995, 0.01629051763370603,  0.0193625978702756,
+           0.01629051763370603,  0.008063999999999995, 0.003991775919106033, 0.008063999999999995,
+           0.009584716258668146, 0.008063999999999995, 0.003991775919106033, 0.003358438595671477,
+           0.006784561404328516, 0.008063999999999995, 0.006784561404328516, 0.003358438595671477,
+           0.006784561404328516, 0.01370585530681735,  0.01629051763370603,  0.01370585530681735,
+           0.006784561404328516, 0.008063999999999995, 0.01629051763370603,  0.0193625978702756,
+           0.01629051763370603,  0.008063999999999995, 0.006784561404328516, 0.01370585530681735,
+           0.01629051763370603,  0.01370585530681735,  0.006784561404328516, 0.003358438595671477,
+           0.006784561404328516, 0.008063999999999995, 0.006784561404328516, 0.003358438595671477,
+           0.001662467052579079, 0.003358438595671477, 0.003991775919106033, 0.003358438595671477,
+           0.001662467052579079, 0.003358438595671477, 0.006784561404328516, 0.008063999999999995,
+           0.006784561404328516, 0.003358438595671477, 0.003991775919106033, 0.008063999999999995,
+           0.009584716258668146, 0.008063999999999995, 0.003991775919106033, 0.003358438595671477,
+           0.006784561404328516, 0.008063999999999995, 0.006784561404328516, 0.003358438595671477,
+           0.001662467052579079, 0.003358438595671477, 0.003991775919106033, 0.003358438595671477,
+           0.001662467052579079};
+    // Precomputed values of basis functions and precomputations
+    // FE* dimensions: [permutation][entities][points][dofs]
+    static const double FE_TF0[1][1][5][4]
+        = {{{{-5.094806789291987, 0.5639075595986678, 6.356016612033354, -1.825117382340034},
+             {-2.183482767485546, -0.5088637830428693, 0.9823862405771633, 1.709960309951253},
+             {0.2499999999999998, -0.2500000000000002, -2.795084971874736, 2.795084971874737},
+             {0.5088637830428694, 2.183482767485546, -1.709960309951253, -0.9823862405771616},
+             {-0.5639075595986669, 5.094806789291987, 1.825117382340032, -6.356016612033352}}}};
+    static const double FE_TF1[1][1][5][4]
+        = {{{{0.7400289499867195, 0.03642344149505652, 0.3382587987733497, -0.1147111902551258},
+             {0.08649005029831021, 0.02594644710880267, 0.9781189357260486, -0.09055543313316147},
+             {-0.125, -0.1250000000000001, 0.6250000000000001, 0.6250000000000001},
+             {0.02594644710880263, 0.08649005029831, -0.09055543313316122, 0.9781189357260488},
+             {0.03642344149505661, 0.740028949986719, -0.1147111902551258, 0.3382587987733504}}}};
+    static const double FE_TF2[1][1][5][2] = {{{{0.953089922969332, 0.04691007703066796},
+                                                {0.7692346550528416, 0.2307653449471584},
+                                                {0.5, 0.5},
+                                                {0.2307653449471585, 0.7692346550528415},
+                                                {0.04691007703066802, 0.9530899229693319}}}};
+    static const double FE_TF3[1][1][5][2]
+        = {{{{-1.0, 1.0}, {-1.0, 1.0}, {-1.0, 1.0}, {-1.0, 1.0}, {-1.0, 1.0}}}};
+    double A[space_dim];
+    for (int i = 0; i < space_dim; ++i)
+      A[i] = 0.0;
+    for (int iq0 = 0; iq0 < 5; ++iq0)
+    {
+      for (int iq1 = 0; iq1 < 5; ++iq1)
+      {
+        for (int iq2 = 0; iq2 < 5; ++iq2)
+        {
+          // ------------------------
+          // Section: Jacobian
+          // Inputs: FE_TF2, FE_TF3, coordinate_dofs
+          // Outputs: J_c6, J_c7, J_c5, J_c0, J_c4, J_c2, J_c8, J_c3, J_c1
+          double J_c4 = 0.0;
+          double J_c8 = 0.0;
+          double J_c5 = 0.0;
+          double J_c7 = 0.0;
+          double J_c0 = 0.0;
+          double J_c3 = 0.0;
+          double J_c6 = 0.0;
+          double J_c1 = 0.0;
+          double J_c2 = 0.0;
+          {
+            for (int ic0 = 0; ic0 < 2; ++ic0)
+            {
+              for (int ic1 = 0; ic1 < 2; ++ic1)
+              {
+                for (int ic2 = 0; ic2 < 2; ++ic2)
+                {
+                  J_c4 += coordinate_dofs[(4 * ic0 + 2 * ic1 + ic2) * 3 + 1]
+                          * (FE_TF2[0][0][iq0][ic0] * FE_TF3[0][0][iq1][ic1]
+                             * FE_TF2[0][0][iq2][ic2]);
+                }
+              }
+              for (int ic1 = 0; ic1 < 2; ++ic1)
+              {
+                for (int ic2 = 0; ic2 < 2; ++ic2)
+                {
+                  J_c8 += coordinate_dofs[(4 * ic0 + 2 * ic1 + ic2) * 3 + 2]
+                          * (FE_TF2[0][0][iq0][ic0] * FE_TF2[0][0][iq1][ic1]
+                             * FE_TF3[0][0][iq2][ic2]);
+                }
+              }
+              for (int ic1 = 0; ic1 < 2; ++ic1)
+              {
+                for (int ic2 = 0; ic2 < 2; ++ic2)
+                {
+                  J_c5 += coordinate_dofs[(4 * ic0 + 2 * ic1 + ic2) * 3 + 1]
+                          * (FE_TF2[0][0][iq0][ic0] * FE_TF2[0][0][iq1][ic1]
+                             * FE_TF3[0][0][iq2][ic2]);
+                }
+              }
+              for (int ic1 = 0; ic1 < 2; ++ic1)
+              {
+                for (int ic2 = 0; ic2 < 2; ++ic2)
+                {
+                  J_c7 += coordinate_dofs[(4 * ic0 + 2 * ic1 + ic2) * 3 + 2]
+                          * (FE_TF2[0][0][iq0][ic0] * FE_TF3[0][0][iq1][ic1]
+                             * FE_TF2[0][0][iq2][ic2]);
+                }
+              }
+              for (int ic1 = 0; ic1 < 2; ++ic1)
+              {
+                for (int ic2 = 0; ic2 < 2; ++ic2)
+                {
+                  J_c0 += coordinate_dofs[(4 * ic0 + 2 * ic1 + ic2) * 3]
+                          * (FE_TF3[0][0][iq0][ic0] * FE_TF2[0][0][iq1][ic1]
+                             * FE_TF2[0][0][iq2][ic2]);
+                }
+              }
+              for (int ic1 = 0; ic1 < 2; ++ic1)
+              {
+                for (int ic2 = 0; ic2 < 2; ++ic2)
+                {
+                  J_c3 += coordinate_dofs[(4 * ic0 + 2 * ic1 + ic2) * 3 + 1]
+                          * (FE_TF3[0][0][iq0][ic0] * FE_TF2[0][0][iq1][ic1]
+                             * FE_TF2[0][0][iq2][ic2]);
+                }
+              }
+              for (int ic1 = 0; ic1 < 2; ++ic1)
+              {
+                for (int ic2 = 0; ic2 < 2; ++ic2)
+                {
+                  J_c6 += coordinate_dofs[(4 * ic0 + 2 * ic1 + ic2) * 3 + 2]
+                          * (FE_TF3[0][0][iq0][ic0] * FE_TF2[0][0][iq1][ic1]
+                             * FE_TF2[0][0][iq2][ic2]);
+                }
+              }
+              for (int ic1 = 0; ic1 < 2; ++ic1)
+              {
+                for (int ic2 = 0; ic2 < 2; ++ic2)
+                {
+                  J_c1 += coordinate_dofs[(4 * ic0 + 2 * ic1 + ic2) * 3]
+                          * (FE_TF2[0][0][iq0][ic0] * FE_TF3[0][0][iq1][ic1]
+                             * FE_TF2[0][0][iq2][ic2]);
+                }
+              }
+              for (int ic1 = 0; ic1 < 2; ++ic1)
+              {
+                for (int ic2 = 0; ic2 < 2; ++ic2)
+                {
+                  J_c2 += coordinate_dofs[(4 * ic0 + 2 * ic1 + ic2) * 3]
+                          * (FE_TF2[0][0][iq0][ic0] * FE_TF2[0][0][iq1][ic1]
+                             * FE_TF3[0][0][iq2][ic2]);
+                }
+              }
+            }
+          }
+          // ------------------------
+          // ------------------------
+          // Section: Coefficient
+          // Inputs: w, FE_TF1, FE_TF0
+          // Outputs: w0_d010, w0_d100, w0_d001
+          double w0_d100 = 0.0;
+          double w0_d010 = 0.0;
+          double w0_d001 = 0.0;
+          {
+            for (int ic0 = 0; ic0 < 4; ++ic0)
+            {
+              for (int ic1 = 0; ic1 < 4; ++ic1)
+              {
+                for (int ic2 = 0; ic2 < 4; ++ic2)
+                {
+                  w0_d100 += w[16 * ic0 + 4 * ic1 + ic2]
+                             * (FE_TF0[0][0][iq0][ic0] * FE_TF1[0][0][iq1][ic1]
+                                * FE_TF1[0][0][iq2][ic2]);
+                }
+              }
+              for (int ic1 = 0; ic1 < 4; ++ic1)
+              {
+                for (int ic2 = 0; ic2 < 4; ++ic2)
+                {
+                  w0_d010 += w[16 * ic0 + 4 * ic1 + ic2]
+                             * (FE_TF1[0][0][iq0][ic0] * FE_TF0[0][0][iq1][ic1]
+                                * FE_TF1[0][0][iq2][ic2]);
+                }
+              }
+              for (int ic1 = 0; ic1 < 4; ++ic1)
+              {
+                for (int ic2 = 0; ic2 < 4; ++ic2)
+                {
+                  w0_d001 += w[16 * ic0 + 4 * ic1 + ic2]
+                             * (FE_TF1[0][0][iq0][ic0] * FE_TF1[0][0][iq1][ic1]
+                                * FE_TF0[0][0][iq2][ic2]);
+                }
+              }
+            }
+          }
+          // ------------------------
+          // ------------------------
+          // Section: Intermediates
+          // Inputs: J_c6, J_c7, J_c5, J_c1, J_c4, J_c2, J_c8, J_c3, J_c0, w0_d001, w0_d100, w0_d010
+          // Outputs: fw0, fw1, fw2
+          double fw0 = 0;
+          double fw1 = 0;
+          double fw2 = 0;
+          {
+            double sv_34a_0 = J_c4 * J_c8;
+            double sv_34a_1 = J_c5 * J_c7;
+            double sv_34a_2 = -sv_34a_1;
+            double sv_34a_3 = sv_34a_0 + sv_34a_2;
+            double sv_34a_4 = J_c0 * sv_34a_3;
+            double sv_34a_5 = J_c3 * J_c8;
+            double sv_34a_6 = J_c5 * J_c6;
+            double sv_34a_7 = -sv_34a_6;
+            double sv_34a_8 = sv_34a_5 + sv_34a_7;
+            double sv_34a_9 = -J_c1;
+            double sv_34a_10 = sv_34a_8 * sv_34a_9;
+            double sv_34a_11 = sv_34a_4 + sv_34a_10;
+            double sv_34a_12 = J_c3 * J_c7;
+            double sv_34a_13 = J_c4 * J_c6;
+            double sv_34a_14 = -sv_34a_13;
+            double sv_34a_15 = sv_34a_12 + sv_34a_14;
+            double sv_34a_16 = J_c2 * sv_34a_15;
+            double sv_34a_17 = sv_34a_11 + sv_34a_16;
+            double sv_34a_18 = sv_34a_3 / sv_34a_17;
+            double sv_34a_19 = -J_c8;
+            double sv_34a_20 = J_c3 * sv_34a_19;
+            double sv_34a_21 = sv_34a_6 + sv_34a_20;
+            double sv_34a_22 = sv_34a_21 / sv_34a_17;
+            double sv_34a_23 = sv_34a_15 / sv_34a_17;
+            double sv_34a_24 = w0_d100 * sv_34a_18;
+            double sv_34a_25 = w0_d010 * sv_34a_22;
+            double sv_34a_26 = sv_34a_24 + sv_34a_25;
+            double sv_34a_27 = w0_d001 * sv_34a_23;
+            double sv_34a_28 = sv_34a_26 + sv_34a_27;
+            double sv_34a_29 = sv_34a_28 * sv_34a_18;
+            double sv_34a_30 = sv_34a_28 * sv_34a_22;
+            double sv_34a_31 = sv_34a_28 * sv_34a_23;
+            double sv_34a_32 = J_c2 * J_c7;
+            double sv_34a_33 = J_c8 * sv_34a_9;
+            double sv_34a_34 = sv_34a_32 + sv_34a_33;
+            double sv_34a_35 = sv_34a_34 / sv_34a_17;
+            double sv_34a_36 = J_c0 * J_c8;
+            double sv_34a_37 = -J_c2;
+            double sv_34a_38 = J_c6 * sv_34a_37;
+            double sv_34a_39 = sv_34a_36 + sv_34a_38;
+            double sv_34a_40 = sv_34a_39 / sv_34a_17;
+            double sv_34a_41 = J_c1 * J_c6;
+            double sv_34a_42 = J_c0 * J_c7;
+            double sv_34a_43 = -sv_34a_42;
+            double sv_34a_44 = sv_34a_41 + sv_34a_43;
+            double sv_34a_45 = sv_34a_44 / sv_34a_17;
+            double sv_34a_46 = w0_d100 * sv_34a_35;
+            double sv_34a_47 = w0_d010 * sv_34a_40;
+            double sv_34a_48 = sv_34a_46 + sv_34a_47;
+            double sv_34a_49 = w0_d001 * sv_34a_45;
+            double sv_34a_50 = sv_34a_48 + sv_34a_49;
+            double sv_34a_51 = sv_34a_50 * sv_34a_35;
+            double sv_34a_52 = sv_34a_50 * sv_34a_40;
+            double sv_34a_53 = sv_34a_50 * sv_34a_45;
+            double sv_34a_54 = sv_34a_51 + sv_34a_29;
+            double sv_34a_55 = sv_34a_52 + sv_34a_30;
+            double sv_34a_56 = sv_34a_31 + sv_34a_53;
+            double sv_34a_57 = J_c1 * J_c5;
+            double sv_34a_58 = J_c2 * J_c4;
+            double sv_34a_59 = -sv_34a_58;
+            double sv_34a_60 = sv_34a_57 + sv_34a_59;
+            double sv_34a_61 = sv_34a_60 / sv_34a_17;
+            double sv_34a_62 = J_c2 * J_c3;
+            double sv_34a_63 = J_c0 * J_c5;
+            double sv_34a_64 = -sv_34a_63;
+            double sv_34a_65 = sv_34a_62 + sv_34a_64;
+            double sv_34a_66 = sv_34a_65 / sv_34a_17;
+            double sv_34a_67 = J_c0 * J_c4;
+            double sv_34a_68 = J_c1 * J_c3;
+            double sv_34a_69 = -sv_34a_68;
+            double sv_34a_70 = sv_34a_67 + sv_34a_69;
+            double sv_34a_71 = sv_34a_70 / sv_34a_17;
+            double sv_34a_72 = w0_d100 * sv_34a_61;
+            double sv_34a_73 = w0_d010 * sv_34a_66;
+            double sv_34a_74 = sv_34a_72 + sv_34a_73;
+            double sv_34a_75 = w0_d001 * sv_34a_71;
+            double sv_34a_76 = sv_34a_74 + sv_34a_75;
+            double sv_34a_77 = sv_34a_76 * sv_34a_61;
+            double sv_34a_78 = sv_34a_76 * sv_34a_66;
+            double sv_34a_79 = sv_34a_76 * sv_34a_71;
+            double sv_34a_80 = sv_34a_54 + sv_34a_77;
+            double sv_34a_81 = sv_34a_55 + sv_34a_78;
+            double sv_34a_82 = sv_34a_56 + sv_34a_79;
+            double sv_34a_83 = c[0] * sv_34a_80;
+            double sv_34a_84 = c[0] * sv_34a_81;
+            double sv_34a_85 = c[0] * sv_34a_82;
+            double sv_34a_86 = fabs(sv_34a_17);
+            double sv_34a_87 = sv_34a_83 * sv_34a_86;
+            double sv_34a_88 = sv_34a_84 * sv_34a_86;
+            double sv_34a_89 = sv_34a_85 * sv_34a_86;
+            fw0 = sv_34a_87 * weights_34a[25 * iq0 + 5 * iq1 + iq2];
+            fw1 = sv_34a_88 * weights_34a[25 * iq0 + 5 * iq1 + iq2];
+            fw2 = sv_34a_89 * weights_34a[25 * iq0 + 5 * iq1 + iq2];
+          }
+          // ------------------------
+          // ------------------------
+          // Section: Tensor Computation
+          // Inputs: FE_TF1, fw1, fw0, fw2, FE_TF0
+          // Outputs: A
+          {
+            for (int i0 = 0; i0 < 4; ++i0)
+            {
+              for (int i1 = 0; i1 < 4; ++i1)
+              {
+                for (int i2 = 0; i2 < 4; ++i2)
+                {
+                  A[(16 * i0 + 4 * i1 + i2)]
+                      += fw0
+                         * (FE_TF0[0][0][iq0][i0] * FE_TF1[0][0][iq1][i1] * FE_TF1[0][0][iq2][i2]);
+                  A[(16 * i0 + 4 * i1 + i2)]
+                      += fw1
+                         * (FE_TF1[0][0][iq0][i0] * FE_TF0[0][0][iq1][i1] * FE_TF1[0][0][iq2][i2]);
+                  A[(16 * i0 + 4 * i1 + i2)]
+                      += fw2
+                         * (FE_TF1[0][0][iq0][i0] * FE_TF1[0][0][iq1][i1] * FE_TF0[0][0][iq2][i2]);
+                }
+              }
+            }
+          }
+          // ------------------------
+        }
+      }
+    }
+    for (int i = 0; i < space_dim; ++i)
+      atomicAdd(&Aglobal[dofmap[id * space_dim + i]], A[i]);
+  }
+}
 } // namespace
 
 namespace dolfinx::acc
@@ -688,6 +1052,9 @@ public:
       break;
     case 2:
       tabulate_tensor = tabulate_tensor_Q2;
+      break;
+    case 3:
+      tabulate_tensor = tabulate_tensor_Q3;
       break;
     default:
       // TODO throw error
