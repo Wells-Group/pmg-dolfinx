@@ -47,8 +47,8 @@ static __global__ void unpack(const int N, const std::int32_t* __restrict__ indi
 }
 
 template <typename T>
-static __global__ void _scatter(std::int32_t N, const int32_t* __restrict__ indices,
-                                const T* __restrict__ in, T* __restrict__ out)
+static __global__ void unpack_add(std::int32_t N, const int32_t* __restrict__ indices,
+                                  const T* __restrict__ in, T* __restrict__ out)
 {
   int gid = blockIdx.x * blockDim.x + threadIdx.x;
   if (gid < N)
@@ -285,6 +285,55 @@ public:
   {
     this->scatter_fwd_begin();
     this->scatter_fwd_end();
+  }
+
+  // Pack data, start reverse scatter
+  void scatter_rev_begin(int block_size = 512)
+  {
+    // TODO: which block_size to use??
+    const int num_blocks = (_remote_indices.size() + block_size - 1) / block_size;
+    dim3 dim_block(block_size);
+    dim3 dim_grid(num_blocks);
+
+    const std::int32_t* indices = thrust::raw_pointer_cast(_remote_indices.data());
+    const T* in = this->array().data();
+    T* out = thrust::raw_pointer_cast(_buffer_remote.data());
+    hipLaunchKernelGGL(pack<T>, dim_grid, dim_block, 0, 0, _remote_indices.size(), indices, in,
+                       out);
+    err_check(hipDeviceSynchronize());
+
+    T* local = thrust::raw_pointer_cast(_buffer_local.data());
+    _scatterer->scatter_rev_begin(std::span<const T>(out, _buffer_remote.size()),
+                                  std::span<T>(local, _buffer_local.size()),
+                                  std::span<MPI_Request>(_request), common::Scatterer<>::type::p2p);
+  }
+
+  // Finalize reverse scatter, unpack data
+  void scatter_rev_end(int block_size = 512)
+  {
+    // TODO: which block_size to use??
+    const std::int32_t local_size = _bs * _map->size_local();
+    _scatterer->scatter_rev_end(std::span<MPI_Request>(_request));
+
+    const int num_blocks = (_local_indices.size() + block_size - 1) / block_size;
+    dim3 dim_block(block_size);
+    dim3 dim_grid(num_blocks);
+    std::span<T> x_local(this->mutable_array().data(), local_size);
+
+    const std::int32_t* indices = thrust::raw_pointer_cast(_local_indices.data());
+    const T* in = thrust::raw_pointer_cast(_buffer_local.data());
+    T* out = x_local.data();
+    hipLaunchKernelGGL(unpack_add<T>, dim_grid, dim_block, 0, 0, _local_indices.size(), indices, in,
+                       out);
+    err_check(hipDeviceSynchronize());
+  }
+
+  /// Scatter local data from ghosts, and accumulate in owned part of vector
+  /// @note Collective MPI operation
+  void scatter_rev()
+  {
+    this->scatter_rev_begin();
+    this->scatter_rev_end();
   }
 
 private:
