@@ -132,21 +132,7 @@ int main(int argc, char* argv[])
     auto bdofs = fem::locate_dofs_topological(*topology, *dofmap, fdim, facets);
     auto bc = std::make_shared<const fem::DirichletBC<T>>(0.0, bdofs, V);
 
-    // Define vectors
-    using DeviceVector = dolfinx::acc::Vector<T, acc::Device::HIP>;
-
-    const int num_cells_local = mesh->topology()->index_map(tdim)->size_local();
-
-    // Input vector
-    auto map = V->dofmap()->index_map;
-    DeviceVector u(map, 1);
-    u.set(T{0.0});
-
-    // TODO Uncomment
-    // Output vector
-    DeviceVector y(map, 1);
-    y.set(T{0.0});
-
+    // Copy data to GPU
     // Constants
     // TODO Pack these properly
     thrust::device_vector<T> constants_d{kappa->value};
@@ -171,28 +157,40 @@ int main(int argc, char* argv[])
     std::span<const std::int32_t> dofmap_d_span(thrust::raw_pointer_cast(dofmap_d.data()),
                                                 dofmap_d.size());
 
+    // Define vectors
+    using DeviceVector = dolfinx::acc::Vector<T, acc::Device::HIP>;
+
+    // Input vector
+    auto map = V->dofmap()->index_map;
+    DeviceVector u(map, 1);
+    u.set(T{0.0});
+
+    // Output vector
+    DeviceVector y(map, 1);
+    y.set(T{0.0});
+
+    // Create matrix free operator
+    const int num_cells_local = mesh->topology()->index_map(tdim)->size_local();
     acc::MatFreeLaplace<T> op(order, num_cells_local, constants_d_span, x_d_span, x_dofmap_d_span,
                               dofmap_d_span);
 
     la::Vector<T> b(map, 1);
     b.set(T(0.0));
     fem::assemble_vector(b.mutable_array(), *L);
+    // TODO BCs
     // fem::apply_lifting<T, T>(b.mutable_array(), {a}, {{bc}}, {}, T(1));
     // b.scatter_rev(std::plus<T>());
     // fem::set_bc<T, T>(b.mutable_array(), {bc});
-
-    // DeviceVector y(map, 1);
     u.copy_from_host(b); // Copy data from host vector to device vector
 
-    // TODO BCs
     std::cout << "Norm of u = " << acc::norm(u) << "\n";
     op(u, y);
     std::cout << "Norm of y = " << acc::norm(y) << "\n";
 
+    // Compare to assembling on CPU and copying matrix to GPU
     DeviceVector z(map, 1);
     z.set(T{0.0});
 
-    std::cout << "Norm of u = " << acc::norm(u) << "\n";
     acc::MatrixOperator<T> mat_op(a, {});
     mat_op(u, z);
     std::cout << "Norm of z = " << acc::norm(z) << "\n";
