@@ -15,9 +15,10 @@ __global__ void tabulate_tensor_Q1(int N, T* Aglobal, const T* wglobal, const T*
   if (id < N)
   {
     // Extract w from wglobal
-    double w[8];
-    for (int i = 0; i < 8; ++i)
-      w[i] = wglobal[dofmap[id * 8 + i]];
+    const int space_dim = 8;
+    double w[space_dim];
+    for (int i = 0; i < space_dim; ++i)
+      w[i] = wglobal[dofmap[id * space_dim + i]];
 
     double coordinate_dofs[24];
     for (int i = 0; i < 8; ++i)
@@ -41,7 +42,9 @@ __global__ void tabulate_tensor_Q1(int N, T* Aglobal, const T* wglobal, const T*
     static const double FE_TF1[1][1][3][2] = {{{{0.8872983346207417, 0.1127016653792582},
                                                 {0.5, 0.5},
                                                 {0.1127016653792582, 0.8872983346207417}}}};
-    double A[8];
+    double A[space_dim];
+    for (int i = 0; i < space_dim; ++i)
+      A[i] = 0.0;
     for (int iq0 = 0; iq0 < 3; ++iq0)
     {
       for (int iq1 = 0; iq1 < 3; ++iq1)
@@ -319,8 +322,8 @@ __global__ void tabulate_tensor_Q1(int N, T* Aglobal, const T* wglobal, const T*
         }
       }
     }
-    for (int i = 0; i < 8; ++i)
-      atomicAdd(&Aglobal[dofmap[id * 8 + i]], A[i]);
+    for (int i = 0; i < space_dim; ++i)
+      atomicAdd(&Aglobal[dofmap[id * space_dim + i]], A[i]);
   }
 }
 
