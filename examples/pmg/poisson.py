@@ -1,14 +1,20 @@
 from ufl import (Coefficient, Constant, FunctionSpace, Mesh,
                  TestFunction, TrialFunction, dx, grad, inner)
-from basix.ufl import element
-
+import basix
+from basix.ufl import blocked_element, wrap_element
 
 # Load namespace
 ns = vars()
 forms = []
 for degree in range(1, 4):
-    e = element("Lagrange", "hexahedron", degree)
-    coord_element = element("Lagrange", "hexahedron", 1, shape=(3,))
+
+    family = basix.ElementFamily.P
+    cell_type = basix.CellType.hexahedron
+    variant = basix.LagrangeVariant.gll_warped
+    e = wrap_element(basix.create_tp_element(family, cell_type, degree, variant))
+
+    coord_ele = basix.create_tp_element(family, cell_type, 1, variant)
+    coord_element = blocked_element(wrap_element(coord_ele), (3,))
     mesh = Mesh(coord_element)
 
     V = FunctionSpace(mesh, e)

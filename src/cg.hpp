@@ -159,7 +159,7 @@ public:
     T rnorm0 = squared_norm(*_r);
     T rnorm = rnorm0;
 
-    LOG(INFO) << "rnorm0 = " << rnorm0;
+    LOG(INFO) << "CG: rnorm0 = " << rnorm0;
 
     // Iterations of CG
     const T rtol2 = _rtol * _rtol;
