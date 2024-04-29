@@ -21,7 +21,7 @@
 #include <memory>
 #include <mpi.h>
 
-// #define MATRIX_FREE
+#define MATRIX_FREE
 
 using namespace dolfinx;
 using T = double;
@@ -206,6 +206,18 @@ int main(int argc, char* argv[])
     std::erase(local_cells, -1);
     LOG(INFO) << "Got " << local_cells.size() << " local cells";
 
+    // Copy lists of local and boundary cells to device
+    thrust::device_vector<std::int32_t> ipcells_device(ip_cells.size());
+    LOG(INFO) << "Copy IP_cells :" << ip_cells.size();
+    thrust::copy(ip_cells.begin(), ip_cells.end(), ipcells_device.begin());
+    thrust::device_vector<std::int32_t> lcells_device(local_cells.size());
+    LOG(INFO) << "Copy local_cells :" << local_cells.size();
+    thrust::copy(local_cells.begin(), local_cells.end(), lcells_device.begin());
+    std::span<std::int32_t> ipcells_span(thrust::raw_pointer_cast(ipcells_device.data()),
+                                         ipcells_device.size());
+    std::span<std::int32_t> lcells_span(thrust::raw_pointer_cast(lcells_device.data()),
+                                        lcells_device.size());
+
     std::vector<std::shared_ptr<fem::FunctionSpace<T>>> V(form_a.size());
     std::vector<std::shared_ptr<fem::Form<T, T>>> a(V.size());
     std::vector<std::shared_ptr<fem::Form<T, T>>> L(V.size());
@@ -363,8 +375,8 @@ int main(int argc, char* argv[])
       std::span<const std::int8_t> bc_span(thrust::raw_pointer_cast(device_bc_dofs[i].data()),
                                            device_bc_dofs[i].size());
       operators[i] = std::make_shared<acc::MatFreeLaplace<T>>(
-          degree, num_cells, device_constants, geom_x, geom_x_dofmap, device_dofmaps[i], bc_span);
-
+          degree, lcells_span, ipcells_span, device_constants, geom_x, geom_x_dofmap,
+          device_dofmaps[i], bc_span);
 #else
       operators[i] = std::make_shared<acc::MatrixOperator<T>>(a_i, bc_i);
       maps[i] = operators[i]->column_index_map();
@@ -421,14 +433,6 @@ int main(int argc, char* argv[])
     std::vector<std::shared_ptr<Interpolator<T>>> int_kerns(V.size() - 1);
     std::vector<std::shared_ptr<Interpolator<T>>> prolong_kerns(V.size() - 1);
 
-    // Copy lists of local and boundary cells to device
-    thrust::device_vector<std::int32_t> ipcells_device(ip_cells.size());
-    LOG(INFO) << "Copy IP_cells :" << ip_cells.size();
-    thrust::copy(ip_cells.begin(), ip_cells.end(), ipcells_device.begin());
-    thrust::device_vector<std::int32_t> lcells_device(local_cells.size());
-    LOG(INFO) << "Copy local_cells :" << local_cells.size();
-    thrust::copy(local_cells.begin(), local_cells.end(), lcells_device.begin());
-
     // From V1 to V0
     if (use_csr_interpolation)
     {
@@ -441,11 +445,6 @@ int main(int argc, char* argv[])
     }
     else
     {
-      std::span<std::int32_t> ipcells_span(thrust::raw_pointer_cast(ipcells_device.data()),
-                                           ipcells_device.size());
-      std::span<std::int32_t> lcells_span(thrust::raw_pointer_cast(lcells_device.data()),
-                                          lcells_device.size());
-
       // These are alternative restriction/prolongation kernels, which should replace the CSR
       // matrices when fully working
 

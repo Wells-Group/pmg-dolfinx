@@ -6,30 +6,32 @@ namespace
 {
 
 template <typename T>
-__global__ void tabulate_tensor_Q1(int N, T* Aglobal, const T* wglobal, const T* c,
-                                   const T* coordinate_dofs_global, const std::int32_t* geom_dofmap,
-                                   const std::int32_t* dofmap, const std::int8_t* bc_dofs)
+__global__ void tabulate_tensor_Q1(int N, const std::int32_t* cell_list, T* Aglobal,
+                                   const T* wglobal, const T* c, const T* coordinate_dofs_global,
+                                   const std::int32_t* geom_dofmap, const std::int32_t* dofmap,
+                                   const std::int8_t* bc_dofs)
 {
   // Calculate the row index for this thread.
   int id = blockIdx.x * blockDim.x + threadIdx.x;
   // Check if the row index is out of bounds.
   if (id < N)
   {
+    int cell = cell_list[id];
     // Extract w from wglobal
     const int space_dim = 8;
     double w[space_dim];
     for (int i = 0; i < space_dim; ++i)
     {
-      int dof = dofmap[id * space_dim + i];
+      int dof = dofmap[cell * space_dim + i];
       w[i] = wglobal[dof] * bc_dofs[dof];
     }
 
     double coordinate_dofs[24];
     for (int i = 0; i < 8; ++i)
     {
-      coordinate_dofs[i * 3] = coordinate_dofs_global[geom_dofmap[id * 8 + i] * 3];
-      coordinate_dofs[i * 3 + 1] = coordinate_dofs_global[geom_dofmap[id * 8 + i] * 3 + 1];
-      coordinate_dofs[i * 3 + 2] = coordinate_dofs_global[geom_dofmap[id * 8 + i] * 3 + 2];
+      coordinate_dofs[i * 3] = coordinate_dofs_global[geom_dofmap[cell * 8 + i] * 3];
+      coordinate_dofs[i * 3 + 1] = coordinate_dofs_global[geom_dofmap[cell * 8 + i] * 3 + 1];
+      coordinate_dofs[i * 3 + 2] = coordinate_dofs_global[geom_dofmap[cell * 8 + i] * 3 + 2];
     }
     // Quadrature rules
     static const double weights_461[27]
@@ -328,37 +330,39 @@ __global__ void tabulate_tensor_Q1(int N, T* Aglobal, const T* wglobal, const T*
     }
     for (int i = 0; i < space_dim; ++i)
     {
-      int dof = dofmap[id * space_dim + i];
+      int dof = dofmap[cell * space_dim + i];
       atomicAdd(&Aglobal[dof], A[i] * bc_dofs[dof]);
     }
   }
 }
 
 template <typename T>
-__global__ void tabulate_tensor_Q2(int N, T* Aglobal, const T* wglobal, const T* c,
-                                   const T* coordinate_dofs_global, const std::int32_t* geom_dofmap,
-                                   const std::int32_t* dofmap, const std::int8_t* bc_dofs)
+__global__ void tabulate_tensor_Q2(int N, const std::int32_t* cell_list, T* Aglobal,
+                                   const T* wglobal, const T* c, const T* coordinate_dofs_global,
+                                   const std::int32_t* geom_dofmap, const std::int32_t* dofmap,
+                                   const std::int8_t* bc_dofs)
 {
   // Calculate the row index for this thread.
   int id = blockIdx.x * blockDim.x + threadIdx.x;
   // Check if the row index is out of bounds.
   if (id < N)
   {
+    int cell = cell_list[id];
     // Extract w from wglobal
     const int space_dim = 27;
     double w[space_dim];
     for (int i = 0; i < space_dim; ++i)
     {
-      int dof = dofmap[id * space_dim + i];
+      int dof = dofmap[cell * space_dim + i];
       w[i] = wglobal[dof] * bc_dofs[dof];
     }
 
     double coordinate_dofs[24];
     for (int i = 0; i < 8; ++i)
     {
-      coordinate_dofs[i * 3] = coordinate_dofs_global[geom_dofmap[id * 8 + i] * 3];
-      coordinate_dofs[i * 3 + 1] = coordinate_dofs_global[geom_dofmap[id * 8 + i] * 3 + 1];
-      coordinate_dofs[i * 3 + 2] = coordinate_dofs_global[geom_dofmap[id * 8 + i] * 3 + 2];
+      coordinate_dofs[i * 3] = coordinate_dofs_global[geom_dofmap[cell * 8 + i] * 3];
+      coordinate_dofs[i * 3 + 1] = coordinate_dofs_global[geom_dofmap[cell * 8 + i] * 3 + 1];
+      coordinate_dofs[i * 3 + 2] = coordinate_dofs_global[geom_dofmap[cell * 8 + i] * 3 + 2];
     }
 
     // Quadrature rules
@@ -680,37 +684,39 @@ __global__ void tabulate_tensor_Q2(int N, T* Aglobal, const T* wglobal, const T*
     }
     for (int i = 0; i < space_dim; ++i)
     {
-      int dof = dofmap[id * space_dim + i];
+      int dof = dofmap[cell * space_dim + i];
       atomicAdd(&Aglobal[dof], A[i] * bc_dofs[dof]);
     }
   }
 }
 
 template <typename T>
-__global__ void tabulate_tensor_Q3(int N, T* Aglobal, const T* wglobal, const T* c,
-                                   const T* coordinate_dofs_global, const std::int32_t* geom_dofmap,
-                                   const std::int32_t* dofmap, const std::int8_t* bc_dofs)
+__global__ void tabulate_tensor_Q3(int N, const std::int32_t* cell_list, T* Aglobal,
+                                   const T* wglobal, const T* c, const T* coordinate_dofs_global,
+                                   const std::int32_t* geom_dofmap, const std::int32_t* dofmap,
+                                   const std::int8_t* bc_dofs)
 {
   // Calculate the row index for this thread.
   int id = blockIdx.x * blockDim.x + threadIdx.x;
   // Check if the row index is out of bounds.
   if (id < N)
   {
+    int cell = cell_list[id];
     // Extract w from wglobal
     const int space_dim = 64;
     double w[space_dim];
     for (int i = 0; i < space_dim; ++i)
     {
-      int dof = dofmap[id * space_dim + i];
+      int dof = dofmap[cell * space_dim + i];
       w[i] = wglobal[dof] * bc_dofs[dof];
     }
 
     double coordinate_dofs[24];
     for (int i = 0; i < 8; ++i)
     {
-      coordinate_dofs[i * 3] = coordinate_dofs_global[geom_dofmap[id * 8 + i] * 3];
-      coordinate_dofs[i * 3 + 1] = coordinate_dofs_global[geom_dofmap[id * 8 + i] * 3 + 1];
-      coordinate_dofs[i * 3 + 2] = coordinate_dofs_global[geom_dofmap[id * 8 + i] * 3 + 2];
+      coordinate_dofs[i * 3] = coordinate_dofs_global[geom_dofmap[cell * 8 + i] * 3];
+      coordinate_dofs[i * 3 + 1] = coordinate_dofs_global[geom_dofmap[cell * 8 + i] * 3 + 1];
+      coordinate_dofs[i * 3 + 2] = coordinate_dofs_global[geom_dofmap[cell * 8 + i] * 3 + 2];
     }
 
     // Quadrature rules
@@ -1050,7 +1056,7 @@ __global__ void tabulate_tensor_Q3(int N, T* Aglobal, const T* wglobal, const T*
     }
     for (int i = 0; i < space_dim; ++i)
     {
-      int dof = dofmap[id * space_dim + i];
+      int dof = dofmap[cell * space_dim + i];
       atomicAdd(&Aglobal[dof], A[i] * bc_dofs[dof]);
     }
   }
@@ -1063,11 +1069,12 @@ template <typename T>
 class MatFreeLaplace
 {
 public:
-  MatFreeLaplace(int degree, int num_cells, std::span<const T> constants, std::span<const T> x,
-                 std::span<const std::int32_t> x_dofmap, std::span<const std::int32_t> dofmap,
-                 std::span<const std::int8_t> bc_dofs)
-      : num_cells(num_cells), constants(constants), x(x), x_dofmap(x_dofmap), dofmap(dofmap),
-        bc_dofs(bc_dofs)
+  MatFreeLaplace(int degree, std::span<const std::int32_t> local_cells,
+                 std::span<const std::int32_t> boundary_cells, std::span<const T> constants,
+                 std::span<const T> x, std::span<const std::int32_t> x_dofmap,
+                 std::span<const std::int32_t> dofmap, std::span<const std::int8_t> bc_dofs)
+      : local_cells(local_cells), boundary_cells(boundary_cells), constants(constants), x(x),
+        x_dofmap(x_dofmap), dofmap(dofmap), bc_dofs(bc_dofs)
   {
     switch (degree)
     {
@@ -1081,7 +1088,7 @@ public:
       tabulate_tensor = tabulate_tensor_Q3;
       break;
     default:
-      // TODO throw error
+      throw std::runtime_error("Invalid degree");
       break;
     }
     // TODO Other degrees
@@ -1093,27 +1100,47 @@ public:
   void operator()(Vector& in, Vector& out)
   {
     dolfinx::common::Timer tmf("% MatFree operator " + std::to_string(dofmap.size()));
+
+    // Start vector update of input_vector
+    in.scatter_fwd_begin();
+
     T* wglobal = in.mutable_array().data();
     T* Aglobal = out.mutable_array().data();
 
     // Zero result vector
     err_check(hipMemset(Aglobal, 0, out.mutable_array().size() * sizeof(T)));
 
-    dim3 block_size(256);
+    int num_cells = local_cells.size();
+    dim3 block_size(16);
     dim3 grid_size((num_cells + block_size.x - 1) / block_size.x);
-    hipLaunchKernelGGL(tabulate_tensor, grid_size, block_size, 0, 0, num_cells, Aglobal, wglobal,
-                       constants.data(), x.data(), x_dofmap.data(), dofmap.data(), bc_dofs.data());
+    hipLaunchKernelGGL(tabulate_tensor, grid_size, block_size, 0, 0, num_cells, local_cells.data(),
+                       Aglobal, wglobal, constants.data(), x.data(), x_dofmap.data(), dofmap.data(),
+                       bc_dofs.data());
+    err_check(hipGetLastError());
+
+    // Wait for vector update of input_vector to complete
+    in.scatter_fwd_end();
+
+    num_cells = boundary_cells.size();
+    grid_size.x = ((num_cells + block_size.x - 1) / block_size.x);
+    hipLaunchKernelGGL(tabulate_tensor, grid_size, block_size, 0, 0, num_cells,
+                       boundary_cells.data(), Aglobal, wglobal, constants.data(), x.data(),
+                       x_dofmap.data(), dofmap.data(), bc_dofs.data());
     err_check(hipGetLastError());
   }
 
 private:
-  int num_cells;
+  // List of cells which are local, and which are on boundary (requiring update before matvec)
+  std::span<const std::int32_t> local_cells;
+  std::span<const std::int32_t> boundary_cells;
+
   std::span<const T> constants;
   std::span<const T> x;
   std::span<const std::int32_t> x_dofmap;
   std::span<const std::int32_t> dofmap;
   std::span<const std::int8_t> bc_dofs;
-  void (*tabulate_tensor)(int, T*, const T*, const T*, const T*, const std::int32_t*,
-                          const std::int32_t*, const std::int8_t*);
+
+  void (*tabulate_tensor)(int, const std::int32_t*, T*, const T*, const T*, const T*,
+                          const std::int32_t*, const std::int32_t*, const std::int8_t*);
 };
 } // namespace dolfinx::acc
