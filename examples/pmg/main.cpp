@@ -217,7 +217,7 @@ int main(int argc, char* argv[])
     auto kappa = std::make_shared<fem::Constant<T>>(2.0);
     for (std::size_t i = 0; i < form_a.size(); i++)
     {
-      auto element = basix::create_element<T>(
+      auto element = basix::create_tp_element<T>(
           basix::element::family::P, basix::cell::type::hexahedron, i + 1,
           basix::element::lagrange_variant::gll_warped, basix::element::dpc_variant::unset, false);
 
