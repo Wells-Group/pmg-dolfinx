@@ -369,7 +369,7 @@ public:
   template <typename Vector>
   void operator()(Vector& x, Vector& y, bool transpose = false)
   {
-    dolfinx::common::Timer t0("~MatrixOperator application");
+    dolfinx::common::Timer t0("% MatrixOperator application");
 
     y.set(T{0});
     T* _x = x.mutable_array().data();
