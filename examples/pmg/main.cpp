@@ -400,14 +400,19 @@ int main(int argc, char* argv[])
 
       // These are alternative restriction/prolongation kernels, which should replace the CSR
       // matrices when fully working
+
       auto interpolator_V1_V0 = std::make_shared<Interpolator<T>>(
-          2, 1, dofmapV1_span, dofmapV0_span, ipcells_span, lcells_span);
+          V[1]->element()->basix_element(), V[0]->element()->basix_element(), dofmapV1_span,
+          dofmapV0_span, ipcells_span, lcells_span);
       auto interpolator_V2_V1 = std::make_shared<Interpolator<T>>(
-          3, 2, dofmapV2_span, dofmapV1_span, ipcells_span, lcells_span);
+          V[2]->element()->basix_element(), V[1]->element()->basix_element(), dofmapV2_span,
+          dofmapV1_span, ipcells_span, lcells_span);
       auto interpolator_V0_V1 = std::make_shared<Interpolator<T>>(
-          1, 2, dofmapV0_span, dofmapV1_span, ipcells_span, lcells_span);
+          V[0]->element()->basix_element(), V[1]->element()->basix_element(), dofmapV0_span,
+          dofmapV1_span, ipcells_span, lcells_span);
       auto interpolator_V1_V2 = std::make_shared<Interpolator<T>>(
-          2, 3, dofmapV1_span, dofmapV2_span, ipcells_span, lcells_span);
+          V[1]->element()->basix_element(), V[2]->element()->basix_element(), dofmapV1_span,
+          dofmapV2_span, ipcells_span, lcells_span);
 
       int_kerns = {interpolator_V1_V0, interpolator_V2_V1};
       prolong_kerns = {interpolator_V0_V1, interpolator_V1_V2};
