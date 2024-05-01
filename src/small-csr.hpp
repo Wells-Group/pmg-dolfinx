@@ -1,6 +1,8 @@
 #include <hip/hip_runtime.h>
 #include <thrust/device_vector.h>
 
+#pragma once
+
 // Simple class for a CSR matrix stored on-device
 //
 template <typename T>

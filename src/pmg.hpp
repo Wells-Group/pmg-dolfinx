@@ -92,7 +92,7 @@ public:
       axpy(*_r[i], T(-1), *_r[i], *_b[i]);
 
       double rn = acc::norm(*_r[i]);
-      // LOG(INFO) << "Residual norm before (" << i << ") = " << rn;
+      LOG(2) << "Residual norm before (" << i << ") = " << rn;
 
       // u[i] = M^-1 b[i]
       _solvers[i]->solve(*_operators[i], *_u[i], *_b[i], false);
@@ -102,12 +102,12 @@ public:
       axpy(*_r[i], T(-1), *_r[i], *_b[i]);
 
       rn = acc::norm(*_r[i]);
-      // LOG(INFO) << "Residual norm after (" << i << ") = " << rn;
+      LOG(2) << "Residual norm after (" << i << ") = " << rn;
 
       // Restrict residual from level i to level (i - 1)
       if (_interpolation_kernels[i - 1])
       {
-        // LOG(INFO) << "***** Using interpolation kernel " << i - 1;
+        LOG(2) << "***** Using interpolation kernel " << i - 1;
 
         // Use "interpolation kernel" if available. Interpolate r[i] into b[i-1].
         _interpolation_kernels[i - 1]->interpolate(*_r[i], *_b[i - 1]);
@@ -121,7 +121,7 @@ public:
     axpy(*_r[0], T(-1), *_r[0], *_b[0]);
 
     double rn = acc::norm(*_r[0]);
-    // LOG(INFO) << "Residual norm before (0) = " << rn;
+    LOG(2) << "Residual norm before (0) = " << rn;
 
     // Solve coarse problem
     if (_coarse_solver)

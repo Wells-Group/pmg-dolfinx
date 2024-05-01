@@ -407,35 +407,6 @@ int main(int argc, char* argv[])
       bs[i]->copy_from_host(b);
     }
 
-    LOG(INFO) << "Create Chebyshev smoothers";
-
-    // Create chebyshev smoother for each level
-    std::vector<std::shared_ptr<acc::Chebyshev<DeviceVector>>> smoothers(V.size());
-    for (std::size_t i = 0; i < V.size(); i++)
-    {
-      dolfinx::acc::CGSolver<DeviceVector> cg(maps[i], 1);
-      cg.set_max_iterations(20);
-      cg.set_tolerance(1e-5);
-      cg.store_coefficients(true);
-
-      DeviceVector x(maps[i], 1);
-      x.set(T{0.0});
-
-      //      (*operators[i])(*bs[i], x);
-
-      [[maybe_unused]] int its = cg.solve(*operators[i], x, *bs[i], false);
-      std::vector<T> eign = cg.compute_eigenvalues();
-      std::sort(eign.begin(), eign.end());
-      std::array<T, 2> eig_range = {0.8 * eign.front(), 1.2 * eign.back()};
-      smoothers[i] = std::make_shared<acc::Chebyshev<DeviceVector>>(maps[i], 1, eig_range, 2);
-
-      LOG(INFO) << "Eigenvalues level " << i << ": " << eign.front() << " " << eign.back();
-    }
-
-    smoothers[0]->set_max_iterations(20);
-    smoothers[1]->set_max_iterations(10);
-    smoothers[2]->set_max_iterations(5);
-
     // Create Restriction operator
     std::vector<std::shared_ptr<acc::MatrixOperator<T>>> restriction(V.size() - 1);
 
@@ -477,6 +448,43 @@ int main(int argc, char* argv[])
       int_kerns = {interpolator_V1_V0, interpolator_V2_V1};
       prolong_kerns = {interpolator_V0_V1, interpolator_V1_V2};
     }
+
+    // Copy pointers to interpolation matrices for use in kernels
+    std::vector<const SmallCSRDevice<T>*> device_mats = {
+        int_kerns[1]->matrix()->device_matrix(), int_kerns[0]->matrix()->device_matrix(),
+        prolong_kerns[0]->matrix()->device_matrix(), prolong_kerns[1]->matrix()->device_matrix()};
+    operators[0]->set_mats(device_mats);
+    operators[1]->set_mats(device_mats);
+    operators[2]->set_mats(device_mats);
+
+    LOG(INFO) << "Create Chebyshev smoothers";
+
+    // Create chebyshev smoother for each level
+    std::vector<std::shared_ptr<acc::Chebyshev<DeviceVector>>> smoothers(V.size());
+    for (std::size_t i = 0; i < V.size(); i++)
+    {
+      dolfinx::acc::CGSolver<DeviceVector> cg(maps[i], 1);
+      cg.set_max_iterations(20);
+      cg.set_tolerance(1e-5);
+      cg.store_coefficients(true);
+
+      DeviceVector x(maps[i], 1);
+      x.set(T{0.0});
+
+      //      (*operators[i])(*bs[i], x);
+
+      [[maybe_unused]] int its = cg.solve(*operators[i], x, *bs[i], false);
+      std::vector<T> eign = cg.compute_eigenvalues();
+      std::sort(eign.begin(), eign.end());
+      std::array<T, 2> eig_range = {0.8 * eign.front(), 1.2 * eign.back()};
+      smoothers[i] = std::make_shared<acc::Chebyshev<DeviceVector>>(maps[i], 1, eig_range, 2);
+
+      LOG(INFO) << "Eigenvalues level " << i << ": " << eign.front() << " " << eign.back();
+    }
+
+    smoothers[0]->set_max_iterations(20);
+    smoothers[1]->set_max_iterations(10);
+    smoothers[2]->set_max_iterations(5);
 
 #ifdef MATRIX_FREE
     using OpType = acc::MatFreeLaplace<T>;

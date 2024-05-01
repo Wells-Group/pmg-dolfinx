@@ -73,7 +73,7 @@ public:
     assert(_row_offset.size() == num_cell_dofs_Q2 + 1);
 
     auto [mat, shape] = basix::compute_interpolation_operator(inp_element, out_element);
-    _mat_csr = std::make_unique<SmallCSR<T>>(mat, shape);
+    _mat_csr = std::make_shared<SmallCSR<T>>(mat, shape);
   }
 
   // Interpolate from input_values to output_values (both on device)
@@ -121,13 +121,15 @@ public:
     err_check(hipGetLastError());
   }
 
+  std::shared_ptr<SmallCSR<T>> matrix() { return _mat_csr; }
+
 private:
   // Dofmap widths
   int num_cell_dofs_Q1;
   int num_cell_dofs_Q2;
 
   // Per-cell CSR interpolation matrix
-  std::unique_ptr<SmallCSR<T>> _mat_csr;
+  std::shared_ptr<SmallCSR<T>> _mat_csr;
 
   // Dofmaps (on device).
   std::span<const std::int32_t> input_dofmap;
