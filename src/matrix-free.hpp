@@ -1111,7 +1111,6 @@ public:
     err_check(hipMemset(Aglobal, 0, out.mutable_array().size() * sizeof(T)));
 
     int num_cells = local_cells.size();
-    LOG(INFO) << "Launch matfree kernel on " << num_cells << " cells (local)";
     dim3 block_size(256);
     dim3 grid_size((num_cells + block_size.x - 1) / block_size.x);
     hipLaunchKernelGGL(tabulate_tensor, grid_size, block_size, 0, 0, num_cells, local_cells.data(),
@@ -1125,7 +1124,6 @@ public:
     num_cells = boundary_cells.size();
     if (num_cells > 0)
     {
-      LOG(INFO) << "Launch matfree kernel on " << num_cells << " cells (boundary)";
       grid_size.x = ((num_cells + block_size.x - 1) / block_size.x);
       hipLaunchKernelGGL(tabulate_tensor, grid_size, block_size, 0, 0, num_cells,
                          boundary_cells.data(), Aglobal, wglobal, constants.data(), x.data(),

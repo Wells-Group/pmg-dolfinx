@@ -1,3 +1,4 @@
+#include "small-csr.hpp"
 #include <basix/finite-element.h>
 #include <basix/interpolation.h>
 #include <cstdint>
@@ -23,8 +24,7 @@ template <typename T>
 __global__ void interpolate_Q1Q2(int N, const std::int32_t* cell_list, const std::int32_t* Q1dofmap,
                                  int Q1_dofs_per_cell, const std::int32_t* Q2dofmap,
                                  int Q2_dofs_per_cell, const T* valuesQ1, T* valuesQ2,
-                                 const std::int32_t* mat_row_offset, const std::int32_t* mat_column,
-                                 const T* mat_value)
+                                 const SmallCSRDevice<T>* mat)
 {
   // Calculate the cell index for this thread.
   int i = blockIdx.x * blockDim.x + threadIdx.x;
@@ -34,47 +34,8 @@ __global__ void interpolate_Q1Q2(int N, const std::int32_t* cell_list, const std
     const std::int32_t cell = cell_list[i];
     const std::int32_t* cellQ1 = Q1dofmap + cell * Q1_dofs_per_cell;
     const std::int32_t* cellQ2 = Q2dofmap + cell * Q2_dofs_per_cell;
-
-    for (std::int32_t j = 0; j < Q2_dofs_per_cell; j++)
-    {
-      T vj = 0;
-      // Use small CSR matrix on cell-local dofs
-      for (std::int32_t k = mat_row_offset[j]; k < mat_row_offset[j + 1]; ++k)
-        vj += mat_value[k] * valuesQ1[cellQ1[mat_column[k]]];
-      valuesQ2[cellQ2[j]] = vj;
-    }
+    mat->apply_indirect(cellQ1, cellQ2, valuesQ1, valuesQ2);
   }
-}
-
-// Compress a dense matrix to a CSR sparse matrix
-// Values less than tol are set to zero.
-// Input: matrix in RowMajor order, shape
-// Output: {row_offset, columns, values} of CSR matrix
-template <std::floating_point T>
-std::tuple<std::vector<std::int32_t>, std::vector<std::int32_t>, std::vector<T>>
-compress_to_csr(const std::vector<T>& mat, std::array<std::size_t, 2> shape, T tol = 1e-12)
-{
-  std::vector<std::int32_t> row_ptr = {0};
-  std::vector<std::int32_t> cols;
-  std::vector<T> vals;
-
-  for (std::size_t row = 0; row < shape[0]; ++row)
-  {
-    for (std::size_t col = 0; col < shape[1]; ++col)
-    {
-      T val = mat[row * shape[1] + col];
-      if (std::abs(val) > tol)
-      {
-        cols.push_back(col);
-        vals.push_back(val);
-      }
-    }
-    row_ptr.push_back(cols.size());
-  }
-
-  LOG(INFO) << "Compressed dense matrix from " << mat.size() << " to " << vals.size()
-            << " CSR values";
-  return {std::move(row_ptr), std::move(cols), std::move(vals)};
 }
 
 } // namespace
@@ -112,17 +73,7 @@ public:
     assert(_row_offset.size() == num_cell_dofs_Q2 + 1);
 
     auto [mat, shape] = basix::compute_interpolation_operator(inp_element, out_element);
-    std::tie(_row_offset, _cols, _vals) = compress_to_csr(mat, shape);
-
-    // Copy small CSR matrix to device
-    mat_row_offset.resize(_row_offset.size());
-    thrust::copy(_row_offset.begin(), _row_offset.end(), mat_row_offset.begin());
-    mat_column.resize(_cols.size());
-    thrust::copy(_cols.begin(), _cols.end(), mat_column.begin());
-    mat_value.resize(_vals.size());
-    thrust::copy(_vals.begin(), _vals.end(), mat_value.begin());
-
-    err_check(hipDeviceSynchronize());
+    _mat_csr = std::make_unique<SmallCSR<T>>(mat, shape);
   }
 
   // Interpolate from input_values to output_values (both on device)
@@ -148,14 +99,10 @@ public:
     LOG(INFO) << "From " << num_cell_dofs_Q1 << " dofs/cell to " << num_cell_dofs_Q2 << " on "
               << ncells << " cells";
 
-    const std::int32_t* _mat_row_ptr = thrust::raw_pointer_cast(mat_row_offset.data());
-    const std::int32_t* _mat_col = thrust::raw_pointer_cast(mat_column.data());
-    const T* _mat_val = thrust::raw_pointer_cast(mat_value.data());
-
     hipLaunchKernelGGL(interpolate_Q1Q2<T>, grid_size, block_size, 0, 0, ncells, cell_list,
                        input_dofmap.data(), num_cell_dofs_Q1, output_dofmap.data(),
-                       num_cell_dofs_Q2, input_values, output_values, _mat_row_ptr, _mat_col,
-                       _mat_val);
+                       num_cell_dofs_Q2, input_values, output_values, _mat_csr->device_matrix());
+
     err_check(hipGetLastError());
 
     // Wait for vector update of input_vector to complete
@@ -168,8 +115,7 @@ public:
 
     hipLaunchKernelGGL(interpolate_Q1Q2<T>, grid_size, block_size, 0, 0, ncells, b_cell_list,
                        input_dofmap.data(), num_cell_dofs_Q1, output_dofmap.data(),
-                       num_cell_dofs_Q2, input_values, output_values, _mat_row_ptr, _mat_col,
-                       _mat_val);
+                       num_cell_dofs_Q2, input_values, output_values, _mat_csr->device_matrix());
 
     err_check(hipDeviceSynchronize());
     err_check(hipGetLastError());
@@ -180,10 +126,8 @@ private:
   int num_cell_dofs_Q1;
   int num_cell_dofs_Q2;
 
-  // Per-cell CSR interpolation matrix (on device)
-  thrust::device_vector<std::int32_t> mat_row_offset;
-  thrust::device_vector<std::int32_t> mat_column;
-  thrust::device_vector<T> mat_value;
+  // Per-cell CSR interpolation matrix
+  std::unique_ptr<SmallCSR<T>> _mat_csr;
 
   // Dofmaps (on device).
   std::span<const std::int32_t> input_dofmap;
