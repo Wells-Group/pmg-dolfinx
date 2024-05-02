@@ -7,19 +7,18 @@ template <typename T>
 class SmallCSRDevice
 {
 public:
-  SmallCSRDevice(std::int32_t* _row_ptr, std::int32_t* _cols, T* _vals)
-      : row_ptr(_row_ptr), cols(_cols), vals(_vals)
+  SmallCSRDevice(int _nrows, std::int32_t* _row_ptr, std::int32_t* _cols, T* _vals)
+      : nrows(_nrows), row_ptr(_row_ptr), cols(_cols), vals(_vals)
   {
   }
 
   // Apply matrix direct to input data
   __device__ void apply(const T* data_in, T* data_out) const
   {
-    int nrows = row_ptr[0];
     for (std::int32_t j = 0; j < nrows; j++)
     {
       T vj = 0;
-      for (std::int32_t k = row_ptr[j + 1]; k < row_ptr[j + 2]; ++k)
+      for (std::int32_t k = row_ptr[j]; k < row_ptr[j + 1]; ++k)
         vj += vals[k] * data_in[cols[k]];
       data_out[j] = vj;
     }
@@ -29,17 +28,17 @@ public:
   __device__ void apply_indirect(const std::int32_t* map_in, const std::int32_t* map_out,
                                  const T* data_in, T* data_out) const
   {
-    int nrows = row_ptr[0];
     for (std::int32_t j = 0; j < nrows; j++)
     {
       T vj = 0;
-      for (std::int32_t k = row_ptr[j + 1]; k < row_ptr[j + 2]; ++k)
+      for (std::int32_t k = row_ptr[j]; k < row_ptr[j + 1]; ++k)
         vj += vals[k] * data_in[map_in[cols[k]]];
       data_out[map_out[j]] = vj;
     }
   }
 
   // Pointers to row offsets, columns and values, already allocated on device
+  std::int32_t nrows;
   std::int32_t* row_ptr;
   std::int32_t* cols;
   T* vals;
@@ -68,7 +67,7 @@ public:
     vals.resize(values.size());
     thrust::copy(values.begin(), values.end(), vals.begin());
 
-    SmallCSRDevice<T> m(thrust::raw_pointer_cast(row_offset.data()),
+    SmallCSRDevice<T> m(row_offset.size() - 1, thrust::raw_pointer_cast(row_offset.data()),
                         thrust::raw_pointer_cast(cols.data()),
                         thrust::raw_pointer_cast(vals.data()));
     err_check(hipMalloc((void**)&mat_device, sizeof(SmallCSRDevice<T>)));
@@ -81,13 +80,12 @@ public:
   SmallCSR(const std::vector<T>& mat, std::array<std::size_t, 2> shape, bool use_transpose,
            T tol = 1e-12)
   {
-    std::vector<std::int32_t> row_ptr;
+    std::vector<std::int32_t> row_ptr = {0};
     std::vector<std::int32_t> columns;
     std::vector<T> values;
 
     if (use_transpose)
     {
-      row_ptr = {static_cast<std::int32_t>(shape[1]), 0};
       for (std::size_t row = 0; row < shape[1]; ++row)
       {
         for (std::size_t col = 0; col < shape[0]; ++col)
@@ -104,7 +102,6 @@ public:
     }
     else
     {
-      row_ptr = {static_cast<std::int32_t>(shape[0]), 0};
       for (std::size_t row = 0; row < shape[0]; ++row)
       {
         for (std::size_t col = 0; col < shape[1]; ++col)
@@ -130,7 +127,7 @@ public:
     vals.resize(values.size());
     thrust::copy(values.begin(), values.end(), vals.begin());
 
-    SmallCSRDevice<T> m(thrust::raw_pointer_cast(row_offset.data()),
+    SmallCSRDevice<T> m(row_offset.size() - 1, thrust::raw_pointer_cast(row_offset.data()),
                         thrust::raw_pointer_cast(cols.data()),
                         thrust::raw_pointer_cast(vals.data()));
     err_check(hipMalloc((void**)&mat_device, sizeof(SmallCSRDevice<T>)));
