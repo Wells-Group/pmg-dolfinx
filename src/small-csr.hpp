@@ -78,24 +78,46 @@ public:
   // Compress a dense matrix to a CSR sparse matrix
   // Values less than tol are set to zero.
   // Input: matrix in RowMajor order, shape
-  SmallCSR(const std::vector<T>& mat, std::array<std::size_t, 2> shape, T tol = 1e-12)
+  SmallCSR(const std::vector<T>& mat, std::array<std::size_t, 2> shape, bool use_transpose,
+           T tol = 1e-12)
   {
-    std::vector<std::int32_t> row_ptr = {static_cast<std::int32_t>(shape[0]), 0};
+    std::vector<std::int32_t> row_ptr;
     std::vector<std::int32_t> columns;
     std::vector<T> values;
 
-    for (std::size_t row = 0; row < shape[0]; ++row)
+    if (use_transpose)
     {
-      for (std::size_t col = 0; col < shape[1]; ++col)
+      row_ptr = {static_cast<std::int32_t>(shape[1]), 0};
+      for (std::size_t row = 0; row < shape[1]; ++row)
       {
-        T val = mat[row * shape[1] + col];
-        if (std::abs(val) > tol)
+        for (std::size_t col = 0; col < shape[0]; ++col)
         {
-          columns.push_back(col);
-          values.push_back(val);
+          T val = mat[col * shape[1] + row];
+          if (std::abs(val) > tol)
+          {
+            columns.push_back(col);
+            values.push_back(val);
+          }
         }
+        row_ptr.push_back(columns.size());
       }
-      row_ptr.push_back(columns.size());
+    }
+    else
+    {
+      row_ptr = {static_cast<std::int32_t>(shape[0]), 0};
+      for (std::size_t row = 0; row < shape[0]; ++row)
+      {
+        for (std::size_t col = 0; col < shape[1]; ++col)
+        {
+          T val = mat[row * shape[1] + col];
+          if (std::abs(val) > tol)
+          {
+            columns.push_back(col);
+            values.push_back(val);
+          }
+        }
+        row_ptr.push_back(columns.size());
+      }
     }
 
     LOG(INFO) << "Compressed dense matrix from " << mat.size() << " to " << values.size()

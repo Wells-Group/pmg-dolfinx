@@ -54,7 +54,7 @@ public:
   Interpolator(const basix::FiniteElement<T>& inp_element,
                const basix::FiniteElement<T>& out_element, std::span<const std::int32_t> inp_dofmap,
                std::span<const std::int32_t> out_dofmap, std::span<const std::int32_t> b_cells,
-               std::span<const std::int32_t> l_cells)
+               std::span<const std::int32_t> l_cells, bool use_transpose)
       : input_dofmap(inp_dofmap), output_dofmap(out_dofmap), boundary_cells(b_cells),
         local_cells(l_cells)
   {
@@ -72,8 +72,16 @@ public:
     assert(output_dofmap.size() / num_cell_dofs_Q2 == input_dofmap.size() / num_cell_dofs_Q1);
     assert(_row_offset.size() == num_cell_dofs_Q2 + 1);
 
-    auto [mat, shape] = basix::compute_interpolation_operator(inp_element, out_element);
-    _mat_csr = std::make_unique<SmallCSR<T>>(mat, shape);
+    if (use_transpose)
+    {
+      auto [mat, shape] = basix::compute_interpolation_operator(out_element, inp_element);
+      _mat_csr = std::make_unique<SmallCSR<T>>(mat, shape, true);
+    }
+    else
+    {
+      auto [mat, shape] = basix::compute_interpolation_operator(inp_element, out_element);
+      _mat_csr = std::make_unique<SmallCSR<T>>(mat, shape, false);
+    }
   }
 
   // Interpolate from input_values to output_values (both on device)

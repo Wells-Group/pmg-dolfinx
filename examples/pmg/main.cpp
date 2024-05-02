@@ -463,16 +463,16 @@ int main(int argc, char* argv[])
 
       auto interpolator_V1_V0 = std::make_shared<Interpolator<T>>(
           V[1]->element()->basix_element(), V[0]->element()->basix_element(), device_dofmaps[1],
-          device_dofmaps[0], ipcells_span, lcells_span);
+          device_dofmaps[0], ipcells_span, lcells_span, true);
       auto interpolator_V2_V1 = std::make_shared<Interpolator<T>>(
           V[2]->element()->basix_element(), V[1]->element()->basix_element(), device_dofmaps[2],
-          device_dofmaps[1], ipcells_span, lcells_span);
+          device_dofmaps[1], ipcells_span, lcells_span, true);
       auto interpolator_V0_V1 = std::make_shared<Interpolator<T>>(
           V[0]->element()->basix_element(), V[1]->element()->basix_element(), device_dofmaps[0],
-          device_dofmaps[1], ipcells_span, lcells_span);
+          device_dofmaps[1], ipcells_span, lcells_span, false);
       auto interpolator_V1_V2 = std::make_shared<Interpolator<T>>(
           V[1]->element()->basix_element(), V[2]->element()->basix_element(), device_dofmaps[1],
-          device_dofmaps[2], ipcells_span, lcells_span);
+          device_dofmaps[2], ipcells_span, lcells_span, false);
 
       int_kerns = {interpolator_V1_V0, interpolator_V2_V1};
       prolong_kerns = {interpolator_V0_V1, interpolator_V1_V2};
