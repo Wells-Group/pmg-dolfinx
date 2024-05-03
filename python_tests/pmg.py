@@ -50,8 +50,12 @@ def u_i(x):
     return np.zeros_like(x[0])
 
 
+def level_print(string, level):
+    print(f"{(len(ks) - level) * "    "}{string}")
+
+
 n = 10
-ks = [1, 3]
+ks = [1, 2, 3]
 num_iters = 10
 kappa = 1.0
 comm = MPI.COMM_WORLD
@@ -137,21 +141,25 @@ us[-1].interpolate(u_i)
 for iter in range(num_iters):
     # Start of iteration
     print(f"Iteration {iter + 1}:")
-    print(
-        f"    Initial:              residual norm = {(residual(bs[-1], As[-1], us[-1])).norm()}"
-    )
 
     # FIXME Zero initial guesses of error every iter?
     for u in us[:-1]:
         u.vector.set(0.0)
 
     for i in range(len(ks) - 1, 0, -1):
+        level_print(f"Level {i}:", i)
+        level_print(
+            f"    Initial:              residual norm = {(residual(bs[i], As[i], us[i])).norm()}",
+            i,
+        )
         # Smooth A_1 u_1 = b_1 on fine level
         solvers[i].solve(bs[i].vector, us[i].vector)
 
         # Compute residual r_1 = b_1 - A_1 u_1
-        rs[i].vector.array[:] = residual(bs[-1], As[i], us[i])
-        print(f"    After initial smooth: residual norm = {rs[1].vector.norm()}")
+        rs[i].vector.array[:] = residual(bs[i], As[i], us[i])
+        level_print(
+            f"    After initial smooth: residual norm = {rs[i].vector.norm()}", i
+        )
         r_files[i].write(iter)
 
         # Interpolate residual to coarse level
@@ -160,26 +168,31 @@ for iter in range(num_iters):
 
     # Solve A_0 e_0 = r_0 for error on coarse level
     petsc.set_bc(bs[0].vector, bcs=[bcs[0]])
-    solvers[0].solve(bs[0].vector, es[0].vector)
+    solvers[0].solve(bs[0].vector, us[0].vector)
     e_files[0].write(iter)
+    level_print("Level 0:", 0)
+    level_print(f"    residual norm = {(residual(bs[0], As[0], us[0])).norm()}", 0)
 
     for i in range(len(ks) - 1):
         # Interpolate error to fine level
-        es[i + 1].interpolate(es[i])
+        es[i + 1].interpolate(us[i])
         e_files[i + 1].write(iter)
 
         # Add error to solution u_1 += e_1
         us[i + 1].vector.array[:] += es[i + 1].vector.array
 
-        print(
-            f"    After correction:     residual norm = {(residual(bs[-1], As[-1], us[-1])).norm()}"
+        level_print(f"Level {i + 1}:", i + 1)
+        level_print(
+            f"    After correction:     residual norm = {(residual(bs[i + 1], As[i + 1], us[i + 1])).norm()}",
+            i + 1,
         )
 
         # Smooth on fine level A_1 u_1 = b_1
         solvers[i + 1].solve(bs[i + 1].vector, us[i + 1].vector)
 
-        print(
-            f"    After final smooth:   residual norm = {(residual(bs[-1], As[-1], us[-1])).norm()}"
+        level_print(
+            f"    After final smooth:   residual norm = {(residual(bs[i + 1], As[i + 1], us[i + 1])).norm()}",
+            i + 1,
         )
 
         u_files[i + 1].write(iter)
