@@ -22,7 +22,7 @@
 #include <memory>
 #include <mpi.h>
 
-#define MATRIX_FREE
+// #define MATRIX_FREE
 
 using namespace dolfinx;
 using T = double;
@@ -463,10 +463,10 @@ int main(int argc, char* argv[])
 
       auto interpolator_V1_V0 = std::make_shared<Interpolator<T>>(
           V[1]->element()->basix_element(), V[0]->element()->basix_element(), device_dofmaps[1],
-          device_dofmaps[0], ipcells_span, lcells_span, true);
+          device_dofmaps[0], ipcells_span, lcells_span, false);
       auto interpolator_V2_V1 = std::make_shared<Interpolator<T>>(
           V[2]->element()->basix_element(), V[1]->element()->basix_element(), device_dofmaps[2],
-          device_dofmaps[1], ipcells_span, lcells_span, true);
+          device_dofmaps[1], ipcells_span, lcells_span, false);
       auto interpolator_V0_V1 = std::make_shared<Interpolator<T>>(
           V[0]->element()->basix_element(), V[1]->element()->basix_element(), device_dofmaps[0],
           device_dofmaps[1], ipcells_span, lcells_span, false);
@@ -498,7 +498,7 @@ int main(int argc, char* argv[])
 
     // Sets CSR matrices or matrix-free kernels to do interpolation
     pmg.set_interpolators(prolongation);
-    pmg.set_restriction_interpolators(restriction);
+    //    pmg.set_restriction_interpolators(restriction);
     pmg.set_interpolation_kernels(int_kerns);
     pmg.set_prolongation_kernels(prolong_kerns);
 

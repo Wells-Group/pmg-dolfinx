@@ -7,15 +7,16 @@ template <typename T>
 class SmallCSRDevice
 {
 public:
-  SmallCSRDevice(int _nrows, std::int32_t* _row_ptr, std::int32_t* _cols, T* _vals)
-      : nrows(_nrows), row_ptr(_row_ptr), cols(_cols), vals(_vals)
+  SmallCSRDevice(std::span<std::int32_t> _row_ptr, std::span<std::int32_t> _cols,
+                 std::span<T> _vals)
+      : row_ptr(_row_ptr), cols(_cols), vals(_vals)
   {
   }
 
   // Apply matrix direct to input data
   __device__ void apply(const T* data_in, T* data_out) const
   {
-    for (std::int32_t j = 0; j < nrows; j++)
+    for (std::int32_t j = 0; j < row_ptr.size() - 1; j++)
     {
       T vj = 0;
       for (std::int32_t k = row_ptr[j]; k < row_ptr[j + 1]; ++k)
@@ -28,7 +29,7 @@ public:
   __device__ void apply_indirect(const std::int32_t* map_in, const std::int32_t* map_out,
                                  const T* data_in, T* data_out) const
   {
-    for (std::int32_t j = 0; j < nrows; j++)
+    for (std::int32_t j = 0; j < row_ptr.size() - 1; j++)
     {
       T vj = 0;
       for (std::int32_t k = row_ptr[j]; k < row_ptr[j + 1]; ++k)
@@ -38,10 +39,9 @@ public:
   }
 
   // Pointers to row offsets, columns and values, already allocated on device
-  std::int32_t nrows;
-  std::int32_t* row_ptr;
-  std::int32_t* cols;
-  T* vals;
+  std::span<std::int32_t> row_ptr;
+  std::span<std::int32_t> cols;
+  std::span<T> vals;
 };
 
 template <typename T>
@@ -66,10 +66,10 @@ public:
     thrust::copy(row_ptr.begin(), row_ptr.end(), row_offset.begin());
     vals.resize(values.size());
     thrust::copy(values.begin(), values.end(), vals.begin());
-
-    SmallCSRDevice<T> m(row_offset.size() - 1, thrust::raw_pointer_cast(row_offset.data()),
-                        thrust::raw_pointer_cast(cols.data()),
-                        thrust::raw_pointer_cast(vals.data()));
+    SmallCSRDevice<T> m(
+        std::span<std::int32_t>(thrust::raw_pointer_cast(row_offset.data()), row_offset.size()),
+        std::span<std::int32_t>(thrust::raw_pointer_cast(cols.data()), cols.size()),
+        std::span<T>(thrust::raw_pointer_cast(vals.data()), vals.size()));
     err_check(hipMalloc((void**)&mat_device, sizeof(SmallCSRDevice<T>)));
     err_check(hipMemcpy(mat_device, &m, sizeof(SmallCSRDevice<T>), hipMemcpyHostToDevice));
   }
@@ -126,10 +126,10 @@ public:
     thrust::copy(row_ptr.begin(), row_ptr.end(), row_offset.begin());
     vals.resize(values.size());
     thrust::copy(values.begin(), values.end(), vals.begin());
-
-    SmallCSRDevice<T> m(row_offset.size() - 1, thrust::raw_pointer_cast(row_offset.data()),
-                        thrust::raw_pointer_cast(cols.data()),
-                        thrust::raw_pointer_cast(vals.data()));
+    SmallCSRDevice<T> m(
+        std::span<std::int32_t>(thrust::raw_pointer_cast(row_offset.data()), row_offset.size()),
+        std::span<std::int32_t>(thrust::raw_pointer_cast(cols.data()), cols.size()),
+        std::span<T>(thrust::raw_pointer_cast(vals.data()), vals.size()));
     err_check(hipMalloc((void**)&mat_device, sizeof(SmallCSRDevice<T>)));
     err_check(hipMemcpy(mat_device, &m, sizeof(SmallCSRDevice<T>), hipMemcpyHostToDevice));
   }

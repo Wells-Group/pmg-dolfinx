@@ -113,7 +113,7 @@ public:
         _interpolation_kernels[i - 1]->interpolate(*_r[i], *_b[i - 1]);
       }
       else
-        (*_res_interpolation[i - 1])(*_r[i], *_b[i - 1], false);
+        (*_interpolation[i - 1])(*_r[i], *_b[i - 1], true);
     }
 
     // r = b[i] - A[i] * u[i]
