@@ -118,65 +118,68 @@ for i in range(1, len(ks)):
     solver.setFromOptions()
     solvers.append(solver)
 
-u = fem.Function(Vs[-1])
-u.interpolate(u_i)
-
+# TODO Remove s
+us = [fem.Function(V) for V in Vs]
 rs = [fem.Function(V) for V in Vs]
 es = [fem.Function(V) for V in Vs]
 
-u_file = io.VTXWriter(msh.comm, "u.bp", u, "bp4")
-u_file.write(-1)
+u_files = [io.VTXWriter(msh.comm, f"u_{i}.bp", u, "bp4") for (i, u) in enumerate(us)]
 r_files = [io.VTXWriter(msh.comm, f"r_{i}.bp", r, "bp4") for (i, r) in enumerate(rs)]
 e_files = [io.VTXWriter(msh.comm, f"e_{i}.bp", e, "bp4") for (i, e) in enumerate(es)]
 
-r_norm_0 = residual(b, As[-1], u).norm()
-for i in range(num_iters):
+r_norm_0 = residual(b, As[-1], us[-1]).norm()
+us[-1].interpolate(u_i)
+for iter in range(num_iters):
     # Start of iteration
-    print(f"Iteration {i + 1}:")
+    print(f"Iteration {iter + 1}:")
     print(
-        f"    Initial:              residual norm = {(residual(b, As[-1], u)).norm()}"
+        f"    Initial:              residual norm = {(residual(b, As[-1], us[-1])).norm()}"
     )
 
+    # FIXME Zero initial guesses of error every iter?
+    for u in us[:-1]:
+        u.vector.set(0.0)
+
     # Smooth A_1 u_1 = b_1 on fine level
-    solvers[1].solve(b.vector, u.vector)
+    solvers[1].solve(b.vector, us[-1].vector)
 
     # Compute residual r_1 = b_1 - A_1 u_1
-    rs[1].vector.array[:] = residual(b, As[-1], u)
+    rs[1].vector.array[:] = residual(b, As[-1], us[-1])
     print(f"    After initial smooth: residual norm = {rs[1].vector.norm()}")
-    r_files[1].write(i)
+    r_files[1].write(iter)
 
     # Interpolate residual to coarse level
     interp_op.multTranspose(rs[1].vector, rs[0].vector)
-    r_files[0].write(i)
+    r_files[0].write(iter)
 
     # Solve A_0 e_0 = r_0 for error on coarse level
     petsc.set_bc(rs[0].vector, bcs=[bcs[0]])
     solvers[0].solve(rs[0].vector, es[0].vector)
-    e_files[0].write(i)
+    e_files[0].write(iter)
 
     # Interpolate error to fine level
     es[1].interpolate(es[0])
-    e_files[1].write(i)
+    e_files[1].write(iter)
 
     # Add error to solution u_1 += e_1
-    u.vector.array[:] += es[1].vector.array
+    us[-1].vector.array[:] += es[1].vector.array
 
     print(
-        f"    After correction:     residual norm = {(residual(b, As[-1], u)).norm()}"
+        f"    After correction:     residual norm = {(residual(b, As[-1], us[-1])).norm()}"
     )
 
     # Smooth on fine level A_1 u_1 = b_1
-    solvers[1].solve(b.vector, u.vector)
+    solvers[1].solve(b.vector, us[-1].vector)
 
     print(
-        f"    After final smooth:   residual norm = {(residual(b, As[-1], u)).norm()}"
+        f"    After final smooth:   residual norm = {(residual(b, As[-1], us[-1])).norm()}"
     )
 
-    u_file.write(i)
+    u_files[-1].write(iter)
 
-    r_norm = residual(b, As[-1], u).norm()
+    r_norm = residual(b, As[-1], us[-1]).norm()
     print(f"\n    Relative residual norm = {r_norm / r_norm_0}")
 
     # Compute error in solution
-    e_u_1 = norm_L2(comm, u_e - u)
+    e_u_1 = norm_L2(comm, u_e - us[-1])
     print(f"\n    L2-norm of error in u_1 = {e_u_1}\n\n")
