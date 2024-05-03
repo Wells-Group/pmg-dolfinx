@@ -1,14 +1,13 @@
 // Copyright (C) 2023 Igor A. Baratta
 // SPDX-License-Identifier:    MIT
 
+#include "amd_gpu.hpp"
 #include "vector.hpp"
 #include <algorithm>
 #include <cmath>
 #include <dolfinx/common/IndexMap.h>
 #include <dolfinx/common/MPI.h>
 #include <iostream>
-#include "amd_gpu.hpp"
-
 
 using namespace dolfinx;
 
@@ -135,7 +134,6 @@ public:
       acc::axpy(x, T{1.0}, x, *_z);
       remove_profiling_annotation("Chebyshev solver iteration");
     }
-    
   }
 
 private:

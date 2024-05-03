@@ -7,6 +7,8 @@
 #include <dolfinx/fem/petsc.h>
 #include <petscmat.h>
 
+#pragma once
+
 /**
  * @brief PETScOperator is a class that provides an operator to perform
  * matrix-vector multiplication using PETSc library. It is used to efficiently

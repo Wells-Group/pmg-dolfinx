@@ -38,6 +38,20 @@ public:
     }
   }
 
+  // Apply matrix to indirect values in arrays with given mappings in map_in and map_out
+  // using atomicAdd
+  __device__ void apply_indirect_add(const std::int32_t* map_in, const std::int32_t* map_out,
+                                     const T* data_in, T* data_out) const
+  {
+    for (std::int32_t j = 0; j < row_ptr.size() - 1; j++)
+    {
+      T vj = 0;
+      for (std::int32_t k = row_ptr[j]; k < row_ptr[j + 1]; ++k)
+        vj += vals[k] * data_in[map_in[cols[k]]];
+      atomicAdd(&data_out[map_out[j]], vj);
+    }
+  }
+
   // Pointers to row offsets, columns and values, already allocated on device
   std::span<std::int32_t> row_ptr;
   std::span<std::int32_t> cols;
