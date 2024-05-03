@@ -5,6 +5,7 @@
 
 #include "hip/hip_runtime.h"
 #include <hipsparse.h>
+#include <thrust/device_vector.h>
 // #elif USE_CUDA
 // #include <cuda_runtime.h>
 // #include <cusparse.h>
