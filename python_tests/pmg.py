@@ -59,7 +59,7 @@ Vs = [fem.functionspace(msh, ("Lagrange", k)) for k in ks]
 As = []
 bcs = []
 b = fem.Function(Vs[-1])
-for i, V in enumerate(Vs):
+for V in Vs:
     a = create_a(V, kappa)
     bc = boundary_condition(V)
     bcs.append(bc)
@@ -68,7 +68,8 @@ for i, V in enumerate(Vs):
     As.append(A)
 
     # Assemble RHS
-    if i == len(Vs) - 1:
+    if V == Vs[-1]:
+        print("HI")
         L = create_L(Vs[-1], kappa, u_e)
         petsc.assemble_vector(b.vector, L)
         petsc.apply_lifting(b.vector, [a], bcs=[[bc]])
