@@ -116,7 +116,7 @@ elseif(nvidia)
 elseif(cpu)
 	add_definitions(-DCPU_ONLY=1)
 endif()
-add_executable(${PROJECT_NAME} main.cpp mesh.cpp ${CMAKE_CURRENT_BINARY_DIR}/poisson.c)
+add_executable(${PROJECT_NAME} main.cpp ${CMAKE_CURRENT_BINARY_DIR}/poisson.c)
 
 include_directories("../../")
 

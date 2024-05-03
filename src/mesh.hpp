@@ -1,5 +1,5 @@
 
-#include "mesh.hpp"
+#include <dolfinx/mesh/Mesh.h>
 #include <dolfinx/mesh/utils.h>
 #include <map>
 #include <span>
@@ -73,5 +73,3 @@ dolfinx::mesh::Mesh<T> ghost_layer_mesh(dolfinx::mesh::Mesh<T>& mesh)
 
   return new_mesh;
 }
-
-template dolfinx::mesh::Mesh<double> ghost_layer_mesh<double>(dolfinx::mesh::Mesh<double>&);

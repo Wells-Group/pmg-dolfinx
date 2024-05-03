@@ -5,7 +5,7 @@
 #include "../../src/operators.hpp"
 #include "../../src/pmg.hpp"
 #include "../../src/vector.hpp"
-#include "mesh.hpp"
+#include "../../src/mesh.hpp"
 #include "poisson.h"
 
 #include <thrust/device_vector.h>
