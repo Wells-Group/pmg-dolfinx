@@ -92,6 +92,11 @@ public:
     thrust::copy(_A->off_diag_offset().begin(), _A->off_diag_offset().begin() + num_rows, _off_diag_offset.begin());
     thrust::copy(_A->cols().begin(), _A->cols().begin() + nnz, _cols.begin());
     thrust::copy(_A->values().begin(), _A->values().begin() + nnz, _values.begin());
+
+    hipsparseCreate(&handle);
+    hipsparseCreateMatDescr(&descrA);
+    hipsparseSetMatType(descrA, HIPSPARSE_MATRIX_TYPE_GENERAL);
+    hipsparseSetMatIndexBase(descrA, HIPSPARSE_INDEX_BASE_ZERO);
   }
 
   MatrixOperator(const fem::FunctionSpace<T>& V0, const fem::FunctionSpace<T>& V1)
@@ -153,7 +158,7 @@ public:
     _values = thrust::device_vector<T>(nnz);
 
     // Copy data from host to device
-    thrust::copy(_A->row_ptr().begin(), _A->row_ptr().end(), _row_ptr.begin());
+    thrust::copy(_A->row_ptr().begin(), _A->row_ptr().begin() + num_rows + 1, _row_ptr.begin());
     thrust::copy(_A->off_diag_offset().begin(), _A->off_diag_offset().begin() + num_rows, _off_diag_offset.begin());
     thrust::copy(_A->cols().begin(), _A->cols().begin() + nnz, _cols.begin());
     thrust::copy(_A->values().begin(), _A->values().begin() + nnz, _values.begin());
