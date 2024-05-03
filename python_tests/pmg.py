@@ -69,14 +69,14 @@ for V in Vs:
 
     # Assemble RHS
     if V == Vs[-1]:
-        print("HI")
         L = create_L(Vs[-1], kappa, u_e)
         petsc.assemble_vector(b.vector, L)
         petsc.apply_lifting(b.vector, [a], bcs=[[bc]])
         petsc.set_bc(b.vector, bcs=[bc])
 
-interp_op = petsc.interpolation_matrix(Vs[0], Vs[1])
-interp_op.assemble()
+interp_ops = [petsc.interpolation_matrix(Vs[i], Vs[i + 1]) for i in range(len(Vs) - 1)]
+for interp_op in interp_ops:
+    interp_op.assemble()
 
 # Create solvers
 solvers = []
