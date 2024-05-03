@@ -120,7 +120,7 @@ for i in range(1, len(ks)):
 
 # TODO Remove s
 us = [fem.Function(V) for V in Vs]
-rs = [fem.Function(V) for V in Vs]  # Remove?
+rs = [fem.Function(V) for V in Vs]
 es = [fem.Function(V) for V in Vs]
 bs = [fem.Function(V) for V in Vs]
 
@@ -182,8 +182,8 @@ for iter in range(num_iters):
 
         u_files[i + 1].write(iter)
 
-        r_norm = residual(b, As[i + 1], us[i + 1]).norm()
-        print(f"\n    Relative residual norm = {r_norm / r_norm_0}")
+    r_norm = residual(b, As[-1], us[-1]).norm()
+    print(f"\n    Relative residual norm = {r_norm / r_norm_0}")
 
     # Compute error in solution
     e_u = norm_L2(comm, u_e - us[-1])
