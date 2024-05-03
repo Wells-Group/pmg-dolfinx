@@ -185,7 +185,7 @@ public:
     dolfinx::common::Timer t0("% MatrixOperator application");
 
     x.scatter_fwd_begin();
-    y.set(T{0});
+    y.set(T{0}); // FIXME: This should be done automatically when beta is 0
     T* _x = x.mutable_array().data();
     T* _y = y.mutable_array().data();
 
