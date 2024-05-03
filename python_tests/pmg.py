@@ -82,33 +82,34 @@ for interp_op in interp_ops:
 solvers = []
 
 # Coarse
-coarse_solver = PETSc.KSP().create(MPI.COMM_WORLD)
-coarse_solver_prefix = "coarse_solver_"
-coarse_solver.setOptionsPrefix(coarse_solver_prefix)
-coarse_solver.setOperators(As[0])
-coarse_solver.setType(PETSc.KSP.Type.PREONLY)
-coarse_solver.pc.setType(PETSc.PC.Type.LU)
-coarse_solver.setFromOptions()
-solvers.append(coarse_solver)
+solver = PETSc.KSP().create(MPI.COMM_WORLD)
+solver_prefix = "solver_0_"
+solver.setOptionsPrefix(solver_prefix)
+solver.setOperators(As[0])
+solver.setType(PETSc.KSP.Type.PREONLY)
+solver.pc.setType(PETSc.PC.Type.LU)
+solver.setFromOptions()
+solvers.append(solver)
 
 # Fine
-fine_solver = PETSc.KSP().create(MPI.COMM_WORLD)
-fine_solver_prefix = "fine_solver_"
-fine_solver.setOptionsPrefix(fine_solver_prefix)
-opts = PETSc.Options()
-smoother_options = {
-    "ksp_type": "chebyshev",
-    "esteig_ksp_type": "cg",
-    "ksp_chebyshev_esteig_steps": 10,
-    "ksp_max_it": 2,
-    "ksp_initial_guess_nonzero": True,
-    "pc_type": "jacobi",
-}
-for key, val in smoother_options.items():
-    opts[f"{fine_solver_prefix}{key}"] = val
-fine_solver.setOperators(As[1])
-fine_solver.setFromOptions()
-solvers.append(fine_solver)
+for i in range(1, len(ks)):
+    solver = PETSc.KSP().create(MPI.COMM_WORLD)
+    solver_prefix = f"solver_{i}_"
+    solver.setOptionsPrefix(solver_prefix)
+    opts = PETSc.Options()
+    smoother_options = {
+        "ksp_type": "chebyshev",
+        "esteig_ksp_type": "cg",
+        "ksp_chebyshev_esteig_steps": 10,
+        "ksp_max_it": 2,
+        "ksp_initial_guess_nonzero": True,
+        "pc_type": "jacobi",
+    }
+    for key, val in smoother_options.items():
+        opts[f"{solver_prefix}{key}"] = val
+    solver.setOperators(As[i])
+    solver.setFromOptions()
+    solvers.append(solver)
 
 u_1 = fem.Function(Vs[1])
 # Set initial guess to be sinusoidal
