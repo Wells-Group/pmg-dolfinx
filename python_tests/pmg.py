@@ -15,16 +15,17 @@ def boundary_condition(V):
     return fem.dirichletbc(0.0, dofs, V)
 
 
-def problem(V, u_e):
-    u, v = TestFunction(V), TrialFunction(V)
-    kappa = 1.0
+def create_a(V, kappa):
+    u, v = TrialFunction(V), TestFunction(V)
     a = kappa * inner(grad(u), grad(v)) * dx
-    a = fem.form(a)
+    return fem.form(a)
 
+
+def create_L(V, kappa, u_e):
+    v = TestFunction(V)
     f = -kappa * div(grad(u_e))
-    L = fem.form(inner(f, v) * dx)
-
-    return a, L
+    L = inner(f, v) * dx
+    return fem.form(L)
 
 
 def residual(b, A, u):
@@ -45,6 +46,7 @@ def norm_L2(comm, v, measure=ufl.dx):
 n = 10
 ks = [1, 3]
 num_iters = 10
+kappa = 1.0
 comm = MPI.COMM_WORLD
 msh = mesh.create_unit_cube(MPI.COMM_WORLD, n, n, n, cell_type=mesh.CellType.hexahedron)
 
@@ -55,10 +57,10 @@ u_e = ufl.sin(ufl.pi * x[0]) * ufl.sin(ufl.pi * x[1]) * ufl.sin(ufl.pi * x[2])
 Vs = [fem.functionspace(msh, ("Lagrange", k)) for k in ks]
 
 As = []
-bs = []
 bcs = []
-for V in Vs:
-    a, L = problem(V, u_e)
+b = fem.Function(Vs[-1])
+for i, V in enumerate(Vs):
+    a = create_a(V, kappa)
     bc = boundary_condition(V)
     bcs.append(bc)
     A = petsc.assemble_matrix(a, bcs=[bc])
@@ -66,11 +68,11 @@ for V in Vs:
     As.append(A)
 
     # Assemble RHS
-    b = fem.Function(V)
-    petsc.assemble_vector(b.vector, L)
-    petsc.apply_lifting(b.vector, [a], bcs=[[bc]])
-    petsc.set_bc(b.vector, bcs=[bc])
-    bs.append(b)
+    if i == len(Vs) - 1:
+        L = create_L(Vs[-1], kappa, u_e)
+        petsc.assemble_vector(b.vector, L)
+        petsc.apply_lifting(b.vector, [a], bcs=[[bc]])
+        petsc.set_bc(b.vector, bcs=[bc])
 
 interp_op = petsc.interpolation_matrix(Vs[0], Vs[1])
 interp_op.assemble()
@@ -120,19 +122,19 @@ u_1_file.write(-1)
 r_files = [io.VTXWriter(msh.comm, f"r_{i}.bp", r, "bp4") for (i, r) in enumerate(rs)]
 e_files = [io.VTXWriter(msh.comm, f"e_{i}.bp", e, "bp4") for (i, e) in enumerate(es)]
 
-r_norm_0 = residual(bs[1], As[1], u_1).norm()
+r_norm_0 = residual(b, As[1], u_1).norm()
 for i in range(num_iters):
     # Start of iteration
     print(f"Iteration {i + 1}:")
     print(
-        f"    Initial:              residual norm = {(residual(bs[1], As[1], u_1)).norm()}"
+        f"    Initial:              residual norm = {(residual(b, As[1], u_1)).norm()}"
     )
 
     # Smooth A_1 u_1 = b_1 on fine level
-    solvers[1].solve(bs[1].vector, u_1.vector)
+    solvers[1].solve(b.vector, u_1.vector)
 
     # Compute residual r_1 = b_1 - A_1 u_1
-    rs[1].vector.array[:] = residual(bs[1], As[1], u_1)
+    rs[1].vector.array[:] = residual(b, As[1], u_1)
     print(f"    After initial smooth: residual norm = {rs[1].vector.norm()}")
     r_files[1].write(i)
 
@@ -153,19 +155,19 @@ for i in range(num_iters):
     u_1.vector.array[:] += es[1].vector.array
 
     print(
-        f"    After correction:     residual norm = {(residual(bs[1], As[1], u_1)).norm()}"
+        f"    After correction:     residual norm = {(residual(b, As[1], u_1)).norm()}"
     )
 
     # Smooth on fine level A_1 u_1 = b_1
-    solvers[1].solve(bs[1].vector, u_1.vector)
+    solvers[1].solve(b.vector, u_1.vector)
 
     print(
-        f"    After final smooth:   residual norm = {(residual(bs[1], As[1], u_1)).norm()}"
+        f"    After final smooth:   residual norm = {(residual(b, As[1], u_1)).norm()}"
     )
 
     u_1_file.write(i)
 
-    r_norm = residual(bs[1], As[1], u_1).norm()
+    r_norm = residual(b, As[1], u_1).norm()
     print(f"\n    Relative residual norm = {r_norm / r_norm_0}")
 
     # Compute error in solution
