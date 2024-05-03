@@ -61,11 +61,21 @@ msh = mesh.create_unit_cube(MPI.COMM_WORLD, n, n, n, cell_type=mesh.CellType.hex
 x = ufl.SpatialCoordinate(msh)
 u_e = ufl.sin(ufl.pi * x[0]) * ufl.sin(ufl.pi * x[1]) * ufl.sin(ufl.pi * x[2])
 
+# TODO Remove s
 Vs = [fem.functionspace(msh, ("Lagrange", k)) for k in ks]
+# Solutions
+us = [fem.Function(V) for V in Vs]
+# Residuals
+rs = [fem.Function(V) for V in Vs]
+# Errors
+es = [fem.Function(V) for V in Vs]
+# Right-hand sides
+bs = [fem.Function(V) for V in Vs]
 
+# Operators
 As = []
+# Boundary conditions
 bcs = []
-b = fem.Function(Vs[-1])
 for V in Vs:
     a = create_a(V, kappa)
     bc = boundary_condition(V)
@@ -77,9 +87,9 @@ for V in Vs:
     # Assemble RHS
     if V == Vs[-1]:
         L = create_L(Vs[-1], kappa, u_e)
-        petsc.assemble_vector(b.vector, L)
-        petsc.apply_lifting(b.vector, [a], bcs=[[bc]])
-        petsc.set_bc(b.vector, bcs=[bc])
+        petsc.assemble_vector(bs[-1].vector, L)
+        petsc.apply_lifting(bs[-1].vector, [a], bcs=[[bc]])
+        petsc.set_bc(bs[-1].vector, bcs=[bc])
 
 interp_ops = [petsc.interpolation_matrix(Vs[i], Vs[i + 1]) for i in range(len(Vs) - 1)]
 for interp_op in interp_ops:
@@ -118,25 +128,17 @@ for i in range(1, len(ks)):
     solver.setFromOptions()
     solvers.append(solver)
 
-# TODO Remove s
-us = [fem.Function(V) for V in Vs]
-rs = [fem.Function(V) for V in Vs]
-es = [fem.Function(V) for V in Vs]
-bs = [fem.Function(V) for V in Vs]
-
 u_files = [io.VTXWriter(msh.comm, f"u_{i}.bp", u, "bp4") for (i, u) in enumerate(us)]
 r_files = [io.VTXWriter(msh.comm, f"r_{i}.bp", r, "bp4") for (i, r) in enumerate(rs)]
 e_files = [io.VTXWriter(msh.comm, f"e_{i}.bp", e, "bp4") for (i, e) in enumerate(es)]
 
-r_norm_0 = residual(b, As[-1], us[-1]).norm()
+r_norm_0 = residual(bs[-1], As[-1], us[-1]).norm()
 us[-1].interpolate(u_i)
-# TODO Tidy to avoid duplication
-bs[-1].vector.array[:] = b.vector
 for iter in range(num_iters):
     # Start of iteration
     print(f"Iteration {iter + 1}:")
     print(
-        f"    Initial:              residual norm = {(residual(b, As[-1], us[-1])).norm()}"
+        f"    Initial:              residual norm = {(residual(bs[-1], As[-1], us[-1])).norm()}"
     )
 
     # FIXME Zero initial guesses of error every iter?
@@ -148,7 +150,7 @@ for iter in range(num_iters):
         solvers[i].solve(bs[i].vector, us[i].vector)
 
         # Compute residual r_1 = b_1 - A_1 u_1
-        rs[i].vector.array[:] = residual(b, As[i], us[i])
+        rs[i].vector.array[:] = residual(bs[-1], As[i], us[i])
         print(f"    After initial smooth: residual norm = {rs[1].vector.norm()}")
         r_files[i].write(iter)
 
@@ -170,19 +172,19 @@ for iter in range(num_iters):
         us[i + 1].vector.array[:] += es[i + 1].vector.array
 
         print(
-            f"    After correction:     residual norm = {(residual(b, As[-1], us[-1])).norm()}"
+            f"    After correction:     residual norm = {(residual(bs[-1], As[-1], us[-1])).norm()}"
         )
 
         # Smooth on fine level A_1 u_1 = b_1
-        solvers[i + 1].solve(b.vector, us[i + 1].vector)
+        solvers[i + 1].solve(bs[i + 1].vector, us[i + 1].vector)
 
         print(
-            f"    After final smooth:   residual norm = {(residual(b, As[-1], us[-1])).norm()}"
+            f"    After final smooth:   residual norm = {(residual(bs[-1], As[-1], us[-1])).norm()}"
         )
 
         u_files[i + 1].write(iter)
 
-    r_norm = residual(b, As[-1], us[-1]).norm()
+    r_norm = residual(bs[-1], As[-1], us[-1]).norm()
     print(f"\n    Relative residual norm = {r_norm / r_norm_0}")
 
     # Compute error in solution
