@@ -43,6 +43,13 @@ def norm_L2(comm, v, measure=ufl.dx):
     )
 
 
+def u_i(x):
+    "Initial guess of solution"
+    # omega = 2 * np.pi * 1
+    # return np.sin(omega * x[0]) * np.sin(omega * x[1])
+    return np.zeros_like(x[0])
+
+
 n = 10
 ks = [1, 3]
 num_iters = 10
@@ -111,32 +118,28 @@ for i in range(1, len(ks)):
     solver.setFromOptions()
     solvers.append(solver)
 
-u_1 = fem.Function(Vs[1])
-# Set initial guess to be sinusoidal
-# omega = 2 * np.pi * 1
-# u_1.interpolate(lambda x: np.sin(omega * x[0]) * np.sin(omega * x[1]))
+u = fem.Function(Vs[-1])
+u.interpolate(u_i)
 
 rs = [fem.Function(V) for V in Vs]
 es = [fem.Function(V) for V in Vs]
 
-u_1_file = io.VTXWriter(msh.comm, "u_1.bp", u_1, "bp4")
+u_1_file = io.VTXWriter(msh.comm, "u_1.bp", u, "bp4")
 u_1_file.write(-1)
 r_files = [io.VTXWriter(msh.comm, f"r_{i}.bp", r, "bp4") for (i, r) in enumerate(rs)]
 e_files = [io.VTXWriter(msh.comm, f"e_{i}.bp", e, "bp4") for (i, e) in enumerate(es)]
 
-r_norm_0 = residual(b, As[1], u_1).norm()
+r_norm_0 = residual(b, As[1], u).norm()
 for i in range(num_iters):
     # Start of iteration
     print(f"Iteration {i + 1}:")
-    print(
-        f"    Initial:              residual norm = {(residual(b, As[1], u_1)).norm()}"
-    )
+    print(f"    Initial:              residual norm = {(residual(b, As[1], u)).norm()}")
 
     # Smooth A_1 u_1 = b_1 on fine level
-    solvers[1].solve(b.vector, u_1.vector)
+    solvers[1].solve(b.vector, u.vector)
 
     # Compute residual r_1 = b_1 - A_1 u_1
-    rs[1].vector.array[:] = residual(b, As[1], u_1)
+    rs[1].vector.array[:] = residual(b, As[1], u)
     print(f"    After initial smooth: residual norm = {rs[1].vector.norm()}")
     r_files[1].write(i)
 
@@ -154,24 +157,20 @@ for i in range(num_iters):
     e_files[1].write(i)
 
     # Add error to solution u_1 += e_1
-    u_1.vector.array[:] += es[1].vector.array
+    u.vector.array[:] += es[1].vector.array
 
-    print(
-        f"    After correction:     residual norm = {(residual(b, As[1], u_1)).norm()}"
-    )
+    print(f"    After correction:     residual norm = {(residual(b, As[1], u)).norm()}")
 
     # Smooth on fine level A_1 u_1 = b_1
-    solvers[1].solve(b.vector, u_1.vector)
+    solvers[1].solve(b.vector, u.vector)
 
-    print(
-        f"    After final smooth:   residual norm = {(residual(b, As[1], u_1)).norm()}"
-    )
+    print(f"    After final smooth:   residual norm = {(residual(b, As[1], u)).norm()}")
 
     u_1_file.write(i)
 
-    r_norm = residual(b, As[1], u_1).norm()
+    r_norm = residual(b, As[1], u).norm()
     print(f"\n    Relative residual norm = {r_norm / r_norm_0}")
 
     # Compute error in solution
-    e_u_1 = norm_L2(comm, u_e - u_1)
+    e_u_1 = norm_L2(comm, u_e - u)
     print(f"\n    L2-norm of error in u_1 = {e_u_1}\n\n")
