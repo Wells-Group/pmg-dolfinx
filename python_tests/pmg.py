@@ -120,8 +120,9 @@ for i in range(1, len(ks)):
 
 # TODO Remove s
 us = [fem.Function(V) for V in Vs]
-rs = [fem.Function(V) for V in Vs]
+rs = [fem.Function(V) for V in Vs]  # Remove?
 es = [fem.Function(V) for V in Vs]
+bs = [fem.Function(V) for V in Vs]
 
 u_files = [io.VTXWriter(msh.comm, f"u_{i}.bp", u, "bp4") for (i, u) in enumerate(us)]
 r_files = [io.VTXWriter(msh.comm, f"r_{i}.bp", r, "bp4") for (i, r) in enumerate(rs)]
@@ -129,6 +130,8 @@ e_files = [io.VTXWriter(msh.comm, f"e_{i}.bp", e, "bp4") for (i, e) in enumerate
 
 r_norm_0 = residual(b, As[-1], us[-1]).norm()
 us[-1].interpolate(u_i)
+# TODO Tidy to avoid duplication
+bs[-1].vector.array[:] = b.vector
 for iter in range(num_iters):
     # Start of iteration
     print(f"Iteration {iter + 1}:")
@@ -140,46 +143,48 @@ for iter in range(num_iters):
     for u in us[:-1]:
         u.vector.set(0.0)
 
-    # Smooth A_1 u_1 = b_1 on fine level
-    solvers[1].solve(b.vector, us[-1].vector)
+    for i in range(len(ks) - 1, 0, -1):
+        # Smooth A_1 u_1 = b_1 on fine level
+        solvers[i].solve(bs[i].vector, us[i].vector)
 
-    # Compute residual r_1 = b_1 - A_1 u_1
-    rs[1].vector.array[:] = residual(b, As[-1], us[-1])
-    print(f"    After initial smooth: residual norm = {rs[1].vector.norm()}")
-    r_files[1].write(iter)
+        # Compute residual r_1 = b_1 - A_1 u_1
+        rs[i].vector.array[:] = residual(b, As[i], us[i])
+        print(f"    After initial smooth: residual norm = {rs[1].vector.norm()}")
+        r_files[i].write(iter)
 
-    # Interpolate residual to coarse level
-    interp_op.multTranspose(rs[1].vector, rs[0].vector)
-    r_files[0].write(iter)
+        # Interpolate residual to coarse level
+        interp_ops[i - 1].multTranspose(rs[i].vector, bs[i - 1].vector)
+        # r_files[0].write(iter)
 
     # Solve A_0 e_0 = r_0 for error on coarse level
-    petsc.set_bc(rs[0].vector, bcs=[bcs[0]])
-    solvers[0].solve(rs[0].vector, es[0].vector)
+    petsc.set_bc(bs[0].vector, bcs=[bcs[0]])
+    solvers[0].solve(bs[0].vector, es[0].vector)
     e_files[0].write(iter)
 
-    # Interpolate error to fine level
-    es[1].interpolate(es[0])
-    e_files[1].write(iter)
+    for i in range(len(ks) - 1):
+        # Interpolate error to fine level
+        es[i + 1].interpolate(es[i])
+        e_files[i + 1].write(iter)
 
-    # Add error to solution u_1 += e_1
-    us[-1].vector.array[:] += es[1].vector.array
+        # Add error to solution u_1 += e_1
+        us[i + 1].vector.array[:] += es[i + 1].vector.array
 
-    print(
-        f"    After correction:     residual norm = {(residual(b, As[-1], us[-1])).norm()}"
-    )
+        print(
+            f"    After correction:     residual norm = {(residual(b, As[-1], us[-1])).norm()}"
+        )
 
-    # Smooth on fine level A_1 u_1 = b_1
-    solvers[1].solve(b.vector, us[-1].vector)
+        # Smooth on fine level A_1 u_1 = b_1
+        solvers[i + 1].solve(b.vector, us[i + 1].vector)
 
-    print(
-        f"    After final smooth:   residual norm = {(residual(b, As[-1], us[-1])).norm()}"
-    )
+        print(
+            f"    After final smooth:   residual norm = {(residual(b, As[-1], us[-1])).norm()}"
+        )
 
-    u_files[-1].write(iter)
+        u_files[i + 1].write(iter)
 
-    r_norm = residual(b, As[-1], us[-1]).norm()
-    print(f"\n    Relative residual norm = {r_norm / r_norm_0}")
+        r_norm = residual(b, As[i + 1], us[i + 1]).norm()
+        print(f"\n    Relative residual norm = {r_norm / r_norm_0}")
 
     # Compute error in solution
-    e_u_1 = norm_L2(comm, u_e - us[-1])
-    print(f"\n    L2-norm of error in u_1 = {e_u_1}\n\n")
+    e_u = norm_L2(comm, u_e - us[-1])
+    print(f"\n    L2-norm of error in u_1 = {e_u}\n\n")
