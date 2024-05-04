@@ -70,7 +70,7 @@ int main(int argc, char* argv[])
           basix::element::lagrange_variant::gll_warped, 
           basix::element::dpc_variant::unset, false);
     auto e1 = basix::create_tp_element<T>(
-          basix::element::family::P, basix::cell::type::hexahedron, degree,
+          basix::element::family::P, basix::cell::type::hexahedron, degree + 1,
           basix::element::lagrange_variant::gll_warped, 
           basix::element::dpc_variant::unset, false);
 
@@ -82,20 +82,41 @@ int main(int argc, char* argv[])
     auto map0 = V0->dofmap()->index_map;
     auto map1 = V1->dofmap()->index_map;
 
+    auto u0 = std::make_shared<fem::Function<T>>(V0);
+    auto u1 = std::make_shared<fem::Function<T>>(V1);
 
+    u0->interpolate(
+    [](auto x) -> std::pair<std::vector<T>, std::vector<std::size_t>>
+    {
+      std::vector<T> out(x.extent(1));
+      for (std::size_t p = 0; p < x.extent(1); ++p)
+        out[p] = x(0, p);
+
+      return {out, {out.size()}};
+    });
+
+    common::Timer t0("~setup CPU Interpolation");
+    u1->interpolate(*u0);
+    t0.stop();
+
+
+    // Create distributed device vector 
     DeviceVector x(map0, 1);
-    x.set(T(1.0));
+    x.copy_from_host(*u0->x());
     DeviceVector y(map1, 1);
 
-    
+    // Apply matrix interpolation operator
     M(x, y);
 
-    // check
-    auto normx = acc::norm(x);
+    // check error /norm of vectors
     auto normy = acc::norm(y);
-    std::cout << " Norm x:  " << normx << std::endl;
-    std::cout << " Norm y:  " << normy << std::endl;
+    auto normu1 = la::norm(*u1->x());
 
+    if (std::abs(normy - normu1) > 1e-9)
+    {
+      std::cout << "Error: " << std::abs(normy - normu1) << std::endl;
+      return 1;
+    }
 
     dolfinx::list_timings(MPI_COMM_WORLD, {dolfinx::TimingType::wall});
   }
