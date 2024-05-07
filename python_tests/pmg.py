@@ -114,6 +114,8 @@ solver.pc.setType(PETSc.PC.Type.LU)
 solver.setFromOptions()
 solvers.append(solver)
 
+use_petsc = True
+
 # Fine
 for i in range(1, len(ks)):
     cg_solver = CGSolver(As[i], 20, 1e-6, False)
@@ -123,27 +125,31 @@ for i in range(1, len(ks)):
 
     eigs = [0.01 * est_eigs[0], 5.0 * est_eigs[1]]
 
-    # solver = PETSc.KSP().create(MPI.COMM_WORLD)
-    # solver_prefix = f"solver_{i}_"
-    # solver.setOptionsPrefix(solver_prefix)
-    # opts = PETSc.Options()
-    # smoother_options = {
-    #     "ksp_type": "chebyshev",
-    #     "ksp_max_it": 5,
-    #     "ksp_initial_guess_nonzero": True,
-    #     "pc_type": "none",
-    #     "ksp_chebyshev_eigenvalues": f"{eigs[0]}, {eigs[1]}",
-    #     "ksp_chebyshev_kind": "fourth"
-    # }
-    # for key, val in smoother_options.items():
-    #     opts[f"{solver_prefix}{key}"] = val
-    # solver.setOperators(As[i])
-    # solver.setFromOptions()
-    # solvers.append(solver)
+    if (use_petsc):
+        solver = PETSc.KSP().create(MPI.COMM_WORLD)
+        solver_prefix = f"solver_{i}_"
+        solver.setOptionsPrefix(solver_prefix)
+        opts = PETSc.Options()
+        smoother_options = {
+            "ksp_type": "chebyshev",
+            "ksp_max_it": 5,
+            "ksp_initial_guess_nonzero": True,
+            "pc_type": "none",
+            "ksp_chebyshev_eigenvalues": f"{eigs[0]}, {eigs[1]}",
+            "ksp_chebyshev_kind": "first",
+            "ksp_monitor": None
+        }
+        for key, val in smoother_options.items():
+            opts[f"{solver_prefix}{key}"] = val
+        print(opts.getAll())
 
-    solvers.append(
-        Chebyshev(As[i], 5, eigs, 4, verbose=False)
-    )
+        solver.setOperators(As[i])
+        solver.setFromOptions()
+        solvers.append(solver)
+    else:
+        solvers.append(
+            Chebyshev(As[i], 5, eigs, 1, verbose=True)
+        )
 
 # Setup output files
 u_files = [io.VTXWriter(msh.comm, f"u_{i}.bp", u, "bp4") for (i, u) in enumerate(us)]

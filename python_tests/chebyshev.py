@@ -57,15 +57,16 @@ class Chebyshev:
         d = r.copy() * float(1.0 / self.theta)
 
         for i in range(self.max_iter):
-            x = x + d
+            x += d
             r = r - self.A @ d
             rho_new = 1/(2 * sigma - rho)
             d *= float(rho * rho_new)
-            d += float(2 * rho/self.delta) * r.copy()
+            d += float(2 * rho_new/self.delta) * r.copy()
             rho = rho_new
 
             if self.verbose:
                 print(f"Iteration {i + 1}, residual norm = {np.linalg.norm(r)}")
+
 
     def cheb4(self, b, x):
         r = b - self.A @ x
