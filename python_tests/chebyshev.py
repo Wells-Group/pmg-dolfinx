@@ -70,12 +70,16 @@ class Chebyshev:
     def cheb4(self, b, x):
         x *= 0.25
         r = b - self.A @ x
-        d = r.copy() * float(4 / (3 * self.eigrange[1]))
+        d = r.copy() * float(4 / (3 * self.eig_range[1]))
+        beta = 1.0
 
-        for i in range(self.max_iter):
+        for i in range(1, self.max_iter + 1):
             x += beta * d
             r = r - self.A @ d
-            d *= (2*i - 1)/(2*i + 3)
+            d *= float((2*i - 1)/(2*i + 3))
+            d += float((8*i + 4)/(2*i + 3)/self.eig_range[1]) * r.copy()
+            if self.verbose:
+                print(f"Iteration {i}, residual norm = {np.linalg.norm(r)}")
 
 if __name__ == "__main__":
     np.set_printoptions(linewidth=200)
