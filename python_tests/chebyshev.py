@@ -13,46 +13,68 @@ from cg import CGSolver
 
 
 class Chebyshev:
-    def __init__(self, A, max_iter, eig_range, degree, verbose=False) -> None:
+    def __init__(self, A, max_iter, eig_range, kind, verbose=False) -> None:
         self.A = A
         self.max_iter = max_iter
         self.eig_range = eig_range
-        self.degree = degree
+        self.kind = kind
         self.verbose = verbose
         self.coeffs = []
 
-        theta = (eig_range[1] + eig_range[0]) / 2.0
-        delta = (eig_range[1] - eig_range[0]) / 2.0
+        self.theta = (eig_range[1] + eig_range[0]) / 2.0
+        self.delta = (eig_range[1] - eig_range[0]) / 2.0
 
-        if degree - 1 == 0:
-            self.coeffs.append(1.0 / theta)
-        elif degree - 1 == 1:
-            self.coeffs.append(2 / (delta * delta - 2 * theta * theta))
-            self.coeffs.append(-4 * theta / (delta * delta - 2 * theta * theta))
-        elif degree - 1 == 2:
-            tmp_0 = 3 * delta * delta
-            tmp_1 = theta * theta
-            tmp_2 = 1.0 / (-4 * theta**3 + theta * tmp_0)
-            self.coeffs.append(-4 * tmp_2)
-            self.coeffs.append(12 / (tmp_0 - 4 * tmp_1))
-            self.coeffs.append(tmp_2 * (tmp_0 - 12 * tmp_1))
-        else:
-            raise RuntimeError(f"Degree {degree} Chebyshev smoother not supported")
+        if not(kind == 1 or kind == 4):
+            raise ValueError(f"Invalid kind: {kind}")
+
+        # if degree - 1 == 0:
+        #     self.coeffs.append(1.0 / theta)
+        # elif degree - 1 == 1:
+        #     self.coeffs.append(2 / (delta * delta - 2 * theta * theta))
+        #     self.coeffs.append(-4 * theta / (delta * delta - 2 * theta * theta))
+        # elif degree - 1 == 2:
+        #     tmp_0 = 3 * delta * delta
+        #     tmp_1 = theta * theta
+        #     tmp_2 = 1.0 / (-4 * theta**3 + theta * tmp_0)
+        #     self.coeffs.append(-4 * tmp_2)
+        #     self.coeffs.append(12 / (tmp_0 - 4 * tmp_1))
+        #     self.coeffs.append(tmp_2 * (tmp_0 - 12 * tmp_1))
+        # else:
+        #     raise RuntimeError(f"Degree {degree} Chebyshev smoother not supported")
 
     def solve(self, b, x):
+        if self.kind == 1:
+            self.cheb1(b, x)
+        elif self.kind == 4:
+            self.cheb4(b, x)
+
+    def cheb1(self, b, x):
+        sigma = self.theta / self.delta
+        rho = 1 / sigma
+
+        r = b - self.A @ x
+        d = r.copy() * float(1.0 / self.theta)
+
         for i in range(self.max_iter):
-            r = b - self.A @ x
-            # Have to cast to float for some reason
-            z = float(self.coeffs[0]) * r
-
-            for k in range(1, len(self.coeffs)):
-                z = float(self.coeffs[k]) * r + self.A @ z
-
-            x += z
+            x = x + d
+            r = r - self.A @ d
+            rho_new = 1/(2 * sigma - rho)
+            d *= float(rho * rho_new)
+            d += float(2 * rho/self.delta) * r.copy()
+            rho = rho_new
 
             if self.verbose:
                 print(f"Iteration {i + 1}, residual norm = {np.linalg.norm(r)}")
 
+    def cheb4(self, b, x):
+        x *= 0.25
+        r = b - self.A @ x
+        d = r.copy() * float(4 / (3 * self.eigrange[1]))
+
+        for i in range(self.max_iter):
+            x += beta * d
+            r = r - self.A @ d
+            d *= (2*i - 1)/(2*i + 3)
 
 if __name__ == "__main__":
     np.set_printoptions(linewidth=200)
@@ -97,5 +119,5 @@ if __name__ == "__main__":
     est_eigs = cg_solver.compute_eigs()
     print(f"Estimated min/max eigenvalues = {est_eigs}")
 
-    smoother = Chebyshev(A, 30, (0.8 * est_eigs[0], 1.2 * est_eigs[1]), 3, verbose=True)
+    smoother = Chebyshev(A, 30, (0.8 * est_eigs[0], 1.2 * est_eigs[1]), 1, verbose=True)
     smoother.solve(b, x)

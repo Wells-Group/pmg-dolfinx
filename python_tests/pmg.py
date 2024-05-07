@@ -114,35 +114,35 @@ solver.pc.setType(PETSc.PC.Type.LU)
 solver.setFromOptions()
 solvers.append(solver)
 
-# Fine
-for i in range(1, len(ks)):
-    solver = PETSc.KSP().create(MPI.COMM_WORLD)
-    solver_prefix = f"solver_{i}_"
-    solver.setOptionsPrefix(solver_prefix)
-    opts = PETSc.Options()
-    smoother_options = {
-        "ksp_type": "chebyshev",
-        "esteig_ksp_type": "cg",
-        "ksp_chebyshev_esteig_steps": 10,
-        "ksp_max_it": 2,
-        "ksp_initial_guess_nonzero": True,
-        "pc_type": "jacobi",
-    }
-    for key, val in smoother_options.items():
-        opts[f"{solver_prefix}{key}"] = val
-    solver.setOperators(As[i])
-    solver.setFromOptions()
-    solvers.append(solver)
-
+# # Fine
 # for i in range(1, len(ks)):
-#     cg_solver = CGSolver(As[i], 20, 1e-6, False)
-#     x = As[i].createVecRight()
-#     cg_solver.solve(bs[i].vector, x)
-#     est_eigs = cg_solver.compute_eigs()
-#     print(f"est_eigs = {est_eigs}")
-#     solvers.append(
-#         Chebyshev(As[i], 10, (0.8 * est_eigs[0], 1.2 * est_eigs[1]), 1, verbose=False)
-#     )
+#     solver = PETSc.KSP().create(MPI.COMM_WORLD)
+#     solver_prefix = f"solver_{i}_"
+#     solver.setOptionsPrefix(solver_prefix)
+#     opts = PETSc.Options()
+#     smoother_options = {
+#         "ksp_type": "chebyshev",
+#         "esteig_ksp_type": "cg",
+#         "ksp_chebyshev_esteig_steps": 10,
+#         "ksp_max_it": 2,
+#         "ksp_initial_guess_nonzero": True,
+#         "pc_type": "jacobi",
+#     }
+#     for key, val in smoother_options.items():
+#         opts[f"{solver_prefix}{key}"] = val
+#     solver.setOperators(As[i])
+#     solver.setFromOptions()
+#     solvers.append(solver)
+
+for i in range(1, len(ks)):
+    cg_solver = CGSolver(As[i], 20, 1e-6, False)
+    x = As[i].createVecRight()
+    cg_solver.solve(bs[i].vector, x)
+    est_eigs = cg_solver.compute_eigs()
+    print(f"est_eigs = {est_eigs}")
+    solvers.append(
+        Chebyshev(As[i], 10, (0.2 * est_eigs[1], 1.2 * est_eigs[1]), 2, verbose=True)
+    )
 
 # Setup output files
 u_files = [io.VTXWriter(msh.comm, f"u_{i}.bp", u, "bp4") for (i, u) in enumerate(us)]
@@ -205,6 +205,7 @@ for iter in range(num_iters):
             f"    After correction:     residual norm = {(residual(bs[i + 1], As[i + 1], us[i + 1])).norm()}",
             i + 1,
         )
+
 
         # Smooth on fine level A_i u_i = b_i
         solvers[i + 1].solve(bs[i + 1].vector, us[i + 1].vector)
