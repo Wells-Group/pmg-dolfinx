@@ -55,7 +55,7 @@ def level_print(string, level):
 
 
 n = 10
-ks = [1, 2, 3]
+ks = [1, 3]
 num_iters = 10
 kappa = 1.0
 comm = MPI.COMM_WORLD
@@ -71,8 +71,8 @@ Vs = [fem.functionspace(msh, ("Lagrange", k)) for k in ks]
 us = [fem.Function(V) for V in Vs]
 # Residuals
 rs = [fem.Function(V) for V in Vs]
-# Errors
-es = [fem.Function(V) for V in Vs]
+# Corrections
+dus = [fem.Function(V) for V in Vs]
 # Right-hand sides
 bs = [fem.Function(V) for V in Vs]
 
@@ -134,7 +134,7 @@ for i in range(1, len(ks)):
 
 u_files = [io.VTXWriter(msh.comm, f"u_{i}.bp", u, "bp4") for (i, u) in enumerate(us)]
 r_files = [io.VTXWriter(msh.comm, f"r_{i}.bp", r, "bp4") for (i, r) in enumerate(rs)]
-e_files = [io.VTXWriter(msh.comm, f"e_{i}.bp", e, "bp4") for (i, e) in enumerate(es)]
+du_files = [io.VTXWriter(msh.comm, f"e_{i}.bp", e, "bp4") for (i, e) in enumerate(dus)]
 
 r_norm_0 = residual(bs[-1], As[-1], us[-1]).norm()
 us[-1].interpolate(u_i)
@@ -164,22 +164,21 @@ for iter in range(num_iters):
 
         # Interpolate residual to coarse level
         interp_ops[i - 1].multTranspose(rs[i].vector, bs[i - 1].vector)
-        # r_files[0].write(iter)
 
     # Solve A_0 e_0 = r_0 for error on coarse level
     petsc.set_bc(bs[0].vector, bcs=[bcs[0]])
     solvers[0].solve(bs[0].vector, us[0].vector)
-    e_files[0].write(iter)
+    u_files[0].write(iter)
     level_print("Level 0:", 0)
     level_print(f"    residual norm = {(residual(bs[0], As[0], us[0])).norm()}", 0)
 
     for i in range(len(ks) - 1):
         # Interpolate error to fine level
-        es[i + 1].interpolate(us[i])
-        e_files[i + 1].write(iter)
+        dus[i + 1].interpolate(us[i])
+        du_files[i + 1].write(iter)
 
         # Add error to solution u_1 += e_1
-        us[i + 1].vector.array[:] += es[i + 1].vector.array
+        us[i + 1].vector.array[:] += dus[i + 1].vector.array
 
         level_print(f"Level {i + 1}:", i + 1)
         level_print(
