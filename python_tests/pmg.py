@@ -65,7 +65,7 @@ msh = mesh.create_unit_cube(MPI.COMM_WORLD, n, n, n, cell_type=mesh.CellType.hex
 x = ufl.SpatialCoordinate(msh)
 u_e = ufl.sin(ufl.pi * x[0]) * ufl.sin(ufl.pi * x[1]) * ufl.sin(ufl.pi * x[2])
 
-# TODO Remove s
+# Function spaces
 Vs = [fem.functionspace(msh, ("Lagrange", k)) for k in ks]
 # Solutions
 us = [fem.Function(V) for V in Vs]
@@ -95,6 +95,7 @@ for V in Vs:
         petsc.apply_lifting(bs[-1].vector, [a], bcs=[[bc]])
         petsc.set_bc(bs[-1].vector, bcs=[bc])
 
+# Create interpolation operators (needed to restrict the residual)
 interp_ops = [petsc.interpolation_matrix(Vs[i], Vs[i + 1]) for i in range(len(Vs) - 1)]
 for interp_op in interp_ops:
     interp_op.assemble()
@@ -132,52 +133,60 @@ for i in range(1, len(ks)):
     solver.setFromOptions()
     solvers.append(solver)
 
+# Setup output files
 u_files = [io.VTXWriter(msh.comm, f"u_{i}.bp", u, "bp4") for (i, u) in enumerate(us)]
 r_files = [io.VTXWriter(msh.comm, f"r_{i}.bp", r, "bp4") for (i, r) in enumerate(rs)]
 du_files = [io.VTXWriter(msh.comm, f"e_{i}.bp", e, "bp4") for (i, e) in enumerate(dus)]
 
+# Initial residual
 r_norm_0 = residual(bs[-1], As[-1], us[-1]).norm()
+
+# Interpolate initial guess
 us[-1].interpolate(u_i)
+
+# Main iteration loop
 for iter in range(num_iters):
     # Start of iteration
     print(f"Iteration {iter + 1}:")
 
-    # FIXME Zero initial guesses of error every iter?
+    # Zero initial guesses of errors?
     for u in us[:-1]:
         u.vector.set(0.0)
 
+    # Sweep down the levels
     for i in range(len(ks) - 1, 0, -1):
         level_print(f"Level {i}:", i)
         level_print(
             f"    Initial:              residual norm = {(residual(bs[i], As[i], us[i])).norm()}",
             i,
         )
-        # Smooth A_1 u_1 = b_1 on fine level
+        # Smooth A_i u_i = b_i on fine level
         solvers[i].solve(bs[i].vector, us[i].vector)
 
-        # Compute residual r_1 = b_1 - A_1 u_1
+        # Compute residual r_i = b_i - A_i u_i
         rs[i].vector.array[:] = residual(bs[i], As[i], us[i])
         level_print(
             f"    After initial smooth: residual norm = {rs[i].vector.norm()}", i
         )
         r_files[i].write(iter)
 
-        # Interpolate residual to coarse level
+        # Interpolate residual to next level
         interp_ops[i - 1].multTranspose(rs[i].vector, bs[i - 1].vector)
 
-    # Solve A_0 e_0 = r_0 for error on coarse level
+    # Solve A_0 u_0 = r_0 on coarse level
     petsc.set_bc(bs[0].vector, bcs=[bcs[0]])
     solvers[0].solve(bs[0].vector, us[0].vector)
     u_files[0].write(iter)
     level_print("Level 0:", 0)
     level_print(f"    residual norm = {(residual(bs[0], As[0], us[0])).norm()}", 0)
 
+    # Sweep up the levels
     for i in range(len(ks) - 1):
-        # Interpolate error to fine level
+        # Interpolate error to next level
         dus[i + 1].interpolate(us[i])
         du_files[i + 1].write(iter)
 
-        # Add error to solution u_1 += e_1
+        # Add error to solution u_i += e_i
         us[i + 1].vector.array[:] += dus[i + 1].vector.array
 
         level_print(f"Level {i + 1}:", i + 1)
@@ -186,7 +195,7 @@ for iter in range(num_iters):
             i + 1,
         )
 
-        # Smooth on fine level A_1 u_1 = b_1
+        # Smooth on fine level A_i u_i = b_i
         solvers[i + 1].solve(bs[i + 1].vector, us[i + 1].vector)
 
         level_print(
@@ -196,6 +205,7 @@ for iter in range(num_iters):
 
         u_files[i + 1].write(iter)
 
+    # Compute relative residual norm
     r_norm = residual(bs[-1], As[-1], us[-1]).norm()
     print(f"\n    Relative residual norm = {r_norm / r_norm_0}")
 
