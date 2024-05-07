@@ -13,7 +13,8 @@ from cg import CGSolver
 
 
 class Chebyshev:
-    def __init__(self, max_iter, eig_range, degree, verbose=False) -> None:
+    def __init__(self, A, max_iter, eig_range, degree, verbose=False) -> None:
+        self.A = A
         self.max_iter = max_iter
         self.eig_range = eig_range
         self.degree = degree
@@ -38,14 +39,14 @@ class Chebyshev:
         else:
             raise RuntimeError(f"Degree {degree} Chebyshev smoother not supported")
 
-    def solve(self, A, x, b):
+    def solve(self, b, x):
         for i in range(self.max_iter):
-            r = b - A @ x
+            r = b - self.A @ x
             # Have to cast to float for some reason
             z = float(self.coeffs[0]) * r
 
             for k in range(1, len(self.coeffs)):
-                z = float(self.coeffs[k]) * r + A @ z
+                z = float(self.coeffs[k]) * r + self.A @ z
 
             x += z
 
@@ -96,5 +97,5 @@ if __name__ == "__main__":
     est_eigs = cg_solver.compute_eigs()
     print(f"Estimated min/max eigenvalues = {est_eigs}")
 
-    smoother = Chebyshev(30, (0.8 * est_eigs[0], 1.2 * est_eigs[1]), 3, verbose=True)
-    smoother.solve(A, x, b)
+    smoother = Chebyshev(A, 30, (0.8 * est_eigs[0], 1.2 * est_eigs[1]), 3, verbose=True)
+    smoother.solve(b, x)
