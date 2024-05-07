@@ -69,12 +69,16 @@ class Chebyshev:
     def cheb4(self, b, x):
         x *= 0.25
         r = b - self.A @ x
-        d = r.copy() * float(4 / (3 * self.eigrange[1]))
+        d = r.copy() * float(4 / (3 * self.eig_range[1]))
+        beta = 1.0
 
-        for i in range(self.max_iter):
+        for i in range(1, self.max_iter + 1):
             x += beta * d
             r = r - self.A @ d
-            d *= (2*i - 1)/(2*i + 3)
+            d *= float((2*i - 1)/(2*i + 3))
+            d += float((8*i + 4)/(2*i + 3)/self.eig_range[1]) * r.copy()
+            if self.verbose:
+                print(f"Iteration {i}, residual norm = {np.linalg.norm(r)}")
 
 if __name__ == "__main__":
     np.set_printoptions(linewidth=200)
@@ -119,5 +123,5 @@ if __name__ == "__main__":
     est_eigs = cg_solver.compute_eigs()
     print(f"Estimated min/max eigenvalues = {est_eigs}")
 
-    smoother = Chebyshev(A, 30, (0.8 * est_eigs[0], 1.2 * est_eigs[1]), 1, verbose=True)
+    smoother = Chebyshev(A, 30, (0.1 * est_eigs[1], 1.1 * est_eigs[1]), 1, verbose=True)
     smoother.solve(b, x)
