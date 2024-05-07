@@ -68,7 +68,6 @@ class Chebyshev:
                 print(f"Iteration {i + 1}, residual norm = {np.linalg.norm(r)}")
 
     def cheb4(self, b, x):
-        x *= 0.25
         r = b - self.A @ x
         d = r.copy() * float(4 / (3 * self.eig_range[1]))
         beta = 1.0
@@ -126,7 +125,7 @@ if __name__ == "__main__":
 
     eigs = [0.8 * est_eigs[0], 1.2 * est_eigs[1]]
 
-    smoother = Chebyshev(A, 30, eigs, 1, verbose=True)
+    smoother = Chebyshev(A, 30, eigs, 4, verbose=True)
     x.set(0.0)
     smoother.solve(b, x)
 
@@ -139,7 +138,7 @@ if __name__ == "__main__":
         "ksp_max_it": 30,
         "pc_type": "none",
         "ksp_chebyshev_eigenvalues": f"{eigs[0]}, {eigs[1]}",
-        "ksp_chebyshev_kind": "first"
+        "ksp_chebyshev_kind": "fourth"
     }
     for key, val in smoother_options.items():
         opts[f"{solver_prefix}{key}"] = val
