@@ -10,6 +10,7 @@ from dolfinx import fem, mesh
 from ufl import TestFunction, TrialFunction, dx, inner, grad
 import numpy as np
 from cg import CGSolver
+from petsc4py import PETSc
 
 
 class Chebyshev:
@@ -119,5 +120,31 @@ if __name__ == "__main__":
     est_eigs = cg_solver.compute_eigs()
     print(f"Estimated min/max eigenvalues = {est_eigs}")
 
-    smoother = Chebyshev(A, 30, (0.8 * est_eigs[0], 1.2 * est_eigs[1]), 1, verbose=True)
+    eigs = [0.8 * est_eigs[0], 1.2 * est_eigs[1]]
+
+    smoother = Chebyshev(A, 30, eigs, 1, verbose=True)
+    x.set(0.0)
     smoother.solve(b, x)
+
+    solver = PETSc.KSP().create(MPI.COMM_WORLD)
+    solver_prefix = "solver_"
+    solver.setOptionsPrefix(solver_prefix)
+    opts = PETSc.Options()
+    smoother_options = {
+        "ksp_type": "chebyshev",
+        "ksp_max_it": 30,
+        "pc_type": "none",
+        "ksp_chebyshev_eigenvalues": f"{eigs[0]}, {eigs[1]}",
+        "ksp_chebyshev_kind": "first"
+    }
+    for key, val in smoother_options.items():
+        opts[f"{solver_prefix}{key}"] = val
+    solver.setOperators(A)
+    def monitor(ksp, its, rnorm):
+        print("Iteration: {}, rel. residual: {}".format(its, rnorm))
+    solver.setMonitor(monitor)
+    solver.setNormType(solver.NormType.NORM_UNPRECONDITIONED)
+    solver.setFromOptions()
+    solver.view()
+    x.set(0.0)
+    solver.solve(b, x)
