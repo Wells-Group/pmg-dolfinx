@@ -5,6 +5,8 @@ import ufl
 from ufl import TestFunction, TrialFunction, dx, inner, grad, div
 import numpy as np
 from petsc4py import PETSc
+from cg import CGSolver
+from chebyshev import Chebyshev
 
 
 def boundary_condition(V):
@@ -80,7 +82,7 @@ bs = [fem.Function(V) for V in Vs]
 As = []
 # Boundary conditions
 bcs = []
-for V in Vs:
+for i, V in enumerate(Vs):
     a = create_a(V, kappa)
     bc = boundary_condition(V)
     bcs.append(bc)
@@ -89,11 +91,10 @@ for V in Vs:
     As.append(A)
 
     # Assemble RHS
-    if V == Vs[-1]:
-        L = create_L(Vs[-1], kappa, u_e)
-        petsc.assemble_vector(bs[-1].vector, L)
-        petsc.apply_lifting(bs[-1].vector, [a], bcs=[[bc]])
-        petsc.set_bc(bs[-1].vector, bcs=[bc])
+    L = create_L(V, kappa, u_e)
+    petsc.assemble_vector(bs[i].vector, L)
+    petsc.apply_lifting(bs[i].vector, [a], bcs=[[bc]])
+    petsc.set_bc(bs[i].vector, bcs=[bc])
 
 # Create interpolation operators (needed to restrict the residual)
 interp_ops = [petsc.interpolation_matrix(Vs[i], Vs[i + 1]) for i in range(len(Vs) - 1)]
@@ -133,10 +134,20 @@ for i in range(1, len(ks)):
     solver.setFromOptions()
     solvers.append(solver)
 
+# for i in range(1, len(ks)):
+#     cg_solver = CGSolver(As[i], 20, 1e-6, False)
+#     x = As[i].createVecRight()
+#     cg_solver.solve(bs[i].vector, x)
+#     est_eigs = cg_solver.compute_eigs()
+#     print(f"est_eigs = {est_eigs}")
+#     solvers.append(
+#         Chebyshev(As[i], 10, (0.8 * est_eigs[0], 1.2 * est_eigs[1]), 1, verbose=False)
+#     )
+
 # Setup output files
 u_files = [io.VTXWriter(msh.comm, f"u_{i}.bp", u, "bp4") for (i, u) in enumerate(us)]
 r_files = [io.VTXWriter(msh.comm, f"r_{i}.bp", r, "bp4") for (i, r) in enumerate(rs)]
-du_files = [io.VTXWriter(msh.comm, f"e_{i}.bp", e, "bp4") for (i, e) in enumerate(dus)]
+du_files = [io.VTXWriter(msh.comm, f"du_{i}.bp", e, "bp4") for (i, e) in enumerate(dus)]
 
 # Initial residual
 r_norm_0 = residual(bs[-1], As[-1], us[-1]).norm()
