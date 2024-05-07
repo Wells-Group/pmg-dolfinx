@@ -13,15 +13,16 @@ import numpy as np
 
 
 class CGSolver:
-    def __init__(self, max_iters, rtol, verbose=False) -> None:
+    def __init__(self, A, max_iters, rtol, verbose=False) -> None:
+        self.A = A
         self.max_iters = max_iters
         self.rtol = rtol
         self.verbose = verbose
         self.alphas = []
         self.betas = []
 
-    def solve(self, A, x, b):
-        r = b - A @ x
+    def solve(self, b, x):
+        r = b - self.A @ x
         p = r.copy()
         rnorm = r.dot(r)
         rnorm_0 = rnorm
@@ -31,7 +32,7 @@ class CGSolver:
             print(f"rnorm0 = {rnorm}")
 
         for i in range(self.max_iters):
-            y = A @ p
+            y = self.A @ p
             self.alphas.append(rnorm / (p.dot(y)))
             x += self.alphas[-1] * p
             r -= self.alphas[-1] * y
@@ -102,9 +103,9 @@ if __name__ == "__main__":
     apply_lifting(b, [a], bcs=[[bc]])
     set_bc(b, [bc])
 
-    cg_solver = CGSolver(30, 1e-6, True)
+    cg_solver = CGSolver(A, 30, 1e-6, True)
     x = A.createVecRight()
-    cg_solver.solve(A, x, b)
+    cg_solver.solve(b, x)
     est_eigs = cg_solver.compute_eigs()
     print(f"Estimated min/max eigenvalues = {est_eigs}")
 
