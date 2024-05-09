@@ -60,6 +60,7 @@ n = 10
 ks = [1, 3]
 num_iters = 10
 kappa = 1.0
+use_petsc = True
 comm = MPI.COMM_WORLD
 msh = mesh.create_unit_cube(MPI.COMM_WORLD, n, n, n, cell_type=mesh.CellType.hexahedron)
 
@@ -116,33 +117,32 @@ solvers.append(solver)
 
 # Fine
 for i in range(1, len(ks)):
-    solver = PETSc.KSP().create(MPI.COMM_WORLD)
-    solver_prefix = f"solver_{i}_"
-    solver.setOptionsPrefix(solver_prefix)
-    opts = PETSc.Options()
-    smoother_options = {
-        "ksp_type": "chebyshev",
-        "esteig_ksp_type": "cg",
-        "ksp_chebyshev_esteig_steps": 10,
-        "ksp_max_it": 2,
-        "ksp_initial_guess_nonzero": True,
-        "pc_type": "jacobi",
-    }
-    for key, val in smoother_options.items():
-        opts[f"{solver_prefix}{key}"] = val
-    solver.setOperators(As[i])
-    solver.setFromOptions()
-    solvers.append(solver)
-
-# for i in range(1, len(ks)):
-#     cg_solver = CGSolver(As[i], 20, 1e-6, False)
-#     x = As[i].createVecRight()
-#     cg_solver.solve(bs[i].vector, x)
-#     est_eigs = cg_solver.compute_eigs()
-#     print(f"est_eigs = {est_eigs}")
-#     solvers.append(
-#         Chebyshev(As[i], 10, (0.8 * est_eigs[0], 1.2 * est_eigs[1]), 1, verbose=False)
-#     )
+    if use_petsc:
+        solver = PETSc.KSP().create(MPI.COMM_WORLD)
+        solver_prefix = f"solver_{i}_"
+        solver.setOptionsPrefix(solver_prefix)
+        opts = PETSc.Options()
+        smoother_options = {
+            "ksp_type": "chebyshev",
+            "esteig_ksp_type": "cg",
+            "ksp_chebyshev_esteig_steps": 10,
+            "ksp_max_it": 2,
+            "ksp_initial_guess_nonzero": True,
+            "pc_type": "jacobi",
+        }
+        for key, val in smoother_options.items():
+            opts[f"{solver_prefix}{key}"] = val
+        solver.setOperators(As[i])
+        solver.setFromOptions()
+        solvers.append(solver)
+    else:
+        cg_solver = CGSolver(As[i], 10, 1e-6, False)
+        x = As[i].createVecRight()
+        cg_solver.solve(bs[i].vector, x)
+        est_eigs = cg_solver.compute_eigs()
+        solvers.append(
+            Chebyshev(As[i], 2, (0.8 * est_eigs[0], 1.2 * est_eigs[1]), 1, verbose=False)
+        )
 
 # Setup output files
 u_files = [io.VTXWriter(msh.comm, f"u_{i}.bp", u, "bp4") for (i, u) in enumerate(us)]
