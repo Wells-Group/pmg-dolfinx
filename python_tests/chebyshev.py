@@ -25,23 +25,8 @@ class Chebyshev:
         self.theta = (eig_range[1] + eig_range[0]) / 2.0
         self.delta = (eig_range[1] - eig_range[0]) / 2.0
 
-        if not(kind == 1 or kind == 4):
+        if not (kind == 1 or kind == 4):
             raise ValueError(f"Invalid kind: {kind}")
-
-        # if degree - 1 == 0:
-        #     self.coeffs.append(1.0 / theta)
-        # elif degree - 1 == 1:
-        #     self.coeffs.append(2 / (delta * delta - 2 * theta * theta))
-        #     self.coeffs.append(-4 * theta / (delta * delta - 2 * theta * theta))
-        # elif degree - 1 == 2:
-        #     tmp_0 = 3 * delta * delta
-        #     tmp_1 = theta * theta
-        #     tmp_2 = 1.0 / (-4 * theta**3 + theta * tmp_0)
-        #     self.coeffs.append(-4 * tmp_2)
-        #     self.coeffs.append(12 / (tmp_0 - 4 * tmp_1))
-        #     self.coeffs.append(tmp_2 * (tmp_0 - 12 * tmp_1))
-        # else:
-        #     raise RuntimeError(f"Degree {degree} Chebyshev smoother not supported")
 
     def solve(self, b, x):
         if self.kind == 1:
@@ -59,14 +44,13 @@ class Chebyshev:
         for i in range(self.max_iter):
             x += d
             r = r - self.A @ d
-            rho_new = 1/(2 * sigma - rho)
+            rho_new = 1 / (2 * sigma - rho)
             d *= float(rho * rho_new)
-            d += float(2 * rho_new/self.delta) * r.copy()
+            d += float(2 * rho_new / self.delta) * r.copy()
             rho = rho_new
 
             if self.verbose:
                 print(f"Iteration {i + 1}, residual norm = {np.linalg.norm(r)}")
-
 
     def cheb4(self, b, x):
         r = b - self.A @ x
@@ -76,20 +60,20 @@ class Chebyshev:
         for i in range(1, self.max_iter + 1):
             x += beta * d
             r = r - self.A @ d
-            d *= float((2*i - 1)/(2*i + 3))
-            d += float((8*i + 4)/(2*i + 3)/self.eig_range[1]) * r.copy()
+            d *= float((2 * i - 1) / (2 * i + 3))
+            d += float((8 * i + 4) / (2 * i + 3) / self.eig_range[1]) * r.copy()
             if self.verbose:
                 print(f"Iteration {i}, residual norm = {np.linalg.norm(r)}")
 
+
 if __name__ == "__main__":
     np.set_printoptions(linewidth=200)
-    # msh = create_unit_cube(MPI.COMM_WORLD, 16, 18, 20, cell_type=mesh.CellType.hexahedron)
-    msh = create_unit_cube(
-        MPI.COMM_WORLD, 10, 10, 10, cell_type=mesh.CellType.hexahedron
-    )
+
+    n = 10
+    msh = create_unit_cube(MPI.COMM_WORLD, n, n, n, cell_type=mesh.CellType.hexahedron)
     print(f"Num cells = {msh.topology.index_map(msh.topology.dim).size_global}")
 
-    V = fem.functionspace(msh, ("CG", 1))
+    V = fem.functionspace(msh, ("CG", 3))
     print(f"NDOFS = {V.dofmap.index_map.size_global}")
     u, v = TestFunction(V), TrialFunction(V)
     k = 2.0
@@ -127,9 +111,12 @@ if __name__ == "__main__":
     eigs = [0.8 * est_eigs[0], 1.2 * est_eigs[1]]
 
     smoother = Chebyshev(A, 30, eigs, 4, verbose=True)
-    x.set(0.0)
+    # Try with non-zero initial guess to check that works OK
+    x.set(1.0)
+    set_bc(x, [bc])
     smoother.solve(b, x)
 
+    # Compare to PETSc
     solver = PETSc.KSP().create(MPI.COMM_WORLD)
     solver_prefix = "solver_"
     solver.setOptionsPrefix(solver_prefix)
@@ -139,16 +126,20 @@ if __name__ == "__main__":
         "ksp_max_it": 30,
         "pc_type": "none",
         "ksp_chebyshev_eigenvalues": f"{eigs[0]}, {eigs[1]}",
-        "ksp_chebyshev_kind": "fourth"
+        "ksp_chebyshev_kind": "fourth",
+        "ksp_initial_guess_nonzero": True,
     }
     for key, val in smoother_options.items():
         opts[f"{solver_prefix}{key}"] = val
     solver.setOperators(A)
+
     def monitor(ksp, its, rnorm):
         print("Iteration: {}, rel. residual: {}".format(its, rnorm))
+
     solver.setMonitor(monitor)
     solver.setNormType(solver.NormType.NORM_UNPRECONDITIONED)
     solver.setFromOptions()
     solver.view()
-    x.set(0.0)
+    x.set(1.0)
+    set_bc(x, [bc])
     solver.solve(b, x)
