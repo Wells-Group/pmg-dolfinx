@@ -60,7 +60,7 @@ n = 10
 ks = [1, 3]
 num_iters = 10
 kappa = 1.0
-use_petsc = True
+use_petsc = False
 comm = MPI.COMM_WORLD
 msh = mesh.create_unit_cube(MPI.COMM_WORLD, n, n, n, cell_type=mesh.CellType.hexahedron)
 
@@ -128,7 +128,8 @@ for i in range(1, len(ks)):
             "ksp_chebyshev_esteig_steps": 10,
             "ksp_max_it": 2,
             "ksp_initial_guess_nonzero": True,
-            "pc_type": "jacobi",
+            "pc_type": "none",
+            "ksp_chebyshev_kind": "first",
         }
         for key, val in smoother_options.items():
             opts[f"{solver_prefix}{key}"] = val
@@ -141,13 +142,17 @@ for i in range(1, len(ks)):
         cg_solver.solve(bs[i].vector, x)
         est_eigs = cg_solver.compute_eigs()
         solvers.append(
-            Chebyshev(As[i], 2, (0.8 * est_eigs[0], 1.2 * est_eigs[1]), 1, verbose=False)
+            Chebyshev(
+                As[i], 2, (0.8 * est_eigs[0], 3.5 * est_eigs[1]), 1, verbose=False
+            )
         )
 
 # Setup output files
 u_files = [io.VTXWriter(msh.comm, f"u_{i}.bp", u, "bp4") for (i, u) in enumerate(us)]
 r_files = [io.VTXWriter(msh.comm, f"r_{i}.bp", r, "bp4") for (i, r) in enumerate(rs)]
-du_files = [io.VTXWriter(msh.comm, f"du_{i}.bp", du, "bp4") for (i, du) in enumerate(dus)]
+du_files = [
+    io.VTXWriter(msh.comm, f"du_{i}.bp", du, "bp4") for (i, du) in enumerate(dus)
+]
 
 # Initial residual
 r_norm_0 = residual(bs[-1], As[-1], us[-1]).norm()
