@@ -5,7 +5,7 @@
 #include "../../src/operators.hpp"
 #include "../../src/pmg.hpp"
 #include "../../src/vector.hpp"
-#include "mesh.hpp"
+#include "../../src/mesh.hpp"
 #include "poisson.h"
 
 #include <thrust/device_vector.h>
@@ -132,8 +132,6 @@ int main(int argc, char* argv[])
   bool use_amg = vm["amg"].as<bool>();
   bool use_csr_interpolation = vm["csr-interpolation"].as<bool>();
 
-  std::vector fs_poisson_a = {functionspace_form_poisson_a1, functionspace_form_poisson_a2,
-                              functionspace_form_poisson_a3};
   std::vector form_a = {form_poisson_a1, form_poisson_a2, form_poisson_a3};
   std::vector form_L = {form_poisson_L1, form_poisson_L2, form_poisson_L3};
 

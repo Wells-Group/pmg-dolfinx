@@ -150,7 +150,7 @@ public:
   }
 
   template <typename OtherVector>
-  void copy_from_host(OtherVector& other)
+  void copy_from_host(const OtherVector& other)
   {
     // Copies only local data
     auto* other_ptr = other.array().data();
