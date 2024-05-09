@@ -147,7 +147,7 @@ for i in range(1, len(ks)):
 # Setup output files
 u_files = [io.VTXWriter(msh.comm, f"u_{i}.bp", u, "bp4") for (i, u) in enumerate(us)]
 r_files = [io.VTXWriter(msh.comm, f"r_{i}.bp", r, "bp4") for (i, r) in enumerate(rs)]
-du_files = [io.VTXWriter(msh.comm, f"du_{i}.bp", e, "bp4") for (i, e) in enumerate(dus)]
+du_files = [io.VTXWriter(msh.comm, f"du_{i}.bp", du, "bp4") for (i, du) in enumerate(dus)]
 
 # Initial residual
 r_norm_0 = residual(bs[-1], As[-1], us[-1]).norm()
