@@ -110,7 +110,7 @@ if __name__ == "__main__":
 
     eigs = [0.8 * est_eigs[0], 1.2 * est_eigs[1]]
 
-    smoother = Chebyshev(A, 30, eigs, 4, verbose=True)
+    smoother = Chebyshev(A, 30, eigs, 1, verbose=True)
     # Try with non-zero initial guess to check that works OK
     x.set(1.0)
     set_bc(x, [bc])
@@ -126,7 +126,7 @@ if __name__ == "__main__":
         "ksp_max_it": 30,
         "pc_type": "none",
         "ksp_chebyshev_eigenvalues": f"{eigs[0]}, {eigs[1]}",
-        "ksp_chebyshev_kind": "fourth",
+        "ksp_chebyshev_kind": "first",
         "ksp_initial_guess_nonzero": True,
     }
     for key, val in smoother_options.items():
