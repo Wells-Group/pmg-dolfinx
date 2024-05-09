@@ -38,15 +38,17 @@ find_package(Boost 1.70 REQUIRED program_options)
 
 set(CMAKE_INCLUDE_CURRENT_DIR ON)
 
+add_custom_command(
+  OUTPUT poisson.c
+  COMMAND ffcx ${CMAKE_CURRENT_SOURCE_DIR}/poisson.py
+  VERBATIM
+  DEPENDS poisson.py
+  COMMENT "Compile poisson.py using FFCx"
+)
+
 
 # Set the GPU to compile for
-if(amd)
-  set(GPU_TARGETS "gfx90a" CACHE STRING "GPU targets to compile for")
-endif()
-
-if(nvidia)
-  set(GPU_TARGETS "Ampere" CACHE STRING "GPU targets to compile for")
-endif()
+set(GPU_TARGETS "gfx90a" CACHE STRING "GPU targets to compile for")
 
 # If using ROCm and HIP
 # On ROCm rocThrust requires rocPRIM
@@ -56,10 +58,9 @@ find_package(rocthrust REQUIRED CONFIG)
 find_package(hipsparse REQUIRED CONFIG)
 
 
-
 add_definitions(-DUSE_HIP=1)
-add_executable(test_csr test_csr.cpp)
+add_executable(${PROJECT_NAME} test_csr.cpp ${CMAKE_CURRENT_BINARY_DIR}/poisson.c)
 
-include_directories("../src/")
+include_directories("../")
 
-target_link_libraries(test_csr dolfinx roc::rocthrust roc::hipsparse Boost::program_options)
+target_link_libraries(${PROJECT_NAME} dolfinx roc::rocthrust roc::hipsparse Boost::program_options)

@@ -1,6 +1,4 @@
 #include "../../src/csr.hpp"
-#include "../../src/matrix-free.hpp"
-#include "../../src/operators.hpp"
 #include "../../src/vector.hpp"
 #include "../../src/mesh.hpp"
 #include <thrust/device_vector.h>
@@ -43,7 +41,7 @@ int main(int argc, char* argv[])
   int degree = vm["degree"].as<int>();
 
   init_logging(argc, argv);
-  PetscInitialize(&argc, &argv, nullptr, nullptr);
+  MPI_Init(&argc, &argv);
   {
     MPI_Comm comm{MPI_COMM_WORLD};
     int rank = 0, size = 0;
