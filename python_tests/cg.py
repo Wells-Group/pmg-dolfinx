@@ -10,6 +10,7 @@ from dolfinx import fem, mesh
 from ufl import TestFunction, TrialFunction, dx, inner, grad
 from scipy import linalg
 import numpy as np
+from petsc4py import PETSc
 
 
 class CGSolver:
@@ -28,7 +29,7 @@ class CGSolver:
         rnorm_0 = rnorm
 
         if self.verbose:
-            print('num dofs = ', r.size)
+            print("num dofs = ", r.size)
             print(f"rnorm0 = {rnorm}")
 
         for i in range(self.max_iters):
@@ -46,7 +47,7 @@ class CGSolver:
                 print(f"alpha = {self.alphas[-1]}")
                 print(f"beta = {self.betas[-1]}")
 
-            if (np.sqrt(rnorm / rnorm_0) < self.rtol):
+            if np.sqrt(rnorm / rnorm_0) < self.rtol:
                 break
 
     def compute_eigs(self):
@@ -68,10 +69,8 @@ class CGSolver:
 if __name__ == "__main__":
     # TODO Do the same with PETSc and compare
     np.set_printoptions(linewidth=200)
-    # msh = create_unit_cube(MPI.COMM_WORLD, 16, 18, 20, cell_type=mesh.CellType.hexahedron)
-    msh = create_unit_cube(
-        MPI.COMM_WORLD, 10, 10, 10, cell_type=mesh.CellType.hexahedron
-    )
+    comm = MPI.COMM_WORLD
+    msh = create_unit_cube(comm, 10, 10, 10, cell_type=mesh.CellType.hexahedron)
     print(f"Num cells = {msh.topology.index_map(msh.topology.dim).size_global}")
 
     V = fem.functionspace(msh, ("CG", 1))
@@ -114,3 +113,30 @@ if __name__ == "__main__":
     # Remove 1.0 (due to applying BCs, and sort)
     vals = sorted(vals[vals != 1.0])
     print("Min/max eigenvalues = ", vals[0], vals[-1])
+
+    # Compare to PETSc
+    solver = PETSc.KSP().create(comm)
+    solver_prefix = "solver_"
+    solver.setOptionsPrefix(solver_prefix)
+    opts = PETSc.Options()
+    smoother_options = {
+        "ksp_type": "cg",
+        "pc_type": "none",
+        "ksp_max_it": 30,
+        "ksp_rtol": 1e-6,
+        "ksp_initial_guess_nonzero": True,
+    }
+    for key, val in smoother_options.items():
+        opts[f"{solver_prefix}{key}"] = val
+
+    def monitor(ksp, its, rnorm):
+        print("Iteration: {}, rel. residual: {}".format(its, rnorm))
+
+    solver.setMonitor(monitor)
+    solver.setNormType(solver.NormType.NORM_UNPRECONDITIONED)
+    solver.setOperators(A)
+    solver.setFromOptions()
+
+    print("\n\nPETSc")
+    x.set(0.0)
+    solver.solve(b, x)
