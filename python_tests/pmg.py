@@ -60,7 +60,7 @@ n = 10
 ks = [1, 3]
 num_iters = 10
 kappa = 1.0
-use_petsc = False
+use_petsc = True
 comm = MPI.COMM_WORLD
 msh = mesh.create_unit_cube(MPI.COMM_WORLD, n, n, n, cell_type=mesh.CellType.hexahedron)
 
@@ -128,7 +128,7 @@ for i in range(1, len(ks)):
             "ksp_chebyshev_esteig_steps": 10,
             "ksp_max_it": 2,
             "ksp_initial_guess_nonzero": True,
-            "pc_type": "none",
+            "pc_type": "jacobi",
             "ksp_chebyshev_kind": "first",
         }
         for key, val in smoother_options.items():
