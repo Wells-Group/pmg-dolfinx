@@ -52,7 +52,7 @@ class CGSolver:
             p = self.betas[-1] * p + self.S * r
 
             if self.verbose:
-                print(f"Iteration {i + 1}: residual {rnorm**(1 / 2)}")
+                print(f"Iteration {i + 1}: residual {(self.S * r).norm()}")
                 print(f"alpha = {self.alphas[-1]}")
                 print(f"beta = {self.betas[-1]}")
 
@@ -124,6 +124,7 @@ if __name__ == "__main__":
     print("Min/max eigenvalues = ", vals[0], vals[-1])
 
     # Compare to PETSc
+    print("\n\nPETSc:")
     solver = PETSc.KSP().create(comm)
     solver_prefix = "solver_"
     solver.setOptionsPrefix(solver_prefix)
@@ -137,6 +138,9 @@ if __name__ == "__main__":
     }
     for key, val in smoother_options.items():
         opts[f"{solver_prefix}{key}"] = val
+    solver.setComputeEigenvalues(True)
+    solver.view()
+    # opts["help"] = None
 
     def monitor(ksp, its, rnorm):
         print("Iteration: {}, rel. residual: {}".format(its, rnorm))
@@ -146,6 +150,6 @@ if __name__ == "__main__":
     solver.setOperators(A)
     solver.setFromOptions()
 
-    print("\n\nPETSc")
     x.set(0.0)
     solver.solve(y, x)
+    print(f"PETSc eigs = {solver.computeEigenvalues()}")
