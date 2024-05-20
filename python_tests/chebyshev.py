@@ -2,8 +2,6 @@ from mpi4py import MPI
 from dolfinx.mesh import exterior_facet_indices, create_unit_cube
 from dolfinx.fem.petsc import (
     assemble_matrix,
-    assemble_vector,
-    apply_lifting,
     set_bc,
 )
 from dolfinx import fem, mesh
@@ -78,7 +76,7 @@ class Chebyshev:
 if __name__ == "__main__":
     np.set_printoptions(linewidth=200)
 
-    n = 8
+    n = 10
     msh = create_unit_cube(MPI.COMM_WORLD, n, n, n, cell_type=mesh.CellType.hexahedron)
     print(f"Num cells = {msh.topology.index_map(msh.topology.dim).size_global}")
 
@@ -107,19 +105,16 @@ if __name__ == "__main__":
     A = assemble_matrix(a, bcs=[bc])
     A.assemble()
 
-    # b = assemble_vector(L)
-    # apply_lifting(b, [a], bcs=[[bc]])
-    # set_bc(b, [bc])
     b = A.createVecRight()
     b.set(1.0)
 
-    cg_solver = CGSolver(A, 5, 1e-6, False)
+    cg_solver = CGSolver(A, 10, 1e-6, jacobi=True, verbose=False)
     x = A.createVecRight()
     cg_solver.solve(b, x)
     est_eigs = cg_solver.compute_eigs()
     print(f"Estimated min/max eigenvalues = {est_eigs}")
 
-    eigs = [0.8 * est_eigs[0], 3.0 * est_eigs[1]]
+    eigs = [0.8 * est_eigs[0], 1.2 * est_eigs[1]]
 
     smoother = Chebyshev(A, 30, eigs, 1, jacobi=True, verbose=True)
     # Try with non-zero initial guess to check that works OK
@@ -128,7 +123,6 @@ if __name__ == "__main__":
     smoother.solve(b, x)
 
     # Compare to PETSc
-    # Does PETSc use the eigs of the precond system?
     solver = PETSc.KSP().create(MPI.COMM_WORLD)
     solver_prefix = "solver_"
     solver.setOptionsPrefix(solver_prefix)

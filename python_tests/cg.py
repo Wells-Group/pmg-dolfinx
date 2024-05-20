@@ -2,9 +2,6 @@ from mpi4py import MPI
 from dolfinx.mesh import exterior_facet_indices, create_unit_cube
 from dolfinx.fem.petsc import (
     assemble_matrix,
-    assemble_vector,
-    apply_lifting,
-    set_bc,
 )
 from dolfinx import fem, mesh
 from ufl import TestFunction, TrialFunction, dx, inner, grad
@@ -39,7 +36,6 @@ class CGSolver:
             print("num dofs = ", r.size)
             print(f"rnorm0 = {rnorm}")
 
-        # TODO Store for efficiency
         for i in range(self.max_iters):
             y = self.A @ p
             self.alphas.append(rnorm / (p.dot(y)))
