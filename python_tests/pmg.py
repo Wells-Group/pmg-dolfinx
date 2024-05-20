@@ -139,7 +139,7 @@ for i in range(1, len(ks)):
         solver.setFromOptions()
         solvers.append(solver)
     else:
-        cg_solver = CGSolver(As[i], 10, 1e-6, False)
+        cg_solver = CGSolver(As[i], 10, 1e-6, jacobi=True, verbose=False)
         x = As[i].createVecRight()
         y = As[i].createVecRight()
         y.set(1.0)
@@ -149,7 +149,7 @@ for i in range(1, len(ks)):
             Chebyshev(
                 As[i],
                 2,
-                (0.8 * est_eigs[0], 2.0 * est_eigs[1]),
+                (0.8 * est_eigs[0], 1.2 * est_eigs[1]),
                 4,
                 jacobi=True,
                 verbose=False,
