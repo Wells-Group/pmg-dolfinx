@@ -14,7 +14,9 @@ from petsc4py import PETSc
 
 
 class Chebyshev:
-    def __init__(self, A, max_iter, eig_range, kind, verbose=False) -> None:
+    def __init__(
+        self, A, max_iter, eig_range, kind, jacobi=False, verbose=False
+    ) -> None:
         self.A = A
         self.max_iter = max_iter
         self.eig_range = eig_range
@@ -28,6 +30,13 @@ class Chebyshev:
         if not (kind == 1 or kind == 4):
             raise ValueError(f"Invalid kind: {kind}")
 
+        if jacobi:
+            self.S = A.getDiagonal()
+            self.S.reciprocal()
+        else:
+            self.S = A.createVecRight()
+            self.S.set(1.0)
+
     def solve(self, b, x):
         if self.kind == 1:
             self.cheb1(b, x)
@@ -38,12 +47,12 @@ class Chebyshev:
         sigma = self.theta / self.delta
         rho = 1 / sigma
 
-        r = b - self.A @ x
+        r = self.S * (b - self.A @ x)
         d = r.copy() * float(1.0 / self.theta)
 
         for i in range(self.max_iter):
             x += d
-            r = r - self.A @ d
+            r = r - self.S * (self.A @ d)
             rho_new = 1 / (2 * sigma - rho)
             d *= float(rho * rho_new)
             d += float(2 * rho_new / self.delta) * r.copy()
@@ -69,7 +78,7 @@ class Chebyshev:
 if __name__ == "__main__":
     np.set_printoptions(linewidth=200)
 
-    n = 10
+    n = 8
     msh = create_unit_cube(MPI.COMM_WORLD, n, n, n, cell_type=mesh.CellType.hexahedron)
     print(f"Num cells = {msh.topology.index_map(msh.topology.dim).size_global}")
 
@@ -98,9 +107,11 @@ if __name__ == "__main__":
     A = assemble_matrix(a, bcs=[bc])
     A.assemble()
 
-    b = assemble_vector(L)
-    apply_lifting(b, [a], bcs=[[bc]])
-    set_bc(b, [bc])
+    # b = assemble_vector(L)
+    # apply_lifting(b, [a], bcs=[[bc]])
+    # set_bc(b, [bc])
+    b = A.createVecRight()
+    b.set(1.0)
 
     cg_solver = CGSolver(A, 5, 1e-6, False)
     x = A.createVecRight()
@@ -108,15 +119,16 @@ if __name__ == "__main__":
     est_eigs = cg_solver.compute_eigs()
     print(f"Estimated min/max eigenvalues = {est_eigs}")
 
-    eigs = [0.8 * est_eigs[0], 1.2 * est_eigs[1]]
+    eigs = [0.8 * est_eigs[0], 3.0 * est_eigs[1]]
 
-    smoother = Chebyshev(A, 30, eigs, 1, verbose=True)
+    smoother = Chebyshev(A, 30, eigs, 1, jacobi=True, verbose=True)
     # Try with non-zero initial guess to check that works OK
     x.set(1.0)
     set_bc(x, [bc])
     smoother.solve(b, x)
 
     # Compare to PETSc
+    # Does PETSc use the eigs of the precond system?
     solver = PETSc.KSP().create(MPI.COMM_WORLD)
     solver_prefix = "solver_"
     solver.setOptionsPrefix(solver_prefix)
@@ -124,7 +136,7 @@ if __name__ == "__main__":
     smoother_options = {
         "ksp_type": "chebyshev",
         "ksp_max_it": 30,
-        "pc_type": "none",
+        "pc_type": "jacobi",
         "ksp_chebyshev_eigenvalues": f"{eigs[0]}, {eigs[1]}",
         "ksp_chebyshev_kind": "first",
         "ksp_initial_guess_nonzero": True,
@@ -137,7 +149,7 @@ if __name__ == "__main__":
         print("Iteration: {}, rel. residual: {}".format(its, rnorm))
 
     solver.setMonitor(monitor)
-    solver.setNormType(solver.NormType.NORM_UNPRECONDITIONED)
+    solver.setNormType(solver.NormType.NORM_PRECONDITIONED)
     solver.setFromOptions()
     solver.view()
     x.set(1.0)
