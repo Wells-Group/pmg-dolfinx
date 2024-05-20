@@ -59,7 +59,7 @@ class Chebyshev:
             rho = rho_new
 
             if self.verbose:
-                print(f"Iteration {i + 1}, residual norm = {np.linalg.norm(r)}")
+                print(f"Iteration {i + 1}, PRECONDITIONED residual norm = {np.linalg.norm(r)}")
 
     def cheb4(self, b, x):
         r = b - self.A @ x
@@ -72,7 +72,7 @@ class Chebyshev:
             d *= float((2 * i - 1) / (2 * i + 3))
             d += float((8 * i + 4) / (2 * i + 3) / self.eig_range[1]) * self.S * r.copy()
             if self.verbose:
-                print(f"Iteration {i}, residual norm = {np.linalg.norm(r)}")
+                print(f"Iteration {i}, UNPRECONDITIONED residual norm = {np.linalg.norm(r)}")
 
 
 if __name__ == "__main__":
@@ -121,7 +121,7 @@ if __name__ == "__main__":
 
     eigs = [0.8 * est_eigs[0], 3.0 * est_eigs[1]]
 
-    smoother = Chebyshev(A, 30, eigs, 4, jacobi=True, verbose=True)
+    smoother = Chebyshev(A, 30, eigs, 1, jacobi=True, verbose=True)
     # Try with non-zero initial guess to check that works OK
     x.set(1.0)
     set_bc(x, [bc])
@@ -138,7 +138,7 @@ if __name__ == "__main__":
         "ksp_max_it": 30,
         "pc_type": "jacobi",
         "ksp_chebyshev_eigenvalues": f"{eigs[0]}, {eigs[1]}",
-        "ksp_chebyshev_kind": "fourth",
+        "ksp_chebyshev_kind": "first",
         "ksp_initial_guess_nonzero": True,
     }
     for key, val in smoother_options.items():
@@ -149,7 +149,7 @@ if __name__ == "__main__":
         print("Iteration: {}, rel. residual: {}".format(its, rnorm))
 
     solver.setMonitor(monitor)
-    solver.setNormType(solver.NormType.NORM_UNPRECONDITIONED)
+    solver.setNormType(solver.NormType.NORM_PRECONDITIONED)
     solver.setFromOptions()
     solver.view()
     x.set(1.0)
