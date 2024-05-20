@@ -14,7 +14,7 @@ from petsc4py import PETSc
 
 
 class CGSolver:
-    def __init__(self, A, max_iters, rtol, verbose=False) -> None:
+    def __init__(self, A, max_iters, rtol, jacobi=False, verbose=False) -> None:
         self.A = A
         self.max_iters = max_iters
         self.rtol = rtol
@@ -22,25 +22,34 @@ class CGSolver:
         self.alphas = []
         self.betas = []
 
+        if jacobi:
+            self.S = A.getDiagonal()
+            self.S.reciprocal()
+        else:
+            self.S = A.createVecRight()
+            self.S.set(1.0)
+
     def solve(self, b, x):
         r = b - self.A @ x
-        p = r.copy()
-        rnorm = r.dot(r)
+        p = self.S * r
+        rnorm = r.dot(p)
         rnorm_0 = rnorm
 
         if self.verbose:
             print("num dofs = ", r.size)
             print(f"rnorm0 = {rnorm}")
 
+        # TODO Store for efficiency
         for i in range(self.max_iters):
             y = self.A @ p
             self.alphas.append(rnorm / (p.dot(y)))
             x += self.alphas[-1] * p
             r -= self.alphas[-1] * y
-            rnorm_new = r.dot(r)
+
+            rnorm_new = r.dot(self.S * r)
             self.betas.append(rnorm_new / rnorm)
             rnorm = rnorm_new
-            p = self.betas[-1] * p + r
+            p = self.betas[-1] * p + self.S * r
 
             if self.verbose:
                 print(f"Iteration {i + 1}: residual {rnorm**(1 / 2)}")
@@ -70,7 +79,8 @@ if __name__ == "__main__":
     # TODO Do the same with PETSc and compare
     np.set_printoptions(linewidth=200)
     comm = MPI.COMM_WORLD
-    msh = create_unit_cube(comm, 10, 10, 10, cell_type=mesh.CellType.hexahedron)
+    n = 10
+    msh = create_unit_cube(comm, n, n, n, cell_type=mesh.CellType.hexahedron)
     print(f"Num cells = {msh.topology.index_map(msh.topology.dim).size_global}")
 
     V = fem.functionspace(msh, ("CG", 1))
@@ -98,7 +108,7 @@ if __name__ == "__main__":
     A = assemble_matrix(a, bcs=[bc])
     A.assemble()
 
-    cg_solver = CGSolver(A, 30, 1e-6, True)
+    cg_solver = CGSolver(A, 30, 1e-6, jacobi=True, verbose=True)
     x = A.createVecRight()
     y = A.createVecRight()
     y.set(1.0)
@@ -107,7 +117,10 @@ if __name__ == "__main__":
     print(f"Estimated min/max eigenvalues = {est_eigs}")
 
     # Compare eigs to numpy
-    vals = np.real(linalg.eigvals(A[:, :]))
+    # FIXME Do this properly
+    A_np = A[:, :]
+    SA_np = 1 / A_np.diagonal()[:, np.newaxis] * A_np
+    vals = np.sort(np.real(linalg.eigvals(SA_np)))
     print("Min/max eigenvalues = ", vals[0], vals[-1])
 
     # Compare to PETSc
@@ -117,7 +130,7 @@ if __name__ == "__main__":
     opts = PETSc.Options()
     smoother_options = {
         "ksp_type": "cg",
-        "pc_type": "none",
+        "pc_type": "jacobi",
         "ksp_max_it": 30,
         "ksp_rtol": 1e-6,
         "ksp_initial_guess_nonzero": True,
@@ -129,7 +142,7 @@ if __name__ == "__main__":
         print("Iteration: {}, rel. residual: {}".format(its, rnorm))
 
     solver.setMonitor(monitor)
-    solver.setNormType(solver.NormType.NORM_UNPRECONDITIONED)
+    solver.setNormType(solver.NormType.NORM_PRECONDITIONED)
     solver.setOperators(A)
     solver.setFromOptions()
 
