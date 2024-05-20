@@ -98,20 +98,16 @@ if __name__ == "__main__":
     A = assemble_matrix(a, bcs=[bc])
     A.assemble()
 
-    b = assemble_vector(L)
-    apply_lifting(b, [a], bcs=[[bc]])
-    set_bc(b, [bc])
-
     cg_solver = CGSolver(A, 30, 1e-6, True)
     x = A.createVecRight()
-    cg_solver.solve(b, x)
+    y = A.createVecRight()
+    y.set(1.0)
+    cg_solver.solve(y, x)
     est_eigs = cg_solver.compute_eigs()
     print(f"Estimated min/max eigenvalues = {est_eigs}")
 
     # Compare eigs to numpy
     vals = np.real(linalg.eigvals(A[:, :]))
-    # Remove 1.0 (due to applying BCs, and sort)
-    vals = sorted(vals[vals != 1.0])
     print("Min/max eigenvalues = ", vals[0], vals[-1])
 
     # Compare to PETSc
@@ -139,4 +135,4 @@ if __name__ == "__main__":
 
     print("\n\nPETSc")
     x.set(0.0)
-    solver.solve(b, x)
+    solver.solve(y, x)
