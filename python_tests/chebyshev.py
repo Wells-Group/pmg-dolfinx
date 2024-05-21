@@ -53,7 +53,7 @@ class Chebyshev:
             r = r - self.S * (self.A @ d)
             rho_new = 1 / (2 * sigma - rho)
             d *= float(rho * rho_new)
-            d += float(2 * rho_new / self.delta) * r.copy()
+            d += r.copy() * float(2 * rho_new / self.delta)
             rho = rho_new
 
             if self.verbose:
@@ -65,10 +65,10 @@ class Chebyshev:
         beta = 1.0
 
         for i in range(1, self.max_iter + 1):
-            x += beta * d
+            x += d * beta
             r = r - self.A @ d
             d *= float((2 * i - 1) / (2 * i + 3))
-            d += float((8 * i + 4) / (2 * i + 3) / self.eig_range[1]) * self.S * r.copy()
+            d += self.S * r.copy() * float((8 * i + 4) / (2 * i + 3) / self.eig_range[1])
             if self.verbose:
                 print(f"Iteration {i}, UNPRECONDITIONED residual norm = {np.linalg.norm(r)}")
 
@@ -114,9 +114,9 @@ if __name__ == "__main__":
     est_eigs = cg_solver.compute_eigs()
     print(f"Estimated min/max eigenvalues = {est_eigs}")
 
-    eigs = [0.8 * est_eigs[0], 1.2 * est_eigs[1]]
+    eigs = [0.8 * est_eigs[0], 1.1 * est_eigs[1]]
 
-    smoother = Chebyshev(A, 30, eigs, 1, jacobi=True, verbose=True)
+    smoother = Chebyshev(A, 30, eigs, 4, jacobi=True, verbose=True)
     # Try with non-zero initial guess to check that works OK
     x.set(1.0)
     set_bc(x, [bc])
@@ -132,7 +132,7 @@ if __name__ == "__main__":
         "ksp_max_it": 30,
         "pc_type": "jacobi",
         "ksp_chebyshev_eigenvalues": f"{eigs[0]}, {eigs[1]}",
-        "ksp_chebyshev_kind": "first",
+        "ksp_chebyshev_kind": "fourth",
         "ksp_initial_guess_nonzero": True,
     }
     for key, val in smoother_options.items():
@@ -143,7 +143,7 @@ if __name__ == "__main__":
         print("Iteration: {}, rel. residual: {}".format(its, rnorm))
 
     solver.setMonitor(monitor)
-    solver.setNormType(solver.NormType.NORM_PRECONDITIONED)
+    solver.setNormType(solver.NormType.NORM_UNPRECONDITIONED)
     solver.setFromOptions()
     solver.view()
     x.set(1.0)

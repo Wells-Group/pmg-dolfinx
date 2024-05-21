@@ -39,13 +39,13 @@ class CGSolver:
         for i in range(self.max_iters):
             y = self.A @ p
             self.alphas.append(rnorm / (p.dot(y)))
-            x += self.alphas[-1] * p
-            r -= self.alphas[-1] * y
+            x += p * self.alphas[-1]
+            r -= y * self.alphas[-1]
 
             rnorm_new = r.dot(self.S * r)
             self.betas.append(rnorm_new / rnorm)
             rnorm = rnorm_new
-            p = self.betas[-1] * p + self.S * r
+            p = p * self.betas[-1] + self.S * r
 
             if self.verbose:
                 print(f"Iteration {i + 1}: residual {(self.S * r).norm()}")
