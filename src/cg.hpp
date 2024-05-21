@@ -143,7 +143,7 @@ public:
 
   // Solve Ax = b
   template <typename Operator>
-  int solve(Operator& A, Vector& x, const Vector& b, bool verbose = false)
+  int solve(Operator& A, const Vector& diag_inv, Vector& x, const Vector& b, bool verbose = false)
   {
     MPI_Comm comm = _map->comm();
     int rank;
@@ -154,9 +154,9 @@ public:
     // Compute initial residual r0 = b - Ax0
     A(x, *_y);
     axpy(*_r, T(-1), *_y, b);
-    copy(*_p, *_r);
+    acc::pointwise_mult(*_p, *_r, diag_inv);
 
-    T rnorm0 = squared_norm(*_r);
+    T rnorm0 = inner_product(*_p, *_r);
     T rnorm = rnorm0;
 
     spdlog::info("CG: rnorm0 = {}", rnorm0);
@@ -184,8 +184,11 @@ public:
       // Update r (r <- r - alpha*y)
       acc::axpy(*_r, -alpha, *_y, *_r);
 
+      // Using y as a temporary for M^-1(r)
+      acc::pointwise_mult(*_y, *_r, diag_inv);
+
       // Update residual norm
-      const T rnorm_new = squared_norm(*_r);
+      const T rnorm_new = inner_product(*_r, *_y);
       const T beta = rnorm_new / rnorm;
       rnorm = rnorm_new;
 
@@ -198,8 +201,8 @@ public:
         break;
 
       // Update p.
-      // Update p (p <- beta*p + r)
-      axpy(*_p, beta, *_p, *_r);
+      // Update p (p <- beta*p + M^-1(r))
+      axpy(*_p, beta, *_p, *_y);
 
       if (_store_coeffs)
       {

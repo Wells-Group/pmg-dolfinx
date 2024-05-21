@@ -104,7 +104,7 @@ if __name__ == "__main__":
     A = assemble_matrix(a, bcs=[bc])
     A.assemble()
 
-    cg_solver = CGSolver(A, 30, 1e-6, jacobi=True, verbose=True)
+    cg_solver = CGSolver(A, 10, 1e-6, jacobi=True, verbose=True)
     x = A.createVecRight()
     y = A.createVecRight()
     y.set(1.0)
@@ -128,7 +128,7 @@ if __name__ == "__main__":
     smoother_options = {
         "ksp_type": "cg",
         "pc_type": "jacobi",
-        "ksp_max_it": 30,
+        "ksp_max_it": 40,
         "ksp_rtol": 1e-6,
         "ksp_initial_guess_nonzero": True,
     }

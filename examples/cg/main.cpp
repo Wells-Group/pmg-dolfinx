@@ -309,7 +309,7 @@ int main(int argc, char* argv[])
       peak_mem = mem;
 #endif
     dolfinx::acc::CGSolver<DeviceVector> cg(map, 1);
-    cg.set_max_iterations(30);
+    cg.set_max_iterations(10);
     cg.set_tolerance(1e-5);
     cg.store_coefficients(true);
 #ifdef ROCM_TRACING
@@ -326,8 +326,11 @@ int main(int argc, char* argv[])
       peak_mem = mem;
 #endif
 
+    DeviceVector diag_inv(map, 1);
+    op.extract_diagonal_inverse(diag_inv);
+
     dolfinx::common::Timer tcg("ZZZ CG");
-    int its = cg.solve(op, x, y, true);
+    int its = cg.solve(op, diag_inv, x, y, true);
     tcg.stop();
 
 #ifdef ROCM_TRACING
@@ -349,15 +352,13 @@ int main(int argc, char* argv[])
 #endif
     std::vector<T> eign = cg.compute_eigenvalues();
     std::sort(eign.begin(), eign.end());
-    std::array<T, 2> eig_range = {0.3 * eign.back(), 1.2 * eign.back()};
+    std::array<T, 2> eig_range = {0.1 * eign.back(), 1.1 * eign.back()};
 #ifdef ROCM_TRACING
     remove_profiling_annotation("get eigenvalues");
 #endif
 
     if (rank == 0)
       std::cout << "Eigenvalues:" << eig_range[0] << " - " << eig_range[1] << std::endl;
-
-    eig_range[1] = 2.1575;
 
 #ifdef ROCM_TRACING
     add_profiling_annotation("chebyshev solve");
@@ -387,9 +388,6 @@ int main(int argc, char* argv[])
     if (mem > peak_mem)
       peak_mem = mem;
 #endif
-
-    DeviceVector diag_inv(map, 1);
-    op.extract_diagonal_inverse(diag_inv);
 
     // Reset x to zero
     x.set(1.0);

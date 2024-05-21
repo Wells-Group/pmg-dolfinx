@@ -127,7 +127,7 @@ if __name__ == "__main__":
 
     eigs = [0.8 * est_eigs[0], 1.1 * est_eigs[1]]
 
-    smoother = Chebyshev(A, 30, eigs, 4, jacobi=True, verbose=True)
+    smoother = Chebyshev(A, 50, eigs, 4, jacobi=True, verbose=True)
     # Try with non-zero initial guess to check that works OK
     x.set(1.0)
     print('before set bc x = ', x.norm())
@@ -142,7 +142,7 @@ if __name__ == "__main__":
     opts = PETSc.Options()
     smoother_options = {
         "ksp_type": "chebyshev",
-        "ksp_max_it": 30,
+        "ksp_max_it": 40,
         "pc_type": "jacobi",
         "ksp_chebyshev_eigenvalues": f"{eigs[0]}, {eigs[1]}",
         "ksp_chebyshev_kind": "fourth",
