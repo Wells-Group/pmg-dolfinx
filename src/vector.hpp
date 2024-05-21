@@ -448,7 +448,7 @@ void scale(Vector& r, S alpha)
 {
   using T = typename Vector::value_type;
   thrust::for_each(thrust::device, r.mutable_array().begin(), r.mutable_array().end(),
-                   [alpha] __host__ __device__(const T& v) { return v * alpha; });
+                   [alpha] __host__ __device__(T & v) { v *= alpha; });
 }
 
 /// Compute vector a = b

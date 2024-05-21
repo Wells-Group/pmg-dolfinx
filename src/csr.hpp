@@ -82,6 +82,12 @@ public:
     std::int32_t nnz = _A->row_ptr()[num_rows];
     _nnz = nnz;
 
+    T norm = 0.0;
+    for (T v : _A->values())
+      norm += v * v;
+
+    spdlog::info("A norm = {}", std::sqrt(norm));
+
     // Get inverse diagonal entries (for Jacobi preconditioning)
     std::vector<T> diag_inv(num_rows);
     for (int i = 0; i < num_rows; ++i)

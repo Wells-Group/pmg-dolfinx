@@ -64,16 +64,21 @@ class Chebyshev:
     def cheb4(self, b, x):
         r = b - self.A @ x
         if self.verbose:
+            print(f"Iteration 0, b norm = {np.linalg.norm(b)}")
+            print(f"Iteration 0, x norm = {np.linalg.norm(x)}")
             print(f"Iteration 0, UNPRECONDITIONED residual norm = {np.linalg.norm(r)}")
+            print(f"S.norm = {np.linalg.norm(self.S)}")
         d = self.S * r.copy() * float(4 / (3 * self.eig_range[1]))
-        beta = 1.0
+        print(f"Iteration 0, z norm = {np.linalg.norm(d)} fac = {float(4 / (3 * self.eig_range[1]))}")
 
         for i in range(1, self.max_iter + 1):
-            x += d * beta
+            x += d
             r = r - self.A @ d
             d *= float((2 * i - 1) / (2 * i + 3))
             d += self.S * r.copy() * float((8 * i + 4) / (2 * i + 3) / self.eig_range[1])
             if self.verbose:
+                print(f"Iteration {i}, x norm = {np.linalg.norm(x)}")
+                print(f"Iteration {i}, z norm = {np.linalg.norm(d)}")
                 print(f"Iteration {i}, UNPRECONDITIONED residual norm = {np.linalg.norm(r)}")
 
 
@@ -108,6 +113,7 @@ if __name__ == "__main__":
 
     A = assemble_matrix(a, bcs=[bc])
     A.assemble()
+    print(A.norm())
 
     b = assemble_vector(L)
     apply_lifting(b, [a], [[bc]])
@@ -123,8 +129,10 @@ if __name__ == "__main__":
 
     smoother = Chebyshev(A, 30, eigs, 4, jacobi=True, verbose=True)
     # Try with non-zero initial guess to check that works OK
-    x.set(0.0)
+    x.set(1.0)
+    print('before set bc x = ', x.norm())
     set_bc(x, [bc])
+    print('after set bc x = ', x.norm())
     smoother.solve(b, x)
 
     # Compare to PETSc
@@ -151,6 +159,6 @@ if __name__ == "__main__":
     solver.setNormType(solver.NormType.NORM_UNPRECONDITIONED)
     solver.setFromOptions()
     solver.view()
-    x.set(0.0)
+    x.set(1.0)
     set_bc(x, [bc])
     solver.solve(b, x)

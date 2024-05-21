@@ -51,12 +51,19 @@ public:
   template <typename Operator>
   void solve(Operator& A, Vector& diag_inv, Vector& x, const Vector& b, bool verbose)
   {
+    spdlog::info("Chebyshev solve");
     // Using "fourth kind" Chebyshev from Phillips and Fischer https://arxiv.org/pdf/2210.03179
     T lmax = _eig_range[1];
 
     // r = b - Ax
     A(x, *_q);
     acc::axpy(*_r, T(-1.0), *_q, b);
+
+    if (verbose)
+    {
+      T rnorm = acc::norm(*_r);
+      spdlog::info("Iteration {}, UNPRECONDITIONED residual norm = {}", 0, rnorm);
+    }
 
     // z = M^-1(r) * 4/(3*lmax)
     // Using M^-1 is Jacobi

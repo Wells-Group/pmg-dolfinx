@@ -29,8 +29,6 @@ int main(int argc, char* argv[])
   float peak_mem = 0.0;
   float global_peak_mem = 0.0;
 
-  spdlog::set_level(spdlog::level::info);
-
   po::options_description desc("Allowed options");
   desc.add_options()("help,h", "print usage message")(
       "ndofs", po::value<std::size_t>()->default_value(500), "number of dofs per rank")(
@@ -49,6 +47,8 @@ int main(int argc, char* argv[])
   const std::string filename = vm["file"].as<std::string>();
 
   init_logging(argc, argv);
+  spdlog::set_level(spdlog::level::info);
+
   MPI_Init(&argc, &argv);
   {
     MPI_Comm comm{MPI_COMM_WORLD};
@@ -357,7 +357,7 @@ int main(int argc, char* argv[])
     if (rank == 0)
       std::cout << "Eigenvalues:" << eig_range[0] << " - " << eig_range[1] << std::endl;
 
-    eig_range[1] = 1.911433537166766 * 1.1;
+    eig_range[1] = 2.1575;
 
 #ifdef ROCM_TRACING
     add_profiling_annotation("chebyshev solve");
@@ -370,7 +370,7 @@ int main(int argc, char* argv[])
 
     dolfinx::common::Timer tcheb("ZZZ Chebyshev");
     dolfinx::acc::Chebyshev<DeviceVector> cheb(map, 1, eig_range);
-    cheb.set_max_iterations(10);
+    cheb.set_max_iterations(30);
 #ifdef ROCM_TRACING
     remove_profiling_annotation("chebyshev solve");
 #endif
@@ -392,7 +392,14 @@ int main(int argc, char* argv[])
     op.extract_diagonal_inverse(diag_inv);
 
     // Reset x to zero
-    x.set(T{0.0});
+    x.set(1.0);
+    err_check(hipDeviceSynchronize());
+    T xnorm = acc::norm(x);
+    spdlog::info("Before set bc, x norm = {}", xnorm);
+    fem::set_bc<T, T>(x.mutable_array(), {bc});
+    err_check(hipDeviceSynchronize());
+    xnorm = acc::norm(x);
+    spdlog::info("After set bc, x norm = {}", xnorm);
 
     cheb.solve(op, diag_inv, x, y, true);
 #ifdef ROCM_SMI
