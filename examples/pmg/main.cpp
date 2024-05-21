@@ -2,10 +2,10 @@
 #include "../../src/chebyshev.hpp"
 #include "../../src/csr.hpp"
 #include "../../src/matrix-free.hpp"
+#include "../../src/mesh.hpp"
 #include "../../src/operators.hpp"
 #include "../../src/pmg.hpp"
 #include "../../src/vector.hpp"
-#include "../../src/mesh.hpp"
 #include "poisson.h"
 
 #include <thrust/device_vector.h>

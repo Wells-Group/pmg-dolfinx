@@ -2,6 +2,8 @@ from mpi4py import MPI
 from dolfinx.mesh import exterior_facet_indices, create_unit_cube
 from dolfinx.fem.petsc import (
     assemble_matrix,
+    assemble_vector,
+    apply_lifting,
     set_bc,
 )
 from dolfinx import fem, mesh
@@ -61,6 +63,8 @@ class Chebyshev:
 
     def cheb4(self, b, x):
         r = b - self.A @ x
+        if self.verbose:
+            print(f"Iteration 0, UNPRECONDITIONED residual norm = {np.linalg.norm(r)}")
         d = self.S * r.copy() * float(4 / (3 * self.eig_range[1]))
         beta = 1.0
 
@@ -105,8 +109,9 @@ if __name__ == "__main__":
     A = assemble_matrix(a, bcs=[bc])
     A.assemble()
 
-    b = A.createVecRight()
-    b.set(1.0)
+    b = assemble_vector(L)
+    apply_lifting(b, [a], [[bc]])
+    set_bc(b, [bc])
 
     cg_solver = CGSolver(A, 10, 1e-6, jacobi=True, verbose=False)
     x = A.createVecRight()
@@ -118,7 +123,7 @@ if __name__ == "__main__":
 
     smoother = Chebyshev(A, 30, eigs, 4, jacobi=True, verbose=True)
     # Try with non-zero initial guess to check that works OK
-    x.set(1.0)
+    x.set(0.0)
     set_bc(x, [bc])
     smoother.solve(b, x)
 
@@ -146,6 +151,6 @@ if __name__ == "__main__":
     solver.setNormType(solver.NormType.NORM_UNPRECONDITIONED)
     solver.setFromOptions()
     solver.view()
-    x.set(1.0)
+    x.set(0.0)
     set_bc(x, [bc])
     solver.solve(b, x)

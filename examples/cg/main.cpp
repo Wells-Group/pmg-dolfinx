@@ -26,11 +26,10 @@ namespace po = boost::program_options;
 
 int main(int argc, char* argv[])
 {
-  int err;
-  uint32_t num_devices;
   float peak_mem = 0.0;
   float global_peak_mem = 0.0;
-  float mem = 0.0;
+
+  spdlog::set_level(spdlog::level::info);
 
   po::options_description desc("Allowed options");
   desc.add_options()("help,h", "print usage message")(
@@ -93,7 +92,7 @@ int main(int argc, char* argv[])
     }
     else
     {
-      const int order = 2;
+      const int order = 3;
       double nx_approx = (std::pow(ndofs * size, 1.0 / 3.0) - 1) / order;
       std::size_t n0 = static_cast<int>(nx_approx);
       std::array<std::size_t, 3> nx = {n0, n0, n0};
@@ -117,6 +116,8 @@ int main(int argc, char* argv[])
               }
             }
       }
+      spdlog::warn("Mesh size {}x{}x{}", nx[0], nx[1], nx[2]);
+
       mesh = std::make_shared<mesh::Mesh<T>>(mesh::create_box<T>(
           comm, {{{0, 0, 0}, {1, 1, 1}}}, {nx[0], nx[1], nx[2]}, mesh::CellType::hexahedron));
     }
@@ -133,8 +134,13 @@ int main(int argc, char* argv[])
     if (mem > peak_mem)
       peak_mem = mem;
 #endif
-    auto V = std::make_shared<fem::FunctionSpace<T>>(
-        fem::create_functionspace(functionspace_form_poisson_a, "u", mesh));
+
+    auto element = basix::create_element<T>(
+        basix::element::family::P, basix::cell::type::hexahedron, 3,
+        basix::element::lagrange_variant::gll_warped, basix::element::dpc_variant::unset, false);
+
+    auto V = std::make_shared<fem::FunctionSpace<T>>(fem::create_functionspace(mesh, element, {}));
+
 #ifdef ROCM_TRACING
     remove_profiling_annotation("making V");
 #endif
@@ -351,6 +357,8 @@ int main(int argc, char* argv[])
     if (rank == 0)
       std::cout << "Eigenvalues:" << eig_range[0] << " - " << eig_range[1] << std::endl;
 
+    eig_range[1] = 1.911433537166766 * 1.1;
+
 #ifdef ROCM_TRACING
     add_profiling_annotation("chebyshev solve");
 #endif
@@ -361,7 +369,7 @@ int main(int argc, char* argv[])
 #endif
 
     dolfinx::common::Timer tcheb("ZZZ Chebyshev");
-    dolfinx::acc::Chebyshev<DeviceVector> cheb(map, 1, eig_range, 3);
+    dolfinx::acc::Chebyshev<DeviceVector> cheb(map, 1, eig_range);
     cheb.set_max_iterations(10);
 #ifdef ROCM_TRACING
     remove_profiling_annotation("chebyshev solve");
@@ -379,7 +387,14 @@ int main(int argc, char* argv[])
     if (mem > peak_mem)
       peak_mem = mem;
 #endif
-    cheb.solve(op, x, y, true);
+
+    DeviceVector diag_inv(map, 1);
+    op.extract_diagonal_inverse(diag_inv);
+
+    // Reset x to zero
+    x.set(T{0.0});
+
+    cheb.solve(op, diag_inv, x, y, true);
 #ifdef ROCM_SMI
     mem = print_amd_gpu_memory_percentage_used("afterchebyshev solve");
     if (mem > peak_mem)

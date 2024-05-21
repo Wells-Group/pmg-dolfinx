@@ -42,17 +42,17 @@ public:
     la::SparsityPattern pattern = fem::create_sparsity_pattern(*a);
     pattern.finalize();
 
-    LOG(INFO) << "Create matrix..." << pattern.index_map(0)->size_global() << "x"
-              << pattern.index_map(1)->size_global();
+    spdlog::info("Create matrix... {}x{}", pattern.index_map(0)->size_global(),
+                 pattern.index_map(1)->size_global());
     _host_mat = la::petsc::create_matrix(a->mesh()->comm(), pattern, "aijhipsparse");
 
-    LOG(INFO) << "Zero matrix...";
+    spdlog::info("Zero matrix...");
     MatZeroEntries(_host_mat);
     auto set_fn = la::petsc::Matrix::set_block_fn(_host_mat, ADD_VALUES);
-    LOG(INFO) << "Assemble matrix...";
+    spdlog::info("Assemble matrix...");
     fem::assemble_matrix(set_fn, *a, bcs);
 
-    LOG(INFO) << "Assemble matrix 2...";
+    spdlog::info("Assemble matrix 2...");
     auto V = a->function_spaces()[0];
     MatAssemblyBegin(_host_mat, MAT_FLUSH_ASSEMBLY);
     MatAssemblyEnd(_host_mat, MAT_FLUSH_ASSEMBLY);
@@ -63,13 +63,13 @@ public:
 
     PetscReal norm;
     MatNorm(_host_mat, NORM_FROBENIUS, &norm);
-    LOG(INFO) << "Mat norm = " << norm;
+    spdlog::info("Mat norm = {}", norm);
 
-    LOG(INFO) << "Convert matrix...";
+    spdlog::info("Convert matrix...");
     // Create HIP matrix
     dolfinx::common::Timer t1("~Convert matrix to MATAIJHIPSPARSE");
     int ierr = MatConvert(_host_mat, MATSAME, MAT_INITIAL_MATRIX, &_hip_mat);
-    LOG(INFO) << ierr;
+    spdlog::info("ierr={}", ierr);
     t1.stop();
 
     // Get communicator from mesh
@@ -78,12 +78,12 @@ public:
     _map = std::make_shared<const common::IndexMap>(pattern.column_index_map());
     const PetscInt local_size = _map->size_local();
     const PetscInt global_size = _map->size_global();
-    LOG(INFO) << "Create vecs... " << local_size << "/" << global_size;
+    spdlog::info("Create vecs... {}/{}", local_size, global_size);
 
     ierr = VecCreateMPIHIPWithArray(_comm, PetscInt(1), local_size, global_size, NULL, &_x_petsc);
-    LOG(INFO) << ierr;
+    spdlog::info("ierr={}", ierr);
     ierr = VecCreateMPIHIPWithArray(_comm, PetscInt(1), local_size, global_size, NULL, &_y_petsc);
-    LOG(INFO) << ierr;
+    spdlog::info("ierr={}", ierr);
   }
 
   PETScOperator(const fem::FunctionSpace<T>& V0, const fem::FunctionSpace<T>& V1)
@@ -166,22 +166,22 @@ public:
   template <typename Vector>
   void operator()(const Vector& x, Vector& y, bool transpose = false)
   {
-    LOG(INFO) << "HipPlaceArray";
+    spdlog::info("HipPlaceArray");
 
     int ierr = VecHIPPlaceArray(_x_petsc, x.array().data());
-    LOG(INFO) << "x:" << ierr << " " << x.array().data();
+    spdlog::info("x:{}, {}", ierr, x.array().data());
     ierr = VecHIPPlaceArray(_y_petsc, y.array().data());
-    LOG(INFO) << "y:" << ierr << " " << y.array().data();
+    spdlog::info("y:{}, {}", ierr, y.array().data());
 
     int nx, ny;
     MatGetLocalSize(_hip_mat, &nx, &ny);
-    LOG(INFO) << "Mat shape = " << nx << "x" << ny;
+    spdlog::info("Mat shape = {}x{}", nx, ny);
     VecGetLocalSize(_x_petsc, &nx);
-    LOG(INFO) << "Vec size x = " << nx;
+    spdlog::info("Vec size x = {}", nx);
     VecGetLocalSize(_y_petsc, &ny);
-    LOG(INFO) << "Vec size y = " << ny;
+    spdlog::info("Vec size y = {}", ny);
 
-    LOG(INFO) << "MatMult";
+    spdlog::info("MatMult");
     if (transpose)
       // y = A^T x
       MatMultTranspose(_hip_mat, _x_petsc, _y_petsc);
@@ -189,7 +189,7 @@ public:
       // y = A x
       MatMult(_hip_mat, _x_petsc, _y_petsc);
 
-    LOG(INFO) << "HipResetArray";
+    spdlog::info("HipResetArray");
     VecHIPResetArray(_y_petsc);
     VecHIPResetArray(_x_petsc);
   }

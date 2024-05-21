@@ -82,15 +82,29 @@ public:
     std::int32_t nnz = _A->row_ptr()[num_rows];
     _nnz = nnz;
 
+    // Get inverse diagonal entries (for Jacobi preconditioning)
+    std::vector<T> diag_inv(num_rows);
+    for (int i = 0; i < num_rows; ++i)
+    {
+      for (int j = _A->row_ptr()[i]; j < _A->row_ptr()[i + 1]; ++j)
+      {
+        if (_A->cols()[j] == i)
+          diag_inv[i] = 1.0 / _A->values()[j];
+      }
+    }
+    _diag_inv = thrust::device_vector<T>(diag_inv.size());
+    thrust::copy(diag_inv.begin(), diag_inv.end(), _diag_inv.begin());
+
     _row_ptr = thrust::device_vector<std::int32_t>(num_rows + 1);
     _off_diag_offset = thrust::device_vector<std::int32_t>(num_rows);
     _cols = thrust::device_vector<std::int32_t>(nnz);
     _values = thrust::device_vector<T>(nnz);
 
     // Copy data from host to device
-    LOG(WARNING) << "Creating Device matrix with  " << _nnz << " non zeros";
+    spdlog::warn("Creating Device matrix with {} non zeros", _nnz);
     thrust::copy(_A->row_ptr().begin(), _A->row_ptr().end(), _row_ptr.begin());
-    thrust::copy(_A->off_diag_offset().begin(), _A->off_diag_offset().begin() + num_rows, _off_diag_offset.begin());
+    thrust::copy(_A->off_diag_offset().begin(), _A->off_diag_offset().begin() + num_rows,
+                 _off_diag_offset.begin());
     thrust::copy(_A->cols().begin(), _A->cols().begin() + nnz, _cols.begin());
     thrust::copy(_A->values().begin(), _A->values().begin() + nnz, _values.begin());
 
@@ -147,11 +161,11 @@ public:
     std::int32_t nnz = _A->row_ptr()[num_rows];
     _nnz = nnz;
 
-    LOG(WARNING) << "Operator Number of non zeros " << _nnz;
-    LOG(WARNING) << "Operator Number of rows " << num_rows;
-    LOG(WARNING) << "Operator dm0 size " << V0.dofmap()->index_map->size_global();
-    LOG(WARNING) << "Operator dm1 size " << V1.dofmap()->index_map->size_global();
-    LOG(WARNING) << "Max column = " << *std::max_element(_A->cols().begin(), _A->cols().end());
+    spdlog::warn("Operator Number of non zeros {}", _nnz);
+    spdlog::warn("Operator Number of rows {}", num_rows);
+    spdlog::warn("Operator dm0 size {}", V0.dofmap()->index_map->size_global());
+    spdlog::warn("Operator dm1 size {}", V1.dofmap()->index_map->size_global());
+    spdlog::warn("Max column = {}", *std::max_element(_A->cols().begin(), _A->cols().end()));
 
     _row_ptr = thrust::device_vector<std::int32_t>(num_rows + 1);
     _off_diag_offset = thrust::device_vector<std::int32_t>(num_rows);
@@ -160,7 +174,8 @@ public:
 
     // Copy data from host to device
     thrust::copy(_A->row_ptr().begin(), _A->row_ptr().begin() + num_rows + 1, _row_ptr.begin());
-    thrust::copy(_A->off_diag_offset().begin(), _A->off_diag_offset().begin() + num_rows, _off_diag_offset.begin());
+    thrust::copy(_A->off_diag_offset().begin(), _A->off_diag_offset().begin() + num_rows,
+                 _off_diag_offset.begin());
     thrust::copy(_A->cols().begin(), _A->cols().begin() + nnz, _cols.begin());
     thrust::copy(_A->values().begin(), _A->values().begin() + nnz, _values.begin());
 
@@ -168,6 +183,12 @@ public:
     hipsparseCreateMatDescr(&descrA);
     hipsparseSetMatType(descrA, HIPSPARSE_MATRIX_TYPE_GENERAL);
     hipsparseSetMatIndexBase(descrA, HIPSPARSE_INDEX_BASE_ZERO);
+  }
+
+  template <typename Vector>
+  void extract_diagonal_inverse(Vector& diag_inv)
+  {
+    thrust::copy(_diag_inv.begin(), _diag_inv.end(), diag_inv.mutable_array().begin());
   }
 
   /**
@@ -182,7 +203,7 @@ public:
   template <typename Vector>
   void operator()(Vector& x, Vector& y, bool transpose = false)
   {
-    LOG(WARNING) << "MatrixOperator application";
+    spdlog::debug("MatrixOperator application");
     dolfinx::common::Timer t0("% MatrixOperator application");
 
     x.scatter_fwd_begin();
@@ -196,12 +217,13 @@ public:
     T beta = 0.0;
     x.scatter_fwd_end();
 
-    hipsparseOperation_t transa = transpose ? HIPSPARSE_OPERATION_TRANSPOSE : HIPSPARSE_OPERATION_NON_TRANSPOSE;
+    hipsparseOperation_t transa
+        = transpose ? HIPSPARSE_OPERATION_TRANSPOSE : HIPSPARSE_OPERATION_NON_TRANSPOSE;
     T* values = thrust::raw_pointer_cast(_values.data());
     std::int32_t* row_ptr = thrust::raw_pointer_cast(_row_ptr.data());
     std::int32_t* cols = thrust::raw_pointer_cast(_cols.data());
-    hipsparseDcsrmv(handle, transa, num_rows, num_cols, _nnz, &alpha,
-                    descrA, values, row_ptr, cols, _x, &beta, _y);
+    hipsparseDcsrmv(handle, transa, num_rows, num_cols, _nnz, &alpha, descrA, values, row_ptr, cols,
+                    _x, &beta, _y);
     err_check(hipGetLastError());
     err_check(hipDeviceSynchronize());
   }
@@ -227,6 +249,7 @@ public:
 private:
   std::size_t _nnz;
   thrust::device_vector<T> _values;
+  thrust::device_vector<T> _diag_inv;
   thrust::device_vector<std::int32_t> _row_ptr;
   thrust::device_vector<std::int32_t> _cols;
   thrust::device_vector<std::int32_t> _off_diag_offset;

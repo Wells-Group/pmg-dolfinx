@@ -440,6 +440,17 @@ void axpy(Vector& r, S alpha, const Vector& x, const Vector& y)
                     { return vx * alpha + vy; });
 }
 
+/// Scale vector by alpha
+/// @param r Result
+/// @param alpha
+template <typename Vector, typename S>
+void scale(Vector& r, S alpha)
+{
+  using T = typename Vector::value_type;
+  thrust::for_each(thrust::device, r.mutable_array().begin(), r.mutable_array().end(),
+                   [alpha] __host__ __device__(const T& v) { return v * alpha; });
+}
+
 /// Compute vector a = b
 /// @param a
 /// @param b
