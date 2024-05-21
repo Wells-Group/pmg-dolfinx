@@ -2,8 +2,6 @@ from mpi4py import MPI
 from dolfinx.mesh import exterior_facet_indices, create_unit_cube
 from dolfinx.fem.petsc import (
     assemble_matrix,
-    assemble_vector,
-    apply_lifting,
     set_bc,
 )
 from dolfinx import fem, mesh
@@ -14,7 +12,9 @@ from petsc4py import PETSc
 
 
 class Chebyshev:
-    def __init__(self, A, max_iter, eig_range, kind, verbose=False) -> None:
+    def __init__(
+        self, A, max_iter, eig_range, kind, jacobi=False, verbose=False
+    ) -> None:
         self.A = A
         self.max_iter = max_iter
         self.eig_range = eig_range
@@ -28,6 +28,13 @@ class Chebyshev:
         if not (kind == 1 or kind == 4):
             raise ValueError(f"Invalid kind: {kind}")
 
+        if jacobi:
+            self.S = A.getDiagonal()
+            self.S.reciprocal()
+        else:
+            self.S = A.createVecRight()
+            self.S.set(1.0)
+
     def solve(self, b, x):
         if self.kind == 1:
             self.cheb1(b, x)
@@ -38,32 +45,32 @@ class Chebyshev:
         sigma = self.theta / self.delta
         rho = 1 / sigma
 
-        r = b - self.A @ x
+        r = self.S * (b - self.A @ x)
         d = r.copy() * float(1.0 / self.theta)
 
         for i in range(self.max_iter):
             x += d
-            r = r - self.A @ d
+            r = r - self.S * (self.A @ d)
             rho_new = 1 / (2 * sigma - rho)
             d *= float(rho * rho_new)
             d += float(2 * rho_new / self.delta) * r.copy()
             rho = rho_new
 
             if self.verbose:
-                print(f"Iteration {i + 1}, residual norm = {np.linalg.norm(r)}")
+                print(f"Iteration {i + 1}, PRECONDITIONED residual norm = {np.linalg.norm(r)}")
 
     def cheb4(self, b, x):
         r = b - self.A @ x
-        d = r.copy() * float(4 / (3 * self.eig_range[1]))
+        d = self.S * r.copy() * float(4 / (3 * self.eig_range[1]))
         beta = 1.0
 
         for i in range(1, self.max_iter + 1):
             x += beta * d
             r = r - self.A @ d
             d *= float((2 * i - 1) / (2 * i + 3))
-            d += float((8 * i + 4) / (2 * i + 3) / self.eig_range[1]) * r.copy()
+            d += float((8 * i + 4) / (2 * i + 3) / self.eig_range[1]) * self.S * r.copy()
             if self.verbose:
-                print(f"Iteration {i}, residual norm = {np.linalg.norm(r)}")
+                print(f"Iteration {i}, UNPRECONDITIONED residual norm = {np.linalg.norm(r)}")
 
 
 if __name__ == "__main__":
@@ -98,11 +105,10 @@ if __name__ == "__main__":
     A = assemble_matrix(a, bcs=[bc])
     A.assemble()
 
-    b = assemble_vector(L)
-    apply_lifting(b, [a], bcs=[[bc]])
-    set_bc(b, [bc])
+    b = A.createVecRight()
+    b.set(1.0)
 
-    cg_solver = CGSolver(A, 5, 1e-6, False)
+    cg_solver = CGSolver(A, 10, 1e-6, jacobi=True, verbose=False)
     x = A.createVecRight()
     cg_solver.solve(b, x)
     est_eigs = cg_solver.compute_eigs()
@@ -110,7 +116,7 @@ if __name__ == "__main__":
 
     eigs = [0.8 * est_eigs[0], 1.2 * est_eigs[1]]
 
-    smoother = Chebyshev(A, 30, eigs, 1, verbose=True)
+    smoother = Chebyshev(A, 30, eigs, 1, jacobi=True, verbose=True)
     # Try with non-zero initial guess to check that works OK
     x.set(1.0)
     set_bc(x, [bc])
@@ -124,7 +130,7 @@ if __name__ == "__main__":
     smoother_options = {
         "ksp_type": "chebyshev",
         "ksp_max_it": 30,
-        "pc_type": "none",
+        "pc_type": "jacobi",
         "ksp_chebyshev_eigenvalues": f"{eigs[0]}, {eigs[1]}",
         "ksp_chebyshev_kind": "first",
         "ksp_initial_guess_nonzero": True,
@@ -137,7 +143,7 @@ if __name__ == "__main__":
         print("Iteration: {}, rel. residual: {}".format(its, rnorm))
 
     solver.setMonitor(monitor)
-    solver.setNormType(solver.NormType.NORM_UNPRECONDITIONED)
+    solver.setNormType(solver.NormType.NORM_PRECONDITIONED)
     solver.setFromOptions()
     solver.view()
     x.set(1.0)

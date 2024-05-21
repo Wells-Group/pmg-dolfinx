@@ -60,7 +60,7 @@ n = 10
 ks = [1, 3]
 num_iters = 10
 kappa = 1.0
-use_petsc = True
+use_petsc = False
 comm = MPI.COMM_WORLD
 msh = mesh.create_unit_cube(MPI.COMM_WORLD, n, n, n, cell_type=mesh.CellType.hexahedron)
 
@@ -112,6 +112,8 @@ solver.setOptionsPrefix(solver_prefix)
 solver.setOperators(As[0])
 solver.setType(PETSc.KSP.Type.PREONLY)
 solver.pc.setType(PETSc.PC.Type.LU)
+# opts = PETSc.Options()
+# opts["help"] = None
 solver.setFromOptions()
 solvers.append(solver)
 
@@ -137,13 +139,20 @@ for i in range(1, len(ks)):
         solver.setFromOptions()
         solvers.append(solver)
     else:
-        cg_solver = CGSolver(As[i], 10, 1e-6, False)
+        cg_solver = CGSolver(As[i], 10, 1e-6, jacobi=True, verbose=False)
         x = As[i].createVecRight()
-        cg_solver.solve(bs[i].vector, x)
+        y = As[i].createVecRight()
+        y.set(1.0)
+        cg_solver.solve(y, x)
         est_eigs = cg_solver.compute_eigs()
         solvers.append(
             Chebyshev(
-                As[i], 2, (0.8 * est_eigs[0], 3.5 * est_eigs[1]), 1, verbose=False
+                As[i],
+                2,
+                (0.8 * est_eigs[0], 1.2 * est_eigs[1]),
+                4,
+                jacobi=True,
+                verbose=False,
             )
         )
 
