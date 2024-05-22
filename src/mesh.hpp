@@ -68,8 +68,8 @@ dolfinx::mesh::Mesh<T> ghost_layer_mesh(dolfinx::mesh::Mesh<T>& mesh)
       = dolfinx::mesh::create_mesh(mesh.comm(), mesh.comm(), std::span(topo_global),
                                    mesh.geometry().cmap(), mesh.comm(), x, xshape, partitioner);
 
-  LOG(INFO) << "** NEW MESH num_ghosts_cells = "
-            << new_mesh.topology()->index_map(tdim)->num_ghosts();
+  spdlog::info("** NEW MESH num_ghosts_cells = {}",
+               new_mesh.topology()->index_map(tdim)->num_ghosts());
 
   return new_mesh;
 }

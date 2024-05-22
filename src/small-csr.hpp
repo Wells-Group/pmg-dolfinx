@@ -52,7 +52,7 @@ public:
 
   ~SmallCSR()
   {
-    LOG(INFO) << "Deallocating SmallCSR";
+    spdlog::info("Deallocating SmallCSR");
     if (mat_device)
       err_check(hipFree(mat_device));
   }
@@ -117,8 +117,7 @@ public:
       }
     }
 
-    LOG(INFO) << "Compressed dense matrix from " << mat.size() << " to " << values.size()
-              << " CSR values";
+    spdlog::info("Compressed dense matrix from {} to {} CSR values", mat.size(), values.size());
 
     cols.resize(columns.size());
     thrust::copy(columns.begin(), columns.end(), cols.begin());

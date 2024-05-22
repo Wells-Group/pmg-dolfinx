@@ -39,33 +39,31 @@ public:
     MPI_Comm comm = a->mesh()->comm();
 
     // Create Coarse Operator using PETSc and Hypre
-    LOG(INFO) << "Create PETScOperator";
+    spdlog::info("Create PETScOperator");
     coarse_op = std::make_unique<PETScOperator<T>>(a, std::vector{bcs});
     err_check(hipDeviceSynchronize());
 
     auto im_op = coarse_op->index_map();
-    LOG(INFO) << "OP:" << im_op->size_global() << "/" << im_op->size_local() << "/"
-              << im_op->num_ghosts();
+    spdlog::info("OP:{}/{}/{}", im_op->size_global(), im_op->size_local(), im_op->num_ghosts());
     auto im_V = V->dofmap()->index_map;
-    LOG(INFO) << "V:" << im_V->size_global() << "/" << im_V->size_local() << "/"
-              << im_V->num_ghosts();
+    spdlog::info("V:{}/{}/{}", im_V->size_global(), im_V->size_local(), im_V->num_ghosts());
 
-    LOG(INFO) << "Get device matrix";
+    spdlog::info("Get device matrix");
     Mat A = coarse_op->device_matrix();
-    LOG(INFO) << "Create Petsc KSP";
+    spdlog::info("Create Petsc KSP");
     KSPCreate(comm, &_solver);
-    LOG(INFO) << "Set KSP Type";
+    spdlog::info("Set KSP Type");
     KSPSetType(_solver, KSPCG);
-    LOG(INFO) << "Set Operators";
+    spdlog::info("Set Operators");
     KSPSetOperators(_solver, A, A);
-    LOG(INFO) << "Set iteration count";
+    spdlog::info("Set iteration count");
     KSPSetTolerances(_solver, PETSC_DEFAULT, PETSC_DEFAULT, PETSC_DEFAULT, 10);
-    LOG(INFO) << "Set PC Type";
+    spdlog::info("Set PC Type");
     PC prec;
     KSPGetPC(_solver, &prec);
     PCSetType(prec, PCHYPRE);
     KSPSetFromOptions(_solver);
-    LOG(INFO) << "KSP Setup";
+    spdlog::info("KSP Setup");
     KSPSetUp(_solver);
 
     const PetscInt local_size = V->dofmap()->index_map->size_local();
@@ -95,10 +93,10 @@ public:
     PetscInt num_iterations = 0;
     int ierr = KSPGetIterationNumber(_solver, &num_iterations);
     if (ierr != 0)
-      LOG(ERROR) << "KSPGetIterationNumber Error:" << ierr;
+      spdlog::error("KSPGetIterationNumber Error:{}", ierr);
 
-    LOG(INFO) << "Converged reason: " << reason;
-    LOG(INFO) << "Num iterations: " << num_iterations;
+    spdlog::info("Converged reason: {}", (int)reason);
+    spdlog::info("Num iterations: {}", num_iterations);
 
     VecHIPResetArray(_b);
     VecHIPResetArray(_x);
@@ -144,9 +142,8 @@ int main(int argc, char* argv[])
     MPI_Comm_size(comm, &size);
 
     std::string thread_name = "RANK: " + std::to_string(rank);
-    loguru::set_thread_name(thread_name.c_str());
     if (rank == 0)
-      loguru::g_stderr_verbosity = loguru::Verbosity_INFO;
+      spdlog::set_level(spdlog::level::info);
 
     const int order = 3;
     double nx_approx = (std::pow(ndofs * size, 1.0 / 3.0) - 1) / order;
@@ -173,7 +170,7 @@ int main(int argc, char* argv[])
           }
     }
 
-    LOG(INFO) << "Creating mesh of size: " << nx[0] << "x" << nx[1] << "x" << nx[2];
+    spdlog::info("Creating mesh of size: {}x{}x{}", nx[0], nx[1], nx[2]);
 
     // Create mesh
     std::shared_ptr<mesh::Mesh<T>> mesh;
@@ -206,7 +203,7 @@ int main(int argc, char* argv[])
     }
     std::sort(ip_cells.begin(), ip_cells.end());
     ip_cells.erase(std::unique(ip_cells.begin(), ip_cells.end()), ip_cells.end());
-    LOG(INFO) << "Got " << ip_cells.size() << " boundary cells.";
+    spdlog::info("Got {} boundary cells.", ip_cells.size());
 
     // Compute local cells
     std::vector<std::int32_t> local_cells(topology->index_map(tdim)->size_local()
@@ -215,14 +212,14 @@ int main(int argc, char* argv[])
     for (std::int32_t c : ip_cells)
       local_cells[c] = -1;
     std::erase(local_cells, -1);
-    LOG(INFO) << "Got " << local_cells.size() << " local cells";
+    spdlog::info("Got {} local cells", local_cells.size());
 
     // Copy lists of local and boundary cells to device
     thrust::device_vector<std::int32_t> ipcells_device(ip_cells.size());
-    LOG(INFO) << "Copy IP_cells :" << ip_cells.size();
+    spdlog::info("Copy IP_cells : {}", ip_cells.size());
     thrust::copy(ip_cells.begin(), ip_cells.end(), ipcells_device.begin());
     thrust::device_vector<std::int32_t> lcells_device(local_cells.size());
-    LOG(INFO) << "Copy local_cells :" << local_cells.size();
+    spdlog::info("Copy local_cells :{}", local_cells.size());
     thrust::copy(local_cells.begin(), local_cells.end(), lcells_device.begin());
     std::span<std::int32_t> ipcells_span(thrust::raw_pointer_cast(ipcells_device.data()),
                                          ipcells_device.size());
@@ -312,19 +309,19 @@ int main(int argc, char* argv[])
 
     // Copy dofmaps to device
     thrust::device_vector<std::int32_t> dofmapV0(V[0]->dofmap()->map().size());
-    LOG(INFO) << "Copy dofmap (V0) :" << dofmapV0.size();
+    spdlog::info("Copy dofmap (V0) : {}", dofmapV0.size());
     thrust::copy(V[0]->dofmap()->map().data_handle(),
                  V[0]->dofmap()->map().data_handle() + V[0]->dofmap()->map().size(),
                  dofmapV0.begin());
 
     thrust::device_vector<std::int32_t> dofmapV1(V[1]->dofmap()->map().size());
-    LOG(INFO) << "Copy dofmap (V1) :" << dofmapV1.size();
+    spdlog::info("Copy dofmap (V1) : {}", dofmapV1.size());
     thrust::copy(V[1]->dofmap()->map().data_handle(),
                  V[1]->dofmap()->map().data_handle() + V[1]->dofmap()->map().size(),
                  dofmapV1.begin());
 
     thrust::device_vector<std::int32_t> dofmapV2(V[2]->dofmap()->map().size());
-    LOG(INFO) << "Copy dofmap (V2) :" << dofmapV2.size();
+    spdlog::info("Copy dofmap (V2) : {}", dofmapV2.size());
     thrust::copy(V[2]->dofmap()->map().data_handle(),
                  V[2]->dofmap()->map().data_handle() + V[2]->dofmap()->map().size(),
                  dofmapV2.begin());
@@ -339,12 +336,12 @@ int main(int argc, char* argv[])
 
     // Copy geometry to device
     thrust::device_vector<T> geomx_device(mesh->geometry().x().size());
-    LOG(INFO) << "Copy geometry to device :" << geomx_device.size();
+    spdlog::info("Copy geometry to device :{}", geomx_device.size());
     thrust::copy(mesh->geometry().x().begin(), mesh->geometry().x().end(), geomx_device.begin());
     std::span<T> geom_x(thrust::raw_pointer_cast(geomx_device.data()), geomx_device.size());
 
     thrust::device_vector<std::int32_t> geomx_dofmap_device(mesh->geometry().dofmap().size());
-    LOG(INFO) << "Copy geometry to device :" << geomx_dofmap_device.size();
+    spdlog::info("Copy geometry to device :{}", geomx_dofmap_device.size());
     thrust::copy(mesh->geometry().dofmap().data_handle(),
                  mesh->geometry().dofmap().data_handle() + mesh->geometry().dofmap().size(),
                  geomx_dofmap_device.begin());
@@ -380,9 +377,9 @@ int main(int argc, char* argv[])
       int num_cells = mesh->topology()->index_map(tdim)->size_local()
                       + mesh->topology()->index_map(tdim)->num_ghosts();
 
-      LOG(INFO) << "Num cells = " << num_cells;
+      spdlog::info("Num cells = {}", num_cells);
 
-      LOG(INFO) << "Create operator on V[" << i << "]";
+      spdlog::info("Create operator on V[{}]", i);
       std::span<const std::int8_t> bc_span(thrust::raw_pointer_cast(device_bc_dofs[i].data()),
                                            device_bc_dofs[i].size());
       operators[i] = std::make_shared<acc::MatFreeLaplace<T>>(
@@ -405,7 +402,7 @@ int main(int argc, char* argv[])
       bs[i]->copy_from_host(b);
     }
 
-    LOG(INFO) << "Create Chebyshev smoothers";
+    spdlog::info("Create Chebyshev smoothers");
 
     // Create chebyshev smoother for each level
     std::vector<std::shared_ptr<acc::Chebyshev<DeviceVector>>> smoothers(V.size());
@@ -424,10 +421,10 @@ int main(int argc, char* argv[])
       [[maybe_unused]] int its = cg.solve(*operators[i], x, *bs[i], false);
       std::vector<T> eign = cg.compute_eigenvalues();
       std::sort(eign.begin(), eign.end());
-      std::array<T, 2> eig_range = {0.8 * eign.front(), 1.2 * eign.back()};
-      smoothers[i] = std::make_shared<acc::Chebyshev<DeviceVector>>(maps[i], 1, eig_range, 2);
+      std::array<T, 2> eig_range = {0.1 * eign.back(), 1.1 * eign.back()};
+      smoothers[i] = std::make_shared<acc::Chebyshev<DeviceVector>>(maps[i], 1, eig_range);
 
-      LOG(INFO) << "Eigenvalues level " << i << ": " << eign.front() << " " << eign.back();
+      spdlog::info("Eigenvalues level {}: {} - {}", i, eign.front(), eign.back());
     }
 
     smoothers[0]->set_max_iterations(20);
@@ -447,7 +444,7 @@ int main(int argc, char* argv[])
     // From V1 to V0
     if (use_csr_interpolation)
     {
-      LOG(WARNING) << "Creating Prolongation Operators";
+      spdlog::warn("Creating Prolongation Operators");
       prolongation[0] = std::make_shared<acc::MatrixOperator<T>>(*V[0], *V[1]);
       restriction[0] = std::make_shared<acc::MatrixOperator<T>>(*V[1], *V[0]);
       // From V2 to V1
@@ -487,11 +484,11 @@ int main(int argc, char* argv[])
     using PMG = acc::MultigridPreconditioner<DeviceVector, OpType, CSRType, CSRType, SolverType,
                                              CoarseSolverType>;
 
-    LOG(INFO) << "Create PMG";
+    spdlog::info("Create PMG");
     PMG pmg(maps, 1);
     pmg.set_solvers(smoothers);
     pmg.set_operators(operators);
-    LOG(INFO) << "Set Coarse Solver";
+    spdlog::info("Set Coarse Solver");
     pmg.set_coarse_solver(coarse_solver);
 
     // Sets CSR matrices or matrix-free kernels to do interpolation
@@ -501,14 +498,14 @@ int main(int argc, char* argv[])
     pmg.set_prolongation_kernels(prolong_kerns);
 
     // Create solution vector
-    LOG(INFO) << "Create x";
+    spdlog::info("Create x");
     DeviceVector x(maps.back(), 1);
     x.set(T{0.0});
 
     for (int i = 0; i < 10; i++)
     {
       pmg.apply(*bs.back(), x, true);
-      // LOG(INFO) << "------ end of iteration ------";
+      // spdlog::info("------ end of iteration ------");
     }
 
     // Display timings

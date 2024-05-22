@@ -326,11 +326,8 @@ int main(int argc, char* argv[])
       peak_mem = mem;
 #endif
 
-    DeviceVector diag_inv(map, 1);
-    op.extract_diagonal_inverse(diag_inv);
-
     dolfinx::common::Timer tcg("ZZZ CG");
-    int its = cg.solve(op, diag_inv, x, y, true);
+    int its = cg.solve(op, x, y, true);
     tcg.stop();
 
 #ifdef ROCM_TRACING
@@ -399,7 +396,7 @@ int main(int argc, char* argv[])
     xnorm = acc::norm(x);
     spdlog::info("After set bc, x norm = {}", xnorm);
 
-    cheb.solve(op, diag_inv, x, y, true);
+    cheb.solve(op, x, y, true);
 #ifdef ROCM_SMI
     mem = print_amd_gpu_memory_percentage_used("afterchebyshev solve");
     if (mem > peak_mem)

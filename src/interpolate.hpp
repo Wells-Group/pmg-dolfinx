@@ -104,8 +104,7 @@ public:
     // Start vector update of input_vector
     input_vector.scatter_fwd_begin();
 
-    LOG(INFO) << "From " << num_cell_dofs_Q1 << " dofs/cell to " << num_cell_dofs_Q2 << " on "
-              << ncells << " cells";
+    spdlog::info("From {} to {} on {} cells", num_cell_dofs_Q1, num_cell_dofs_Q2, ncells);
 
     hipLaunchKernelGGL(interpolate_Q1Q2<T>, grid_size, block_size, 0, 0, ncells, cell_list,
                        input_dofmap.data(), num_cell_dofs_Q1, output_dofmap.data(),
@@ -118,8 +117,8 @@ public:
 
     const std::int32_t* b_cell_list = boundary_cells.data();
     ncells = boundary_cells.size();
-    LOG(INFO) << "From " << num_cell_dofs_Q1 << " dofs/cell to " << num_cell_dofs_Q2 << " on "
-              << ncells << "(boundary) cells";
+    spdlog::info("From {} dofs/cell to {} on {} (boundary) cells", num_cell_dofs_Q1,
+                 num_cell_dofs_Q2, ncells);
 
     hipLaunchKernelGGL(interpolate_Q1Q2<T>, grid_size, block_size, 0, 0, ncells, b_cell_list,
                        input_dofmap.data(), num_cell_dofs_Q1, output_dofmap.data(),

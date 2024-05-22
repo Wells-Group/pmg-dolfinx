@@ -29,6 +29,7 @@ public:
     _z = std::make_unique<Vector>(map, bs);
     _q = std::make_unique<Vector>(map, bs);
     _r = std::make_unique<Vector>(map, bs);
+    _diag_inv = std::make_unique<Vector>(map, bs);
   }
 
   void set_max_iterations(int max_iter) { _max_iter = max_iter; }
@@ -41,19 +42,15 @@ public:
     return acc::norm(*_r, dolfinx::la::Norm::l2);
   }
 
-  void set_diagonal(std::shared_ptr<Vector> diag)
-  {
-    _diag = diag;
-    acc::transform(*_diag, [](auto e) { return T{1.0} / e; });
-  }
-
   // Solve Ax = b
   template <typename Operator>
-  void solve(Operator& A, Vector& diag_inv, Vector& x, const Vector& b, bool verbose)
+  void solve(Operator& A, Vector& x, const Vector& b, bool verbose)
   {
     spdlog::info("Chebyshev solve");
     // Using "fourth kind" Chebyshev from Phillips and Fischer https://arxiv.org/pdf/2210.03179
     T lmax = _eig_range[1];
+
+    A.get_diag_inverse(*_diag_inv);
 
     // r = b - Ax
     A(x, *_q);
@@ -67,7 +64,7 @@ public:
 
     // z = M^-1(r) * 4/(3*lmax)
     // Using M^-1 is Jacobi
-    acc::pointwise_mult(*_z, *_r, diag_inv);
+    acc::pointwise_mult(*_z, *_r, *_diag_inv);
     acc::scale(*_z, T(4.0 / (3.0 * lmax)));
 
     for (int i = 1; i < _max_iter + 1; i++)
@@ -82,7 +79,7 @@ public:
       // z = z * (2i-1)/(2i+3) + M^-1(r) * (8i+4)/(2i+3)/lmax
       acc::scale(*_z, T(2 * i - 1) / T(2 * i + 3));
       // Using M^-1 is Jacobi
-      acc::pointwise_mult(*_q, *_r, diag_inv);
+      acc::pointwise_mult(*_q, *_r, *_diag_inv);
       acc::axpy(*_z, T(8 * i + 4) / T(2 * i + 3) / lmax, *_q, *_z);
 
       if (verbose)
@@ -107,6 +104,6 @@ private:
   std::unique_ptr<Vector> _z;
   std::unique_ptr<Vector> _q;
   std::unique_ptr<Vector> _r;
-  std::shared_ptr<Vector> _diag;
+  std::shared_ptr<Vector> _diag_inv;
 };
 } // namespace dolfinx::acc

@@ -101,6 +101,7 @@ public:
     _r = std::make_unique<Vector>(_map, _bs);
     _y = std::make_unique<Vector>(_map, _bs);
     _p = std::make_unique<Vector>(_map, _bs);
+    _diag_inv = std::make_unique<Vector>(_map, _bs);
   }
 
   void set_max_iterations(int max_iter)
@@ -143,18 +144,20 @@ public:
 
   // Solve Ax = b
   template <typename Operator>
-  int solve(Operator& A, const Vector& diag_inv, Vector& x, const Vector& b, bool verbose = false)
+  int solve(Operator& A, Vector& x, const Vector& b, bool verbose = false)
   {
     MPI_Comm comm = _map->comm();
     int rank;
     MPI_Comm_rank(comm, &rank);
+
+    A.get_diag_inverse(*_diag_inv);
 
     // TODO: check sizes
 
     // Compute initial residual r0 = b - Ax0
     A(x, *_y);
     axpy(*_r, T(-1), *_y, b);
-    acc::pointwise_mult(*_p, *_r, diag_inv);
+    acc::pointwise_mult(*_p, *_r, *_diag_inv);
 
     T rnorm0 = inner_product(*_p, *_r);
     T rnorm = rnorm0;
@@ -185,7 +188,7 @@ public:
       acc::axpy(*_r, -alpha, *_y, *_r);
 
       // Using y as a temporary for M^-1(r)
-      acc::pointwise_mult(*_y, *_r, diag_inv);
+      acc::pointwise_mult(*_y, *_r, *_diag_inv);
 
       // Update residual norm
       const T rnorm_new = inner_product(*_r, *_y);
@@ -233,6 +236,7 @@ private:
 
   /// Working vectors
   std::unique_ptr<Vector> _r;
+  std::unique_ptr<Vector> _diag_inv;
   std::unique_ptr<Vector> _y;
   std::unique_ptr<Vector> _p;
 

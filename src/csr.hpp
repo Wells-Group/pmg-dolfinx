@@ -207,7 +207,7 @@ public:
   }
 
   template <typename Vector>
-  void extract_diagonal_inverse(Vector& diag_inv)
+  void get_diag_inverse(Vector& diag_inv)
   {
     thrust::copy(_diag_inv.begin(), _diag_inv.end(), diag_inv.mutable_array().begin());
   }
