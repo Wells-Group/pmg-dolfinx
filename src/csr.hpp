@@ -6,12 +6,7 @@
 #include "hip/hip_runtime.h"
 #include <hipsparse.h>
 #include <thrust/device_vector.h>
-// #elif USE_CUDA
-// #include <cuda_runtime.h>
-// #include <cusparse.h>
-// #endif
 
-#ifdef USE_HIP
 #define err_check(command)                                                                         \
   {                                                                                                \
     hipError_t status = command;                                                                   \
@@ -21,27 +16,52 @@
       exit(1);                                                                                     \
     }                                                                                              \
   }
-#elif USE_CUDA
-#define err_check(command)                                                                         \
-  {                                                                                                \
-    cudaError_t status = command;                                                                  \
-    if (status != cudaSuccess)                                                                     \
-    {                                                                                              \
-      printf("(%s:%d) Error: CUDA reports %s\n", __FILE__, __LINE__, cudaGetErrorString(status));  \
-      exit(1);                                                                                     \
-    }                                                                                              \
+
+namespace
+{
+// // /// Computes y += A*x for a local CSR matrix A and local dense vectors x,y
+/// @param[in] values Nonzero values of A
+/// @param[in] row_begin First index of each row in the arrays values and
+/// indices.
+/// @param[in] row_end Last index of each row in the arrays values and indices.
+/// @param[in] indices Column indices for each non-zero element of the matrix A
+/// @param[in] x Input vector
+/// @param[in, out] y Output vector
+template <typename T>
+__global__ void spmv_impl(int N, const T* values, const std::int32_t* row_begin,
+                          const std::int32_t* row_end, const std::int32_t* indices, const T* x,
+                          T* y)
+{
+  // Calculate the row index for this thread.
+  int i = blockIdx.x * blockDim.x + threadIdx.x;
+  // Check if the row index is out of bounds.
+  if (i < N)
+  {
+    // Perform the sparse matrix-vector multiplication for this row.
+    T vi{0};
+    for (std::int32_t j = row_begin[i]; j < row_end[i]; j++)
+      vi += values[j] * x[indices[j]];
+    y[i] += vi;
   }
-#elif CPU
-#define err_check(command)                                                                         \
-  {                                                                                                \
-    int status = command;                                                                          \
-    if (status != 0)                                                                               \
-    {                                                                                              \
-      printf("(%s:%d) Error: Report %s\n", __FILE__, __LINE__, perror());                          \
-      exit(1);                                                                                     \
-    }                                                                                              \
+}
+
+template <typename T>
+__global__ void spmvT_impl(int N, const T* values, const std::int32_t* row_begin,
+                           const std::int32_t* row_end, const std::int32_t* indices, const T* x,
+                           T* y)
+{
+  // Calculate the row index for this thread.
+  int i = blockIdx.x * blockDim.x + threadIdx.x;
+  // Check if the row index is out of bounds.
+  if (i < N)
+  {
+    // Perform the transpose sparse matrix-vector multiplication for this row.
+    for (std::int32_t j = row_begin[i]; j < row_end[i]; j++)
+      atomicAdd(&y[indices[j]], values[j] * x[i]);
   }
-#endif
+}
+
+} // namespace
 
 namespace dolfinx::acc
 {
@@ -108,16 +128,16 @@ public:
 
     // Copy data from host to device
     spdlog::warn("Creating Device matrix with {} non zeros", _nnz);
-    thrust::copy(_A->row_ptr().begin(), _A->row_ptr().end(), _row_ptr.begin());
+    spdlog::warn("Creating row_ptr with {} to {}", num_rows + 1, _row_ptr.size());
+    thrust::copy(_A->row_ptr().begin(), _A->row_ptr().begin() + num_rows + 1, _row_ptr.begin());
+    spdlog::warn("Creating off_diag with {} to {}", _A->off_diag_offset().size(),
+                 _off_diag_offset.size());
     thrust::copy(_A->off_diag_offset().begin(), _A->off_diag_offset().begin() + num_rows,
                  _off_diag_offset.begin());
+    spdlog::warn("Creating cols with {} to {}", nnz, _cols.size());
     thrust::copy(_A->cols().begin(), _A->cols().begin() + nnz, _cols.begin());
+    spdlog::warn("Creating values with {} to {}", nnz, _values.size());
     thrust::copy(_A->values().begin(), _A->values().begin() + nnz, _values.begin());
-
-    hipsparseCreate(&handle);
-    hipsparseCreateMatDescr(&descrA);
-    hipsparseSetMatType(descrA, HIPSPARSE_MATRIX_TYPE_GENERAL);
-    hipsparseSetMatIndexBase(descrA, HIPSPARSE_INDEX_BASE_ZERO);
   }
 
   MatrixOperator(const fem::FunctionSpace<T>& V0, const fem::FunctionSpace<T>& V1)
@@ -184,11 +204,6 @@ public:
                  _off_diag_offset.begin());
     thrust::copy(_A->cols().begin(), _A->cols().begin() + nnz, _cols.begin());
     thrust::copy(_A->values().begin(), _A->values().begin() + nnz, _values.begin());
-
-    hipsparseCreate(&handle);
-    hipsparseCreateMatDescr(&descrA);
-    hipsparseSetMatType(descrA, HIPSPARSE_MATRIX_TYPE_GENERAL);
-    hipsparseSetMatIndexBase(descrA, HIPSPARSE_INDEX_BASE_ZERO);
   }
 
   template <typename Vector>
@@ -209,36 +224,55 @@ public:
   template <typename Vector>
   void operator()(Vector& x, Vector& y, bool transpose = false)
   {
-    spdlog::debug("MatrixOperator application");
     dolfinx::common::Timer t0("% MatrixOperator application");
 
-    x.scatter_fwd_begin();
-    y.set(T{0}); // FIXME: This should be done automatically when beta is 0
+    y.set(T{0});
     T* _x = x.mutable_array().data();
     T* _y = y.mutable_array().data();
 
-    int num_cols = _col_map->size_local() + _col_map->num_ghosts();
-    int num_rows = _row_map->size_local();
-    T alpha = 1.0;
-    T beta = 0.0;
-    x.scatter_fwd_end();
+    if (transpose)
+    {
+      int num_rows = _row_map->size_local();
+      dim3 block_size(256);
+      dim3 grid_size((num_rows + block_size.x - 1) / block_size.x);
+      x.scatter_fwd_begin();
+      hipLaunchKernelGGL(spmvT_impl<T>, grid_size, block_size, 0, 0, num_rows,
+                         thrust::raw_pointer_cast(_values.data()),
+                         thrust::raw_pointer_cast(_row_ptr.data()),
+                         thrust::raw_pointer_cast(_off_diag_offset.data()),
+                         thrust::raw_pointer_cast(_cols.data()), _x, _y);
+      err_check(hipGetLastError());
+      x.scatter_fwd_end();
 
-    hipsparseOperation_t transa
-        = transpose ? HIPSPARSE_OPERATION_TRANSPOSE : HIPSPARSE_OPERATION_NON_TRANSPOSE;
-    T* values = thrust::raw_pointer_cast(_values.data());
-    std::int32_t* row_ptr = thrust::raw_pointer_cast(_row_ptr.data());
-    std::int32_t* cols = thrust::raw_pointer_cast(_cols.data());
-    hipsparseDcsrmv(handle, transa, num_rows, num_cols, _nnz, &alpha, descrA, values, row_ptr, cols,
-                    _x, &beta, _y);
-    err_check(hipGetLastError());
-    err_check(hipDeviceSynchronize());
+      hipLaunchKernelGGL(spmvT_impl<T>, grid_size, block_size, 0, 0, num_rows,
+                         thrust::raw_pointer_cast(_values.data()),
+                         thrust::raw_pointer_cast(_off_diag_offset.data()),
+                         thrust::raw_pointer_cast(_row_ptr.data()) + 1,
+                         thrust::raw_pointer_cast(_cols.data()), _x, _y);
+      err_check(hipGetLastError());
+    }
+    else
+    {
+      int num_rows = _row_map->size_local();
+      dim3 block_size(256);
+      dim3 grid_size((num_rows + block_size.x - 1) / block_size.x);
+      x.scatter_fwd_begin();
+      hipLaunchKernelGGL(spmv_impl<T>, grid_size, block_size, 0, 0, num_rows,
+                         thrust::raw_pointer_cast(_values.data()),
+                         thrust::raw_pointer_cast(_row_ptr.data()),
+                         thrust::raw_pointer_cast(_off_diag_offset.data()),
+                         thrust::raw_pointer_cast(_cols.data()), _x, _y);
+      err_check(hipGetLastError());
+      x.scatter_fwd_end();
+
+      hipLaunchKernelGGL(spmv_impl<T>, grid_size, block_size, 0, 0, num_rows,
+                         thrust::raw_pointer_cast(_values.data()),
+                         thrust::raw_pointer_cast(_off_diag_offset.data()),
+                         thrust::raw_pointer_cast(_row_ptr.data()) + 1,
+                         thrust::raw_pointer_cast(_cols.data()), _x, _y);
+      err_check(hipGetLastError());
+    }
   }
-
-  // template <typename Vector>
-  // void apply_host(Vector& x, Vector& y, bool transpose = false)
-  // {
-  //   test::spmv(*_A, x, y);
-  // }
 
   std::shared_ptr<const common::IndexMap> column_index_map() { return _col_map; }
 
@@ -246,11 +280,7 @@ public:
 
   std::size_t nnz() { return _nnz; }
 
-  ~MatrixOperator()
-  {
-    hipsparseDestroyMatDescr(descrA);
-    hipsparseDestroy(handle);
-  }
+  ~MatrixOperator() {}
 
 private:
   std::size_t _nnz;
@@ -263,10 +293,6 @@ private:
   std::unique_ptr<
       la::MatrixCSR<T, std::vector<T>, std::vector<std::int32_t>, std::vector<std::int32_t>>>
       _A;
-
-  // HIP specific
-  hipsparseMatDescr_t descrA;
-  hipsparseHandle_t handle;
 
   MPI_Comm _comm;
 };
