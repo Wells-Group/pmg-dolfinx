@@ -62,11 +62,6 @@ public:
     _interpolation = interpolators;
   }
 
-  void set_restriction_interpolators(std::vector<std::shared_ptr<Restriction>>& interpolators)
-  {
-    _res_interpolation = interpolators;
-  }
-
   // Apply M^{-1}x = y
   void apply(const Vector& x, Vector& y, bool verbose = false)
   {
@@ -198,8 +193,6 @@ private:
 
   std::vector<std::shared_ptr<Interpolator<T>>> _interpolation_kernels;
   std::vector<std::shared_ptr<Interpolator<T>>> _prolongation_kernels;
-
-  std::vector<std::shared_ptr<Restriction>> _res_interpolation;
 
   // Operators used to compute the residual
   std::vector<std::shared_ptr<Operator>> _operators;

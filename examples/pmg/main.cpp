@@ -431,9 +431,6 @@ int main(int argc, char* argv[])
     smoothers[1]->set_max_iterations(10);
     smoothers[2]->set_max_iterations(5);
 
-    // Create Restriction operator
-    std::vector<std::shared_ptr<acc::MatrixOperator<T>>> restriction(V.size() - 1);
-
     // Create Prolongation operator
     std::vector<std::shared_ptr<acc::MatrixOperator<T>>> prolongation(V.size() - 1);
 
@@ -446,10 +443,8 @@ int main(int argc, char* argv[])
     {
       spdlog::warn("Creating Prolongation Operators");
       prolongation[0] = std::make_shared<acc::MatrixOperator<T>>(*V[0], *V[1]);
-      restriction[0] = std::make_shared<acc::MatrixOperator<T>>(*V[1], *V[0]);
       // From V2 to V1
       prolongation[1] = std::make_shared<acc::MatrixOperator<T>>(*V[1], *V[2]);
-      restriction[1] = std::make_shared<acc::MatrixOperator<T>>(*V[2], *V[1]);
     }
     else
     {
@@ -493,7 +488,7 @@ int main(int argc, char* argv[])
 
     // Sets CSR matrices or matrix-free kernels to do interpolation
     pmg.set_interpolators(prolongation);
-    //    pmg.set_restriction_interpolators(restriction);
+
     pmg.set_interpolation_kernels(int_kerns);
     pmg.set_prolongation_kernels(prolong_kerns);
 
