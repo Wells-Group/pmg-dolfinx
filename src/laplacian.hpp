@@ -12,9 +12,9 @@
 ///
 /// where C is a constant, ϕ_i and ϕ_j are the basis functions of the
 /// finite element space, and ∇ϕ_i is the gradient of the basis function.
-/// The integral is computed over the domain Ω of the entity using sum 
-/// factorization. The basis functions are defined on the reference element 
-/// and are transformed to the physical element using the geometry operator G. 
+/// The integral is computed over the domain Ω of the entity using sum
+/// factorization. The basis functions are defined on the reference element
+/// and are transformed to the physical element using the geometry operator G.
 /// G is a 3x3 matrix per quadrature point per entity.
 ///
 /// @tparam P Polynomial degree of the basis functions
@@ -30,117 +30,156 @@
 /// @note The kernel is launched with a 3D grid of 1D blocks, where each block
 /// is responsible for computing the stiffness operator for a single entity.
 /// The block size is (P+1, P+1, P+1) and the shared memory 4 * (P+1)^3 * sizeof(T).
-template <int P, typename T>
-__global__ void stiffness_operator(
-    const T *x,
-    const T *entity_constants,
-    T *y,
-    const T *G_entity,
-    const int *entity_dofmap,
-    const T *dphi,
-    int n_entities)
+template <typename T>
+__global__ void stiffness_operator(const T* x, const T* entity_constants, T* y, const T* G_entity,
+                                   const std::int32_t* entity_dofmap, const T* dphi, int n_entities)
 {
-    const int nd = P + 1; // Number of dofs per direction in 1D
-    // const int nq = P + 2; // Currently unused, same as nd
-    const int cube_nd = nd * nd * nd;
-    const int square_nd = nd * nd;
+  constexpr int P = 3;
 
-    extern __shared__ T shared_mem[];
-    
-    T *scratch = shared_mem;
-    T *scratchx = shared_mem + cube_nd;
-    T *scratchy = scratchx + cube_nd;
-    T *scratchz = scratchy + cube_nd;
+  const int nd = P + 1; // Number of dofs per direction in 1D
+  // const int nq = P + 2; // Currently unused, same as nd
+  const int cube_nd = nd * nd * nd;
+  const int square_nd = nd * nd;
 
+  extern __shared__ T shared_mem[];
 
-    int tx = threadIdx.x; // 1d dofs x direction
-    int ty = threadIdx.y; // 1d dofs y direction
-    int tz = threadIdx.z; // 1d dofs z direction
+  T* scratch = shared_mem;
+  T* scratchx = shared_mem + cube_nd;
+  T* scratchy = scratchx + cube_nd;
+  T* scratchz = scratchy + cube_nd;
 
-    // thread_id = tx * nd * nd + ty * nd + tz represents the dof index in 3D
-    int thread_id = tx * blockDim.y * blockDim.z + ty * blockDim.z + tz;
-    int block_id = blockIdx.x; // Entity index
+  int tx = threadIdx.x; // 1d dofs x direction
+  int ty = threadIdx.y; // 1d dofs y direction
+  int tz = threadIdx.z; // 1d dofs z direction
 
-    // Check if the block_id is valid (i.e. within the number of entities)
-    if (block_id >= n_entities)
-        return;
+  // thread_id = tx * nd * nd + ty * nd + tz represents the dof index in 3D
+  int thread_id = tx * blockDim.y * blockDim.z + ty * blockDim.z + tz;
+  int block_id = blockIdx.x; // Entity index
 
-    // Get dof index that this thread is responsible for
+  // Check if the block_id is valid (i.e. within the number of entities)
+  if (block_id >= n_entities)
+    return;
 
-    int dof = entity_dofmap[block_id * Ndofs + thread_id];
+  // Get dof index that this thread is responsible for
+  int dof = entity_dofmap[block_id * cube_nd + thread_id];
 
-    // Gather x value required by this thread
-    scratch[tx * square_nd + ty * nd + tz] = x[dof];
-    __syncthreads();
+  // Gather x value required by this thread
+  scratch[tx * square_nd + ty * nd + tz] = x[dof];
+  __syncthreads();
 
-    // Apply contraction in the x-direction
-    T val_x = 0.0;
-    for (int ix = 0; ix < nd; ++ix)
-    {
-        val_x += dphi[tx * nd + ix] * scratch[ix * square_nd + ty * nd + tz];
-    }
+  // Now thread_id is quadrature point index
 
-    // Apply contraction in the y-direction
-    T val_y = 0.0;
-    for (int iy = 0; iy < nd; ++iy)
-    {
-        val_y += dphi[ty * nd + iy] * scratch[tx * square_nd + iy * nd + tz];
-    }
+  // Apply contraction in the x-direction
+  T val_x = 0.0;
+  for (int ix = 0; ix < nd; ++ix)
+  {
+    val_x += dphi[tx * nd + ix] * scratch[ix * square_nd + ty * nd + tz];
+  }
 
-    // Apply contraction in the z-direction
-    T val_z = 0.0;
-    for (int iz = 0; iz < nd; ++iz)
-    {
-        val_z += dphi[tz * nd + iz] * scratch[tx * square_nd + ty * nd + iz];
-    }
+  // Apply contraction in the y-direction
+  T val_y = 0.0;
+  for (int iy = 0; iy < nd; ++iy)
+  {
+    val_y += dphi[ty * nd + iy] * scratch[tx * square_nd + iy * nd + tz];
+  }
 
-    // Apply transform
-    int offset = block_id * cube_nd + thread_id * 6;
-    T G0 = G_entity[offset + 0];
-    T G1 = G_entity[offset + 1];
-    T G2 = G_entity[offset + 2];
-    T G3 = G_entity[offset + 3];
-    T G4 = G_entity[offset + 4];
-    T G5 = G_entity[offset + 5];
+  // Apply contraction in the z-direction
+  T val_z = 0.0;
+  for (int iz = 0; iz < nd; ++iz)
+  {
+    val_z += dphi[tz * nd + iz] * scratch[tx * square_nd + ty * nd + iz];
+  }
 
-    // DG-0 Coefficient
-    T coeff = entity_constants[block_id];
+  // Apply transform
+  int offset = (block_id * cube_nd + thread_id) * 6;
+  T G0 = G_entity[offset + 0];
+  T G1 = G_entity[offset + 1];
+  T G2 = G_entity[offset + 2];
+  T G3 = G_entity[offset + 3];
+  T G4 = G_entity[offset + 4];
+  T G5 = G_entity[offset + 5];
 
-    // Apply geometry
-    T fw0 = coeff * (G0 * val_x + G1 * val_y + G2 * val_z);
-    T fw1 = coeff * (G1 * val_x + G3 * val_y + G4 * val_z);
-    T fw2 = coeff * (G2 * val_x + G4 * val_y + G5 * val_z);
+  // DG-0 Coefficient
+  T coeff = entity_constants[block_id];
 
-    scratchx[tx * square_nd + ty * nd + tz] = fw0;
-    scratchy[tx * square_nd + ty * nd + tz] = fw1;
-    scratchz[tx * square_nd + ty * nd + tz] = fw2;
+  // Apply geometry
+  T fw0 = coeff * (G0 * val_x + G1 * val_y + G2 * val_z);
+  T fw1 = coeff * (G1 * val_x + G3 * val_y + G4 * val_z);
+  T fw2 = coeff * (G2 * val_x + G4 * val_y + G5 * val_z);
 
-    __syncthreads();
+  scratchx[tx * square_nd + ty * nd + tz] = fw0;
+  scratchy[tx * square_nd + ty * nd + tz] = fw1;
+  scratchz[tx * square_nd + ty * nd + tz] = fw2;
 
-    // Apply contraction in the x-direction
-    val_x = 0.0;
-    for (int ix = 0; ix < nd; ++ix)
-    {
-        val_x += dphi[ix * nd + tx] * scratchx[ix * square_nd + ty * nd + tz];
-    }
+  __syncthreads();
 
-    // Apply contraction in the y-direction
-    val_y = 0.0;
-    for (int iy = 0; iy < nd; ++iy)
-    {
-        val_y += dphi[iy * nd + ty] * scratchy[tx * square_nd + iy * nd + tz];
-    }
+  // Apply contraction in the x-direction
+  val_x = 0.0;
+  for (int ix = 0; ix < nd; ++ix)
+  {
+    val_x += dphi[ix * nd + tx] * scratchx[ix * square_nd + ty * nd + tz];
+  }
 
-    // Apply contraction in the z-direction
-    val_z = 0.0;
-    for (int iz = 0; iz < nd; ++iz)
-    {
-        val_z += dphi[iz * nd + tz] * scratchz[tx * square_nd + ty * nd + iz];
-    }
+  // Apply contraction in the y-direction
+  val_y = 0.0;
+  for (int iy = 0; iy < nd; ++iy)
+  {
+    val_y += dphi[iy * nd + ty] * scratchy[tx * square_nd + iy * nd + tz];
+  }
 
-    // Add contributions
-    T val = val_x + val_y + val_z;
+  // Apply contraction in the z-direction
+  val_z = 0.0;
+  for (int iz = 0; iz < nd; ++iz)
+  {
+    val_z += dphi[iz * nd + tz] * scratchz[tx * square_nd + ty * nd + iz];
+  }
 
-    // Atomically add the computed value to the output array `y`
-    atomicAdd(&y[dof], val);
+  // Add contributions
+  T val = val_x + val_y + val_z;
+
+  // Atomically add the computed value to the output array `y`
+  atomicAdd(&y[dof], val);
 }
+
+namespace dolfinx::acc
+{
+
+template <int P, typename T>
+class MatFreeLaplacian
+{
+public:
+  MatFreeLaplacian(int num_cells, std::span<const T> coefficients,
+                   std::span<const std::int32_t> dofmap, std::span<const T> G,
+                   std::span<const T> dphi)
+      : num_cells(num_cells), cell_constants(coefficients), cell_dofmap(dofmap), G_entity(G),
+        dphi(dphi)
+  {
+    // Could compute dphi here?
+  }
+
+  template <typename Vector>
+  void operator()(Vector& in, Vector& out)
+  {
+    dim3 block_size(P + 1, P + 1, P + 1);
+    int p1cubed = (P + 1) * (P + 1) * (P + 1);
+    dim3 grid_size(num_cells);
+    std::size_t shm_size = 4 * p1cubed * sizeof(T);
+
+    T* x = in.mutable_array().data();
+    T* y = out.mutable_array().data();
+    hipLaunchKernelGGL(stiffness_operator<T>, grid_size, block_size, shm_size, 0, x,
+                       cell_constants.data(), y, G_entity.data(), cell_dofmap.data(), dphi.data(),
+                       num_cells);
+
+    err_check(hipGetLastError());
+  }
+
+private:
+  int num_cells;
+  std::span<const T> cell_constants;
+  std::span<const std::int32_t> cell_dofmap;
+  std::span<const T> G_entity;
+  std::span<const T> dphi;
+};
+
+} // namespace dolfinx::acc

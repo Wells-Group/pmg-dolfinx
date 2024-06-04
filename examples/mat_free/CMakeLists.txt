@@ -77,7 +77,7 @@ endif()
 
 add_custom_command(
   OUTPUT poisson.c
-  COMMAND ffcx ${CMAKE_CURRENT_SOURCE_DIR}/poisson.py
+  COMMAND ffcx --sum_factorization ${CMAKE_CURRENT_SOURCE_DIR}/poisson.py
   VERBATIM
   DEPENDS poisson.py
   COMMENT "Compile poisson.py using FFCx"
@@ -104,7 +104,7 @@ if(omnitrace)
 	find_path(OMNITRACE_INCLUDE omnitrace/user.h "${OMNITRACE_DIR}/include")
 	include_directories(${OMNITRACE_INCLUDE})
 	find_library(OMNITRACE_LIBRARY NAMES omnitrace HINTS "${OMNITRACE_DIR}/lib")
-	find_library(OMNITRACE_USER_LIBRARY NAMES omnitrace-user HINTS "${OMNITRACE_DIR}/lib")	
+	find_library(OMNITRACE_USER_LIBRARY NAMES omnitrace-user HINTS "${OMNITRACE_DIR}/lib")
 	add_definitions(-DOMNITRACE=1)
 endif()
 if(amd)

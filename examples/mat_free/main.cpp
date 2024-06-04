@@ -2,7 +2,7 @@
 #include "src/cg.hpp"
 #include "src/chebyshev.hpp"
 #include "src/csr.hpp"
-#include "src/matrix-free.hpp"
+#include "src/laplacian.hpp"
 #include "src/operators.hpp"
 #include "src/vector.hpp"
 
@@ -135,27 +135,31 @@ int main(int argc, char* argv[])
     // Copy data to GPU
     // Constants
     // TODO Pack these properly
-    thrust::device_vector<T> constants_d{kappa->value};
+    const int num_cells_local = mesh->topology()->index_map(tdim)->size_local();
+    thrust::device_vector<T> constants_d(num_cells_local, kappa->value[0]);
     std::span<const T> constants_d_span(thrust::raw_pointer_cast(constants_d.data()),
                                         constants_d.size());
 
-    // Coordinate DOFs
-    std::span<const T> x = mesh->geometry().x();
-    thrust::device_vector<T> x_d(x.begin(), x.end());
-    std::span<const T> x_d_span(thrust::raw_pointer_cast(x_d.data()), x_d.size());
-
-    // Geomerty dofmap
-    auto x_dofmap = mesh->geometry().dofmap();
-    thrust::device_vector<std::int32_t> x_dofmap_d(x_dofmap.data_handle(),
-                                                   x_dofmap.data_handle() + x_dofmap.size());
-    std::span<const std::int32_t> x_dofmap_d_span(thrust::raw_pointer_cast(x_dofmap_d.data()),
-                                                  x_dofmap_d.size());
+    // Geometry Jacobians - set to Identity matrix
+    std::vector<T> G(num_cells_local * 64 * 6, 0.0);
+    for (int i = 0; i < num_cells_local * 64; ++i)
+    {
+      G[i * 6] = 1.0;
+      G[i * 6 + 3] = 1.0;
+      G[i * 6 + 5] = 1.0;
+    }
+    thrust::device_vector<T> G_d(G.begin(), G.end());
+    std::span<const T> geometry_d_span(thrust::raw_pointer_cast(G_d.data()), G_d.size());
 
     // V dofmap
     thrust::device_vector<std::int32_t> dofmap_d(
         dofmap->map().data_handle(), dofmap->map().data_handle() + dofmap->map().size());
     std::span<const std::int32_t> dofmap_d_span(thrust::raw_pointer_cast(dofmap_d.data()),
                                                 dofmap_d.size());
+
+    // Basis value gradient evualation
+    thrust::device_vector<T> dphi_d(16);
+    std::span<const T> dphi_d_span(thrust::raw_pointer_cast(dphi_d.data()), dphi_d.size());
 
     // Define vectors
     using DeviceVector = dolfinx::acc::Vector<T, acc::Device::HIP>;
@@ -170,9 +174,8 @@ int main(int argc, char* argv[])
     y.set(T{0.0});
 
     // Create matrix free operator
-    const int num_cells_local = mesh->topology()->index_map(tdim)->size_local();
-    acc::MatFreeLaplace<T> op(order, num_cells_local, constants_d_span, x_d_span, x_dofmap_d_span,
-                              dofmap_d_span);
+    acc::MatFreeLaplacian<3, T> op(num_cells_local, constants_d_span, dofmap_d_span,
+                                   geometry_d_span, dphi_d_span);
 
     la::Vector<T> b(map, 1);
     b.set(T(0.0));
