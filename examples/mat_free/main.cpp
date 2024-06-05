@@ -160,6 +160,16 @@ int main(int argc, char* argv[])
         basix::element::family::P, basix::cell::type::interval, order,
         basix::element::lagrange_variant::gll_warped, basix::element::dpc_variant::unset, false);
     auto pts = element1D.points();
+
+    // Sort points into increasing order
+    std::sort(pts.first.begin(), pts.first.end());
+
+    std::stringstream s;
+    for (auto q : pts.first)
+      s << q << " ";
+
+    spdlog::info("1D points: {}", s.str());
+
     auto basis_eval
         = element1D.tabulate(1, basix::impl::mdspan_t<T, 2>(pts.first.data(), pts.second));
 
@@ -186,16 +196,21 @@ int main(int argc, char* argv[])
 
     la::Vector<T> b(map, 1);
     b.set(T(0.0));
-    fem::assemble_vector(b.mutable_array(), *L);
+    auto q = b.mutable_array();
+    q[0] = 1.0;
+
+    //    fem::assemble_vector(b.mutable_array(), *L);
     // TODO BCs
     // fem::apply_lifting<T, T>(b.mutable_array(), {a}, {{bc}}, {}, T(1));
     // b.scatter_rev(std::plus<T>());
     // fem::set_bc<T, T>(b.mutable_array(), {bc});
     u.copy_from_host(b); // Copy data from host vector to device vector
 
-    std::cout << "Norm of u = " << acc::norm(u) << "\n";
     op(u, y);
+    std::cout << "Norm of u = " << acc::norm(u) << "\n";
     std::cout << "Norm of y = " << acc::norm(y) << "\n";
+
+    y.print();
 
     // Compare to assembling on CPU and copying matrix to GPU
     DeviceVector z(map, 1);
@@ -203,7 +218,10 @@ int main(int argc, char* argv[])
 
     acc::MatrixOperator<T> mat_op(a, {});
     mat_op(u, z);
+    std::cout << "Norm of u = " << acc::norm(u) << "\n";
     std::cout << "Norm of z = " << acc::norm(z) << "\n";
+
+    z.print();
 
     // Display timings
     dolfinx::list_timings(MPI_COMM_WORLD, {dolfinx::TimingType::wall});

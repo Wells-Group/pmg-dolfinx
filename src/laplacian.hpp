@@ -35,7 +35,7 @@ __global__ void stiffness_operator(const T* x, const T* entity_constants, T* y, 
                                    const std::int32_t* entity_dofmap, const T* dphi, int n_entities)
 {
   constexpr int nd = P + 1; // Number of dofs per direction in 1D
-  constexpr int nq = nd;    // Number of quadrature points in 1D (must be the same)
+  constexpr int nq = nd;    // Number of quadrature points in 1D (must be the same as nd)
 
   assert(blockDim.x == nd);
   assert(blockDim.y == nd);
@@ -44,7 +44,7 @@ __global__ void stiffness_operator(const T* x, const T* entity_constants, T* y, 
   constexpr int cube_nd = nd * nd * nd;
   constexpr int cube_nq = nq * nq * nq;
   constexpr int square_nd = nd * nd;
-  constexpr int square_nd = nq * nq;
+  constexpr int square_nq = nq * nq;
 
   extern __shared__ T shared_mem[];
 
@@ -115,6 +115,8 @@ __global__ void stiffness_operator(const T* x, const T* entity_constants, T* y, 
   T fw0 = coeff * (G0 * val_x + G1 * val_y + G2 * val_z);
   T fw1 = coeff * (G1 * val_x + G3 * val_y + G4 * val_z);
   T fw2 = coeff * (G2 * val_x + G4 * val_y + G5 * val_z);
+
+  printf("t:%d fw:%f %f %f\n", thread_id, fw0, fw1, fw2);
 
   // Store values at quadrature points
   // scratchx, scratchy, scratchz all have dimensions (nq, nq, nq)
