@@ -44,6 +44,7 @@ __global__ void stiffness_operator(const T* x, const T* entity_constants, T* y, 
   constexpr int cube_nd = nd * nd * nd;
   constexpr int cube_nq = nq * nq * nq;
   constexpr int square_nd = nd * nd;
+  constexpr int square_nd = nq * nq;
 
   extern __shared__ T shared_mem[];
 
@@ -69,11 +70,11 @@ __global__ void stiffness_operator(const T* x, const T* entity_constants, T* y, 
   int dof = entity_dofmap[block_id * cube_nd + thread_id];
 
   // Gather x values required in this cell
+  // scratch has dimensions (nd, nd, nd)
   scratch[thread_id] = x[dof];
   __syncthreads();
 
   // Compute val_x, val_y, val_z at quadrature point of this thread
-
   // Apply contraction in the x-direction
   // tx is quadrature point index, ty, tz dof indices
   T val_x = 0.0;
@@ -116,9 +117,10 @@ __global__ void stiffness_operator(const T* x, const T* entity_constants, T* y, 
   T fw2 = coeff * (G2 * val_x + G4 * val_y + G5 * val_z);
 
   // Store values at quadrature points
-  scratchx[tx * nq * nq + ty * nq + tz] = fw0;
-  scratchy[tx * nq * nq + ty * nq + tz] = fw1;
-  scratchz[tx * nq * nq + ty * nq + tz] = fw2;
+  // scratchx, scratchy, scratchz all have dimensions (nq, nq, nq)
+  scratchx[tx * square_nq + ty * nq + tz] = fw0;
+  scratchy[tx * square_nq + ty * nq + tz] = fw1;
+  scratchz[tx * square_nq + ty * nq + tz] = fw2;
 
   __syncthreads();
 
@@ -127,7 +129,7 @@ __global__ void stiffness_operator(const T* x, const T* entity_constants, T* y, 
   // tx is dof index, ty, tz quadrature point indices
   for (int ix = 0; ix < nq; ++ix)
   {
-    val_x += dphi[ix * nd + tx] * scratchx[ix * square_nd + ty * nd + tz];
+    val_x += dphi[ix * nd + tx] * scratchx[ix * square_nq + ty * nd + tz];
   }
 
   // Apply contraction in the y-direction and add y contribution
@@ -135,7 +137,7 @@ __global__ void stiffness_operator(const T* x, const T* entity_constants, T* y, 
   val_y = 0.0;
   for (int iy = 0; iy < nq; ++iy)
   {
-    val_y += dphi[iy * nd + ty] * scratchy[tx * square_nd + iy * nd + tz];
+    val_y += dphi[iy * nd + ty] * scratchy[tx * square_nq + iy * nd + tz];
   }
 
   // Apply contraction in the z-direction and add z contribution
@@ -143,7 +145,7 @@ __global__ void stiffness_operator(const T* x, const T* entity_constants, T* y, 
   val_z = 0.0;
   for (int iz = 0; iz < nq; ++iz)
   {
-    val_z += dphi[iz * nd + tz] * scratchz[tx * square_nd + ty * nd + iz];
+    val_z += dphi[iz * nd + tz] * scratchz[tx * square_nq + ty * nd + iz];
   }
 
   // Sum contributions
