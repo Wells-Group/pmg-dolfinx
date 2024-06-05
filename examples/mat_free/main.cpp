@@ -29,8 +29,7 @@ int main(int argc, char* argv[])
 {
   po::options_description desc("Allowed options");
   desc.add_options()("help,h", "print usage message")(
-      "ndofs", po::value<std::size_t>()->default_value(500), "number of dofs per rank")(
-      "file", po::value<std::string>()->default_value(""), "mesh filename");
+      "ndofs", po::value<std::size_t>()->default_value(343), "number of dofs per rank");
 
   po::variables_map vm;
   po::store(po::command_line_parser(argc, argv).options(desc).allow_unregistered().run(), vm);
@@ -42,7 +41,6 @@ int main(int argc, char* argv[])
     return 0;
   }
   const std::size_t ndofs = vm["ndofs"].as<std::size_t>();
-  const std::string filename = vm["file"].as<std::string>();
 
   init_logging(argc, argv);
   MPI_Init(&argc, &argv);
@@ -157,8 +155,17 @@ int main(int argc, char* argv[])
     std::span<const std::int32_t> dofmap_d_span(thrust::raw_pointer_cast(dofmap_d.data()),
                                                 dofmap_d.size());
 
+    // Create 1D element
+    auto element1D = basix::create_element<T>(
+        basix::element::family::P, basix::cell::type::interval, order,
+        basix::element::lagrange_variant::gll_warped, basix::element::dpc_variant::unset, false);
+    auto pts = element1D.points();
+    auto basis_eval
+        = element1D.tabulate(1, basix::impl::mdspan_t<T, 2>(pts.first.data(), pts.second));
+
     // Basis value gradient evualation
-    thrust::device_vector<T> dphi_d(16);
+    thrust::device_vector<T> dphi_d(
+        std::next(basis_eval.first.begin(), basis_eval.first.size() / 2), basis_eval.first.end());
     std::span<const T> dphi_d_span(thrust::raw_pointer_cast(dphi_d.data()), dphi_d.size());
 
     // Define vectors
