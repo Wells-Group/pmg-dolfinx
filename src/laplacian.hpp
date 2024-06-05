@@ -30,31 +30,36 @@
 /// @note The kernel is launched with a 3D grid of 1D blocks, where each block
 /// is responsible for computing the stiffness operator for a single entity.
 /// The block size is (P+1, P+1, P+1) and the shared memory 4 * (P+1)^3 * sizeof(T).
-template <typename T>
+template <typename T, int P>
 __global__ void stiffness_operator(const T* x, const T* entity_constants, T* y, const T* G_entity,
                                    const std::int32_t* entity_dofmap, const T* dphi, int n_entities)
 {
-  constexpr int P = 3;
+  constexpr int nd = P + 1; // Number of dofs per direction in 1D
+  constexpr int nq = nd;    // Number of quadrature points in 1D (must be the same)
 
-  const int nd = P + 1; // Number of dofs per direction in 1D
-  // const int nq = P + 2; // Currently unused, same as nd
-  const int cube_nd = nd * nd * nd;
-  const int square_nd = nd * nd;
+  assert(blockDim.x == nd);
+  assert(blockDim.y == nd);
+  assert(blockDim.z == nd);
+
+  constexpr int cube_nd = nd * nd * nd;
+  constexpr int cube_nq = nq * nq * nq;
+  constexpr int square_nd = nd * nd;
 
   extern __shared__ T shared_mem[];
 
-  T* scratch = shared_mem;
-  T* scratchx = shared_mem + cube_nd;
-  T* scratchy = scratchx + cube_nd;
-  T* scratchz = scratchy + cube_nd;
+  T* scratch = shared_mem;            // size nd^3
+  T* scratchx = shared_mem + cube_nd; // size nq^3
+  T* scratchy = scratchx + cube_nq;   // size nq^3
+  T* scratchz = scratchy + cube_nq;   // size nq^3
 
   int tx = threadIdx.x; // 1d dofs x direction
   int ty = threadIdx.y; // 1d dofs y direction
   int tz = threadIdx.z; // 1d dofs z direction
 
-  // thread_id = tx * nd * nd + ty * nd + tz represents the dof index in 3D
-  int thread_id = tx * blockDim.y * blockDim.z + ty * blockDim.z + tz;
-  int block_id = blockIdx.x; // Entity index
+  // thread_id represents the dof index in 3D
+  int thread_id = tx * square_nd + ty * nd + tz;
+  // block_id is the cell (or facet) index
+  int block_id = blockIdx.x;
 
   // Check if the block_id is valid (i.e. within the number of entities)
   if (block_id >= n_entities)
@@ -63,13 +68,14 @@ __global__ void stiffness_operator(const T* x, const T* entity_constants, T* y, 
   // Get dof index that this thread is responsible for
   int dof = entity_dofmap[block_id * cube_nd + thread_id];
 
-  // Gather x value required by this thread
-  scratch[tx * square_nd + ty * nd + tz] = x[dof];
+  // Gather x values required in this cell
+  scratch[thread_id] = x[dof];
   __syncthreads();
 
-  // Now thread_id is quadrature point index
+  // Compute val_x, val_y, val_z at quadrature point of this thread
 
   // Apply contraction in the x-direction
+  // tx is quadrature point index, ty, tz dof indices
   T val_x = 0.0;
   for (int ix = 0; ix < nd; ++ix)
   {
@@ -77,6 +83,7 @@ __global__ void stiffness_operator(const T* x, const T* entity_constants, T* y, 
   }
 
   // Apply contraction in the y-direction
+  // ty is quadrature point index, tx, tz dof indices
   T val_y = 0.0;
   for (int iy = 0; iy < nd; ++iy)
   {
@@ -84,14 +91,15 @@ __global__ void stiffness_operator(const T* x, const T* entity_constants, T* y, 
   }
 
   // Apply contraction in the z-direction
+  // tz is quadrature point index, tx, ty dof indices
   T val_z = 0.0;
   for (int iz = 0; iz < nd; ++iz)
   {
     val_z += dphi[tz * nd + iz] * scratch[tx * square_nd + ty * nd + iz];
   }
 
-  // Apply transform
-  int offset = (block_id * cube_nd + thread_id) * 6;
+  // Apply transform at each quadrature point (thread)
+  int offset = (block_id * nq * nq * nq + thread_id) * 6;
   T G0 = G_entity[offset + 0];
   T G1 = G_entity[offset + 1];
   T G2 = G_entity[offset + 2];
@@ -107,34 +115,38 @@ __global__ void stiffness_operator(const T* x, const T* entity_constants, T* y, 
   T fw1 = coeff * (G1 * val_x + G3 * val_y + G4 * val_z);
   T fw2 = coeff * (G2 * val_x + G4 * val_y + G5 * val_z);
 
-  scratchx[tx * square_nd + ty * nd + tz] = fw0;
-  scratchy[tx * square_nd + ty * nd + tz] = fw1;
-  scratchz[tx * square_nd + ty * nd + tz] = fw2;
+  // Store values at quadrature points
+  scratchx[tx * nq * nq + ty * nq + tz] = fw0;
+  scratchy[tx * nq * nq + ty * nq + tz] = fw1;
+  scratchz[tx * nq * nq + ty * nq + tz] = fw2;
 
   __syncthreads();
 
   // Apply contraction in the x-direction
   val_x = 0.0;
-  for (int ix = 0; ix < nd; ++ix)
+  // tx is dof index, ty, tz quadrature point indices
+  for (int ix = 0; ix < nq; ++ix)
   {
     val_x += dphi[ix * nd + tx] * scratchx[ix * square_nd + ty * nd + tz];
   }
 
-  // Apply contraction in the y-direction
+  // Apply contraction in the y-direction and add y contribution
+  // ty is dof index, tx, tz quadrature point indices
   val_y = 0.0;
-  for (int iy = 0; iy < nd; ++iy)
+  for (int iy = 0; iy < nq; ++iy)
   {
     val_y += dphi[iy * nd + ty] * scratchy[tx * square_nd + iy * nd + tz];
   }
 
-  // Apply contraction in the z-direction
+  // Apply contraction in the z-direction and add z contribution
+  // tz is dof index, tx, ty quadrature point indices
   val_z = 0.0;
-  for (int iz = 0; iz < nd; ++iz)
+  for (int iz = 0; iz < nq; ++iz)
   {
     val_z += dphi[iz * nd + tz] * scratchz[tx * square_nd + ty * nd + iz];
   }
 
-  // Add contributions
+  // Sum contributions
   T val = val_x + val_y + val_z;
 
   // Atomically add the computed value to the output array `y`
@@ -167,9 +179,9 @@ public:
 
     T* x = in.mutable_array().data();
     T* y = out.mutable_array().data();
-    hipLaunchKernelGGL(stiffness_operator<T>, grid_size, block_size, shm_size, 0, x,
-                       cell_constants.data(), y, G_entity.data(), cell_dofmap.data(), dphi.data(),
-                       num_cells);
+    hipLaunchKernelGGL(HIP_KERNEL_NAME(stiffness_operator<T, P>), grid_size, block_size, shm_size,
+                       0, x, cell_constants.data(), y, G_entity.data(), cell_dofmap.data(),
+                       dphi.data(), num_cells);
 
     err_check(hipGetLastError());
   }
