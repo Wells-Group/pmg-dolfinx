@@ -1,4 +1,4 @@
-from ufl import (Coefficient, Constant, FunctionSpace, Mesh,
+from ufl import (Coefficient, Constant, FunctionSpace, Mesh, Measure,
                  TestFunction, TrialFunction, dx, grad, inner)
 import basix
 from basix.ufl import blocked_element, wrap_element
@@ -20,5 +20,6 @@ v = TestFunction(V)
 f = Coefficient(V)
 kappa = Constant(mesh)
 
+dx = Measure("dx", metadata={"quadrature_rule": "GLL", "quadrature_degree": 4})
 a = kappa * inner(grad(u), grad(v)) * dx
 L = inner(f, v) * dx

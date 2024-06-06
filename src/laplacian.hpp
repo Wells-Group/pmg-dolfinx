@@ -82,6 +82,9 @@ __global__ void stiffness_operator(const T* x, const T* entity_constants, T* y, 
   {
     val_x += dphi[tx * nd + ix] * scratch[ix * square_nd + ty * nd + tz];
   }
+  // Because phi(nq, nd) is the identity for this choice of quadrature points,
+  // we do not need to apply it in the y and z direction, and val_x is already the value at the
+  // quadrature point of thread (tx, ty, tz). Similarly, below, for val_y and val_z.
 
   // Apply contraction in the y-direction
   // ty is quadrature point index, tx, tz dof indices
@@ -115,8 +118,6 @@ __global__ void stiffness_operator(const T* x, const T* entity_constants, T* y, 
   T fw0 = coeff * (G0 * val_x + G1 * val_y + G2 * val_z);
   T fw1 = coeff * (G1 * val_x + G3 * val_y + G4 * val_z);
   T fw2 = coeff * (G2 * val_x + G4 * val_y + G5 * val_z);
-
-  printf("t:%d fw:%f %f %f\n", thread_id, fw0, fw1, fw2);
 
   // Store values at quadrature points
   // scratchx, scratchy, scratchz all have dimensions (nq, nq, nq)

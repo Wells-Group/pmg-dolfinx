@@ -4,10 +4,12 @@
 #include "src/csr.hpp"
 #include "src/laplacian.hpp"
 #include "src/operators.hpp"
+#include "src/precompute.hpp"
 #include "src/vector.hpp"
 
 #include <array>
 #include <basix/finite-element.h>
+#include <basix/quadrature.h>
 #include <boost/program_options.hpp>
 #include <dolfinx.h>
 #include <dolfinx/fem/dolfinx_fem.h>
@@ -80,6 +82,16 @@ int main(int argc, char* argv[])
     auto element = basix::create_tp_element<T>(
         basix::element::family::P, basix::cell::type::hexahedron, order,
         basix::element::lagrange_variant::gll_warped, basix::element::dpc_variant::unset, false);
+
+    auto [Gpoints, Gweights] = basix::quadrature::make_quadrature<T>(
+        basix::quadrature::type::gll, basix::cell::type::hexahedron, basix::polyset::type::standard,
+        4);
+
+    // Compute the geometrical factor and copy to device
+    auto G_ = compute_scaled_geometrical_factor<T>(mesh, Gpoints, Gweights);
+    thrust::device_vector<T> G_d(G_.begin(), G_.end());
+    std::span<const T> geometry_d_span(thrust::raw_pointer_cast(G_d.data()), G_d.size());
+
     auto V = std::make_shared<fem::FunctionSpace<T>>(fem::create_functionspace(mesh, element));
 
     auto topology = V->mesh()->topology_mutable();
@@ -138,17 +150,6 @@ int main(int argc, char* argv[])
     std::span<const T> constants_d_span(thrust::raw_pointer_cast(constants_d.data()),
                                         constants_d.size());
 
-    // Geometry Jacobians - set to Identity matrix
-    std::vector<T> G(num_cells_local * 64 * 6, 0.0);
-    for (int i = 0; i < num_cells_local * 64; ++i)
-    {
-      G[i * 6] = 1.0;
-      G[i * 6 + 3] = 1.0;
-      G[i * 6 + 5] = 1.0;
-    }
-    thrust::device_vector<T> G_d(G.begin(), G.end());
-    std::span<const T> geometry_d_span(thrust::raw_pointer_cast(G_d.data()), G_d.size());
-
     // V dofmap
     thrust::device_vector<std::int32_t> dofmap_d(
         dofmap->map().data_handle(), dofmap->map().data_handle() + dofmap->map().size());
@@ -159,23 +160,17 @@ int main(int argc, char* argv[])
     auto element1D = basix::create_element<T>(
         basix::element::family::P, basix::cell::type::interval, order,
         basix::element::lagrange_variant::gll_warped, basix::element::dpc_variant::unset, false);
-    auto pts = element1D.points();
 
-    // Sort points into increasing order
-    std::sort(pts.first.begin(), pts.first.end());
+    // Create quadrature
+    auto [points, weights] = basix::quadrature::make_quadrature<T>(
+        basix::quadrature::type::gll, basix::cell::type::interval, basix::polyset::type::standard,
+        4);
 
-    std::stringstream s;
-    for (auto q : pts.first)
-      s << q << " ";
+    // Tabulate 1D
+    auto [table, shape] = element1D.tabulate(1, points, {weights.size(), 1});
 
-    spdlog::info("1D points: {}", s.str());
-
-    auto basis_eval
-        = element1D.tabulate(1, basix::impl::mdspan_t<T, 2>(pts.first.data(), pts.second));
-
-    // Basis value gradient evualation
-    thrust::device_vector<T> dphi_d(
-        std::next(basis_eval.first.begin(), basis_eval.first.size() / 2), basis_eval.first.end());
+    // Basis value gradient evualation table
+    thrust::device_vector<T> dphi_d(std::next(table.begin(), table.size() / 2), table.end());
     std::span<const T> dphi_d_span(thrust::raw_pointer_cast(dphi_d.data()), dphi_d.size());
 
     // Define vectors
@@ -196,10 +191,8 @@ int main(int argc, char* argv[])
 
     la::Vector<T> b(map, 1);
     b.set(T(0.0));
-    auto q = b.mutable_array();
-    q[0] = 1.0;
 
-    //    fem::assemble_vector(b.mutable_array(), *L);
+    fem::assemble_vector(b.mutable_array(), *L);
     // TODO BCs
     // fem::apply_lifting<T, T>(b.mutable_array(), {a}, {{bc}}, {}, T(1));
     // b.scatter_rev(std::plus<T>());
@@ -210,8 +203,6 @@ int main(int argc, char* argv[])
     std::cout << "Norm of u = " << acc::norm(u) << "\n";
     std::cout << "Norm of y = " << acc::norm(y) << "\n";
 
-    y.print();
-
     // Compare to assembling on CPU and copying matrix to GPU
     DeviceVector z(map, 1);
     z.set(T{0.0});
@@ -220,8 +211,6 @@ int main(int argc, char* argv[])
     mat_op(u, z);
     std::cout << "Norm of u = " << acc::norm(u) << "\n";
     std::cout << "Norm of z = " << acc::norm(z) << "\n";
-
-    z.print();
 
     // Display timings
     dolfinx::list_timings(MPI_COMM_WORLD, {dolfinx::TimingType::wall});
