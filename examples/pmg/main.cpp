@@ -1,10 +1,12 @@
+#include "../../src/amg.hpp"
 #include "../../src/cg.hpp"
 #include "../../src/chebyshev.hpp"
 #include "../../src/csr.hpp"
-#include "../../src/matrix-free.hpp"
+#include "../../src/laplacian.hpp"
 #include "../../src/mesh.hpp"
 #include "../../src/operators.hpp"
 #include "../../src/pmg.hpp"
+#include "../../src/precompute.hpp"
 #include "../../src/vector.hpp"
 #include "poisson.h"
 
@@ -22,91 +24,12 @@
 #include <memory>
 #include <mpi.h>
 
-// #define MATRIX_FREE
+#define MATRIX_FREE
 
 using namespace dolfinx;
 using T = double;
 using DeviceVector = dolfinx::acc::Vector<T, acc::Device::HIP>;
 namespace po = boost::program_options;
-
-class CoarseSolverType
-{
-public:
-  CoarseSolverType(std::shared_ptr<fem::Form<T, T>> a,
-                   std::shared_ptr<const fem::DirichletBC<T, T>> bcs)
-  {
-    auto V = a->function_spaces()[0];
-    MPI_Comm comm = a->mesh()->comm();
-
-    // Create Coarse Operator using PETSc and Hypre
-    spdlog::info("Create PETScOperator");
-    coarse_op = std::make_unique<PETScOperator<T>>(a, std::vector{bcs});
-    err_check(hipDeviceSynchronize());
-
-    auto im_op = coarse_op->index_map();
-    spdlog::info("OP:{}/{}/{}", im_op->size_global(), im_op->size_local(), im_op->num_ghosts());
-    auto im_V = V->dofmap()->index_map;
-    spdlog::info("V:{}/{}/{}", im_V->size_global(), im_V->size_local(), im_V->num_ghosts());
-
-    spdlog::info("Get device matrix");
-    Mat A = coarse_op->device_matrix();
-    spdlog::info("Create Petsc KSP");
-    KSPCreate(comm, &_solver);
-    spdlog::info("Set KSP Type");
-    KSPSetType(_solver, KSPCG);
-    spdlog::info("Set Operators");
-    KSPSetOperators(_solver, A, A);
-    spdlog::info("Set iteration count");
-    KSPSetTolerances(_solver, PETSC_DEFAULT, PETSC_DEFAULT, PETSC_DEFAULT, 10);
-    spdlog::info("Set PC Type");
-    PC prec;
-    KSPGetPC(_solver, &prec);
-    PCSetType(prec, PCHYPRE);
-    KSPSetFromOptions(_solver);
-    spdlog::info("KSP Setup");
-    KSPSetUp(_solver);
-
-    const PetscInt local_size = V->dofmap()->index_map->size_local();
-    const PetscInt global_size = V->dofmap()->index_map->size_global();
-    VecCreateMPIHIPWithArray(comm, PetscInt(1), local_size, global_size, NULL, &_x);
-    VecCreateMPIHIPWithArray(comm, PetscInt(1), local_size, global_size, NULL, &_b);
-  }
-
-  ~CoarseSolverType()
-  {
-    VecDestroy(&_x);
-    VecDestroy(&_b);
-    KSPDestroy(&_solver);
-  }
-
-  void solve(DeviceVector& x, DeviceVector& y)
-  {
-    VecHIPPlaceArray(_b, y.array().data());
-    VecHIPPlaceArray(_x, x.array().data());
-
-    KSPSolve(_solver, _b, _x);
-    KSPView(_solver, PETSC_VIEWER_STDOUT_WORLD);
-
-    KSPConvergedReason reason;
-    KSPGetConvergedReason(_solver, &reason);
-
-    PetscInt num_iterations = 0;
-    int ierr = KSPGetIterationNumber(_solver, &num_iterations);
-    if (ierr != 0)
-      spdlog::error("KSPGetIterationNumber Error:{}", ierr);
-
-    spdlog::info("Converged reason: {}", (int)reason);
-    spdlog::info("Num iterations: {}", num_iterations);
-
-    VecHIPResetArray(_b);
-    VecHIPResetArray(_x);
-  }
-
-private:
-  Vec _b, _x;
-  KSP _solver;
-  std::unique_ptr<PETScOperator<T>> coarse_op;
-};
 
 int main(int argc, char* argv[])
 {
@@ -231,7 +154,7 @@ int main(int argc, char* argv[])
     std::vector<std::shared_ptr<fem::Form<T, T>>> L(V.size());
     std::vector<std::shared_ptr<const fem::DirichletBC<T, T>>> bcs(V.size());
 #ifdef MATRIX_FREE
-    std::vector<std::shared_ptr<acc::MatFreeLaplace<T>>> operators(V.size());
+    std::vector<std::shared_ptr<acc::MatrixFreeLaplacian<T>>> operators(V.size());
 #else
     std::vector<std::shared_ptr<acc::MatrixOperator<T>>> operators(V.size());
 #endif
@@ -282,10 +205,10 @@ int main(int argc, char* argv[])
       bcs[i] = std::make_shared<const fem::DirichletBC<T, T>>(0.0, bdofs, V[i]);
     }
 
-    std::shared_ptr<CoarseSolverType> coarse_solver;
+    std::shared_ptr<CoarseSolverType<T>> coarse_solver;
 
     if (use_amg)
-      coarse_solver = std::make_shared<CoarseSolverType>(a[0], bcs[0]);
+      coarse_solver = std::make_shared<CoarseSolverType<T>>(a[0], bcs[0]);
 
     // RHS
     std::size_t ncells = mesh->topology()->index_map(3)->size_global();
@@ -382,7 +305,7 @@ int main(int argc, char* argv[])
       spdlog::info("Create operator on V[{}]", i);
       std::span<const std::int8_t> bc_span(thrust::raw_pointer_cast(device_bc_dofs[i].data()),
                                            device_bc_dofs[i].size());
-      operators[i] = std::make_shared<acc::MatFreeLaplace<T>>(
+      operators[i] = std::make_shared<acc::MatFreeLaplacian<T>>(
           degree, lcells_span, ipcells_span, device_constants, geom_x, geom_x_dofmap,
           device_dofmaps[i], bc_span);
 #else
@@ -469,7 +392,7 @@ int main(int argc, char* argv[])
     }
 
 #ifdef MATRIX_FREE
-    using OpType = acc::MatFreeLaplace<T>;
+    using OpType = acc::MatFreeLaplacian<T>;
 #else
     using OpType = acc::MatrixOperator<T>;
 #endif
@@ -477,7 +400,7 @@ int main(int argc, char* argv[])
     using SolverType = acc::Chebyshev<DeviceVector>;
 
     using PMG = acc::MultigridPreconditioner<DeviceVector, OpType, CSRType, CSRType, SolverType,
-                                             CoarseSolverType>;
+                                             CoarseSolverType<T>>;
 
     spdlog::info("Create PMG");
     PMG pmg(maps, 1);

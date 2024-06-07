@@ -1,4 +1,4 @@
-from ufl import (Coefficient, Constant, FunctionSpace, Mesh,
+from ufl import (Coefficient, Constant, FunctionSpace, Mesh, Measure,
                  TestFunction, TrialFunction, dx, grad, inner)
 import basix
 from basix.ufl import blocked_element, wrap_element
@@ -27,8 +27,10 @@ for degree in range(1, 4):
     aname = 'a' + str(degree)
     Lname = 'L' + str(degree)
 
+    Qdegree = {1:1, 2:3, 3:4}
 
     # Insert into namespace so that the forms will be named a1, a2, a3 etc.
+    dx = Measure("dx", metadata={"quadrature_rule": "GLL", "quadrature_degree": Qdegree[degree]})
     ns[aname] = kappa * inner(grad(u), grad(v)) * dx
     ns[Lname] = inner(f, v) * dx
 

@@ -156,23 +156,6 @@ int main(int argc, char* argv[])
     std::span<const std::int32_t> dofmap_d_span(thrust::raw_pointer_cast(dofmap_d.data()),
                                                 dofmap_d.size());
 
-    // Create 1D element
-    auto element1D = basix::create_element<T>(
-        basix::element::family::P, basix::cell::type::interval, order,
-        basix::element::lagrange_variant::gll_warped, basix::element::dpc_variant::unset, false);
-
-    // Create quadrature
-    auto [points, weights] = basix::quadrature::make_quadrature<T>(
-        basix::quadrature::type::gll, basix::cell::type::interval, basix::polyset::type::standard,
-        4);
-
-    // Tabulate 1D
-    auto [table, shape] = element1D.tabulate(1, points, {weights.size(), 1});
-
-    // Basis value gradient evualation table
-    thrust::device_vector<T> dphi_d(std::next(table.begin(), table.size() / 2), table.end());
-    std::span<const T> dphi_d_span(thrust::raw_pointer_cast(dphi_d.data()), dphi_d.size());
-
     // Define vectors
     using DeviceVector = dolfinx::acc::Vector<T, acc::Device::HIP>;
 
@@ -186,8 +169,9 @@ int main(int argc, char* argv[])
     y.set(T{0.0});
 
     // Create matrix free operator
+    spdlog::debug("Create MatFreLaplacian");
     acc::MatFreeLaplacian<3, T> op(num_cells_local, constants_d_span, dofmap_d_span,
-                                   geometry_d_span, dphi_d_span);
+                                   geometry_d_span);
 
     la::Vector<T> b(map, 1);
     b.set(T(0.0));

@@ -77,7 +77,7 @@ endif()
 
 add_custom_command(
   OUTPUT poisson.c
-  COMMAND ffcx ${CMAKE_CURRENT_SOURCE_DIR}/poisson.py
+  COMMAND ffcx --sum_factorization ${CMAKE_CURRENT_SOURCE_DIR}/poisson.py
   VERBATIM
   DEPENDS poisson.py
   COMMENT "Compile poisson.py using FFCx"

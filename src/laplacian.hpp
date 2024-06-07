@@ -2,6 +2,11 @@
 // SPDX-License-Identifier:    MIT
 
 #include "hip/hip_runtime.h"
+#include <basix/finite-element.h>
+#include <basix/quadrature.h>
+#include <thrust/device_vector.h>
+
+#pragma once
 
 /// Compute y = A * x where A is the stiffness operator
 /// for a set of entities (cells or facets) in a mesh.
@@ -166,12 +171,34 @@ class MatFreeLaplacian
 {
 public:
   MatFreeLaplacian(int num_cells, std::span<const T> coefficients,
-                   std::span<const std::int32_t> dofmap, std::span<const T> G,
-                   std::span<const T> dphi)
-      : num_cells(num_cells), cell_constants(coefficients), cell_dofmap(dofmap), G_entity(G),
-        dphi(dphi)
+                   std::span<const std::int32_t> dofmap, std::span<const T> G)
+      : num_cells(num_cells), cell_constants(coefficients), cell_dofmap(dofmap), G_entity(G)
   {
-    // Could compute dphi here?
+    std::map<int, int> Qdegree = {{2, 3}, {3, 4}, {4, 6}, {5, 8}};
+
+    // Create 1D element
+    auto element1D = basix::create_element<T>(
+        basix::element::family::P, basix::cell::type::interval, P,
+        basix::element::lagrange_variant::gll_warped, basix::element::dpc_variant::unset, false);
+
+    // Create quadrature
+    auto [points, weights] = basix::quadrature::make_quadrature<T>(
+        basix::quadrature::type::gll, basix::cell::type::interval, basix::polyset::type::standard,
+        Qdegree[P]);
+
+    // Tabulate 1D
+    auto [table, shape] = element1D.tabulate(1, points, {weights.size(), 1});
+
+    spdlog::debug("1D table = {}, G = {}", weights.size(), G.size());
+
+    int nq = weights.size();
+    // 6 geometry values per quadrature point on each cell
+    assert(nq * nq * nq * num_cells * 6 == G.size());
+
+    spdlog::debug("Create device vector for phi");
+    // Basis value gradient evualation table
+    dphi_d.resize(table.size() / 2);
+    thrust::copy(std::next(table.begin(), table.size() / 2), table.end(), dphi_d.begin());
   }
 
   template <typename Vector>
@@ -184,6 +211,7 @@ public:
 
     T* x = in.mutable_array().data();
     T* y = out.mutable_array().data();
+    std::span<const T> dphi(thrust::raw_pointer_cast(dphi_d.data()), dphi_d.size());
     hipLaunchKernelGGL(HIP_KERNEL_NAME(stiffness_operator<T, P>), grid_size, block_size, shm_size,
                        0, x, cell_constants.data(), y, G_entity.data(), cell_dofmap.data(),
                        dphi.data(), num_cells);
@@ -193,10 +221,14 @@ public:
 
 private:
   int num_cells;
+
+  // Reference to on-device storage for constants, dofmap etc.
   std::span<const T> cell_constants;
   std::span<const std::int32_t> cell_dofmap;
   std::span<const T> G_entity;
-  std::span<const T> dphi;
+
+  // On device storage for dphi
+  thrust::device_vector<T> dphi_d;
 };
 
 } // namespace dolfinx::acc
