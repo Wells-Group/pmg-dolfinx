@@ -170,8 +170,8 @@ int main(int argc, char* argv[])
 
     // Create matrix free operator
     spdlog::debug("Create MatFreLaplacian");
-    acc::MatFreeLaplacian<3, T> op(num_cells_local, constants_d_span, dofmap_d_span,
-                                   geometry_d_span);
+    acc::MatFreeLaplacian<T> op(3, num_cells_local, constants_d_span, dofmap_d_span,
+                                geometry_d_span);
 
     la::Vector<T> b(map, 1);
     b.set(T(0.0));

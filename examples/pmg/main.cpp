@@ -154,7 +154,7 @@ int main(int argc, char* argv[])
     std::vector<std::shared_ptr<fem::Form<T, T>>> L(V.size());
     std::vector<std::shared_ptr<const fem::DirichletBC<T, T>>> bcs(V.size());
 #ifdef MATRIX_FREE
-    std::vector<std::shared_ptr<acc::MatrixFreeLaplacian<T>>> operators(V.size());
+    std::vector<std::shared_ptr<acc::MatFreeLaplacian<T>>> operators(V.size());
 #else
     std::vector<std::shared_ptr<acc::MatrixOperator<T>>> operators(V.size());
 #endif

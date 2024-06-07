@@ -166,25 +166,27 @@ __global__ void stiffness_operator(const T* x, const T* entity_constants, T* y, 
 namespace dolfinx::acc
 {
 
-template <int P, typename T>
+template <typename T>
 class MatFreeLaplacian
 {
 public:
-  MatFreeLaplacian(int num_cells, std::span<const T> coefficients,
+  MatFreeLaplacian(int degree, int num_cells, std::span<const T> coefficients,
                    std::span<const std::int32_t> dofmap, std::span<const T> G)
-      : num_cells(num_cells), cell_constants(coefficients), cell_dofmap(dofmap), G_entity(G)
+      : degree(degree), num_cells(num_cells), cell_constants(coefficients), cell_dofmap(dofmap),
+        G_entity(G)
   {
+
     std::map<int, int> Qdegree = {{2, 3}, {3, 4}, {4, 6}, {5, 8}};
 
     // Create 1D element
     auto element1D = basix::create_element<T>(
-        basix::element::family::P, basix::cell::type::interval, P,
+        basix::element::family::P, basix::cell::type::interval, degree,
         basix::element::lagrange_variant::gll_warped, basix::element::dpc_variant::unset, false);
 
     // Create quadrature
     auto [points, weights] = basix::quadrature::make_quadrature<T>(
         basix::quadrature::type::gll, basix::cell::type::interval, basix::polyset::type::standard,
-        Qdegree[P]);
+        Qdegree[degree]);
 
     // Tabulate 1D
     auto [table, shape] = element1D.tabulate(1, points, {weights.size(), 1});
@@ -201,8 +203,8 @@ public:
     thrust::copy(std::next(table.begin(), table.size() / 2), table.end(), dphi_d.begin());
   }
 
-  template <typename Vector>
-  void operator()(Vector& in, Vector& out)
+  template <int P, typename Vector>
+  void impl_operator(Vector& in, Vector& out)
   {
     dim3 block_size(P + 1, P + 1, P + 1);
     int p1cubed = (P + 1) * (P + 1) * (P + 1);
@@ -219,7 +221,19 @@ public:
     err_check(hipGetLastError());
   }
 
+  template <typename Vector>
+  void operator()(Vector& in, Vector& out)
+  {
+    if (degree == 1)
+      impl_operator<1>(in, out);
+    else if (degree == 2)
+      impl_operator<2>(in, out);
+    else if (degree == 3)
+      impl_operator<3>(in, out);
+  }
+
 private:
+  int degree;
   int num_cells;
 
   // Reference to on-device storage for constants, dofmap etc.
