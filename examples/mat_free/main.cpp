@@ -20,6 +20,7 @@
 #include <iostream>
 #include <memory>
 #include <mpi.h>
+#include <thrust/sequence.h>
 
 #include "src/amd_gpu.hpp"
 
@@ -168,10 +169,14 @@ int main(int argc, char* argv[])
     DeviceVector y(map, 1);
     y.set(T{0.0});
 
+    thrust::device_vector<int> cell_list_d(num_cells_local);
+    thrust::sequence(cell_list_d.begin(), cell_list_d.end());
+    std::span<const int> cells_local(thrust::raw_pointer_cast(cell_list_d.data()),
+                                     cell_list_d.size());
+
     // Create matrix free operator
     spdlog::debug("Create MatFreLaplacian");
-    acc::MatFreeLaplacian<T> op(3, num_cells_local, constants_d_span, dofmap_d_span,
-                                geometry_d_span);
+    acc::MatFreeLaplacian<T> op(3, cells_local, constants_d_span, dofmap_d_span, geometry_d_span);
 
     la::Vector<T> b(map, 1);
     b.set(T(0.0));

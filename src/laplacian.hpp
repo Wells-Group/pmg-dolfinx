@@ -37,7 +37,8 @@
 /// The block size is (P+1, P+1, P+1) and the shared memory 4 * (P+1)^3 * sizeof(T).
 template <typename T, int P>
 __global__ void stiffness_operator(const T* x, const T* entity_constants, T* y, const T* G_entity,
-                                   const std::int32_t* entity_dofmap, const T* dphi, int n_entities)
+                                   const std::int32_t* entity_dofmap, const T* dphi,
+                                   const int* entities, int n_entities)
 {
   constexpr int nd = P + 1; // Number of dofs per direction in 1D
   constexpr int nq = nd;    // Number of quadrature points in 1D (must be the same as nd)
@@ -170,9 +171,9 @@ template <typename T>
 class MatFreeLaplacian
 {
 public:
-  MatFreeLaplacian(int degree, int num_cells, std::span<const T> coefficients,
+  MatFreeLaplacian(int degree, std::span<const int> cell_list, std::span<const T> coefficients,
                    std::span<const std::int32_t> dofmap, std::span<const T> G)
-      : degree(degree), num_cells(num_cells), cell_constants(coefficients), cell_dofmap(dofmap),
+      : degree(degree), cell_list(cell_list), cell_constants(coefficients), cell_dofmap(dofmap),
         G_entity(G)
   {
 
@@ -195,7 +196,7 @@ public:
 
     int nq = weights.size();
     // 6 geometry values per quadrature point on each cell
-    assert(nq * nq * nq * num_cells * 6 == G.size());
+    assert(nq * nq * nq * cell_list.size() * 6 == G.size());
 
     spdlog::debug("Create device vector for phi");
     // Basis value gradient evualation table
@@ -208,7 +209,7 @@ public:
   {
     dim3 block_size(P + 1, P + 1, P + 1);
     int p1cubed = (P + 1) * (P + 1) * (P + 1);
-    dim3 grid_size(num_cells);
+    dim3 grid_size(cell_list.size());
     std::size_t shm_size = 4 * p1cubed * sizeof(T);
 
     T* x = in.mutable_array().data();
@@ -216,7 +217,7 @@ public:
     std::span<const T> dphi(thrust::raw_pointer_cast(dphi_d.data()), dphi_d.size());
     hipLaunchKernelGGL(HIP_KERNEL_NAME(stiffness_operator<T, P>), grid_size, block_size, shm_size,
                        0, x, cell_constants.data(), y, G_entity.data(), cell_dofmap.data(),
-                       dphi.data(), num_cells);
+                       dphi.data(), cell_list.data(), cell_list.size());
 
     err_check(hipGetLastError());
   }
@@ -234,9 +235,9 @@ public:
 
 private:
   int degree;
-  int num_cells;
 
   // Reference to on-device storage for constants, dofmap etc.
+  std::span<const int> cell_list;
   std::span<const T> cell_constants;
   std::span<const std::int32_t> cell_dofmap;
   std::span<const T> G_entity;
