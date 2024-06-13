@@ -24,7 +24,7 @@
 #include <memory>
 #include <mpi.h>
 
-#define MATRIX_FREE
+// #define MATRIX_FREE
 
 using namespace dolfinx;
 using T = double;
@@ -36,9 +36,9 @@ int main(int argc, char* argv[])
   po::options_description desc("Allowed options");
   desc.add_options()("help,h", "print usage message")(
       "ndofs", po::value<std::size_t>()->default_value(50000), "number of dofs per rank")(
-      "amg", po::bool_switch()->default_value(false), "Use AMG solver on coarse level")(
-      "csr-interpolation", po::bool_switch()->default_value(false),
-      "Use CSR matrices to interpolate between levels");
+      "amg", po::bool_switch()->default_value(false),
+      "Use AMG solver on coarse level")("csr-interpolation", po::bool_switch()->default_value(true),
+                                        "Use CSR matrices to interpolate between levels");
 
   po::variables_map vm;
   po::store(po::command_line_parser(argc, argv).options(desc).allow_unregistered().run(), vm);
@@ -53,8 +53,9 @@ int main(int argc, char* argv[])
   bool use_amg = vm["amg"].as<bool>();
   bool use_csr_interpolation = vm["csr-interpolation"].as<bool>();
 
-  std::vector form_a = {form_poisson_a1, form_poisson_a2, form_poisson_a3};
-  std::vector form_L = {form_poisson_L1, form_poisson_L2, form_poisson_L3};
+  std::vector<int> order = {1, 3};
+  std::vector form_a = {form_poisson_a1, form_poisson_a3};
+  std::vector form_L = {form_poisson_L1, form_poisson_L3};
 
   init_logging(argc, argv);
   PetscInitialize(&argc, &argv, nullptr, nullptr);
@@ -68,8 +69,8 @@ int main(int argc, char* argv[])
     if (rank == 0)
       spdlog::set_level(spdlog::level::info);
 
-    const int order = 3;
-    double nx_approx = (std::pow(ndofs * size, 1.0 / 3.0) - 1) / order;
+    int max_order = order.back();
+    double nx_approx = (std::pow(ndofs * size, 1.0 / 3.0) - 1) / max_order;
     std::size_t n0 = static_cast<int>(nx_approx);
     std::array<std::size_t, 3> nx = {n0, n0, n0};
 
@@ -77,14 +78,15 @@ int main(int argc, char* argv[])
     if (n0 > 5)
     {
       std::int64_t best_misfit
-          = (n0 * order + 1) * (n0 * order + 1) * (n0 * order + 1) - ndofs * size;
+          = (n0 * max_order + 1) * (n0 * max_order + 1) * (n0 * max_order + 1) - ndofs * size;
       best_misfit = std::abs(best_misfit);
       for (std::size_t nx0 = n0 - 5; nx0 < n0 + 6; ++nx0)
         for (std::size_t ny0 = n0 - 5; ny0 < n0 + 6; ++ny0)
           for (std::size_t nz0 = n0 - 5; nz0 < n0 + 6; ++nz0)
           {
             std::int64_t misfit
-                = (nx0 * order + 1) * (ny0 * order + 1) * (nz0 * order + 1) - ndofs * size;
+                = (nx0 * max_order + 1) * (ny0 * max_order + 1) * (nz0 * max_order + 1)
+                  - ndofs * size;
             if (std::abs(misfit) < best_misfit)
             {
               best_misfit = std::abs(misfit);
@@ -167,8 +169,9 @@ int main(int argc, char* argv[])
     auto kappa = std::make_shared<fem::Constant<T>>(2.0);
     for (std::size_t i = 0; i < form_a.size(); i++)
     {
+      spdlog::info("Creating FunctionSpace at order {}", order[i]);
       auto element = basix::create_tp_element<T>(
-          basix::element::family::P, basix::cell::type::hexahedron, i + 1,
+          basix::element::family::P, basix::cell::type::hexahedron, order[i],
           basix::element::lagrange_variant::gll_warped, basix::element::dpc_variant::unset, false);
 
       V[i] = std::make_shared<fem::FunctionSpace<T>>(fem::create_functionspace(mesh, element, {}));
@@ -181,6 +184,8 @@ int main(int argc, char* argv[])
     // assemble RHS for each level
     for (std::size_t i = 0; i < V.size(); i++)
     {
+      spdlog::info("Build RHS for order {}", order[i]);
+
       auto f = std::make_shared<fem::Function<T>>(V[i]);
       f->interpolate(
           [](auto x) -> std::pair<std::vector<T>, std::vector<std::size_t>>
@@ -231,31 +236,18 @@ int main(int argc, char* argv[])
     }
 
     // Copy dofmaps to device
-    thrust::device_vector<std::int32_t> dofmapV0(V[0]->dofmap()->map().size());
-    spdlog::info("Copy dofmap (V0) : {}", dofmapV0.size());
-    thrust::copy(V[0]->dofmap()->map().data_handle(),
-                 V[0]->dofmap()->map().data_handle() + V[0]->dofmap()->map().size(),
-                 dofmapV0.begin());
-
-    thrust::device_vector<std::int32_t> dofmapV1(V[1]->dofmap()->map().size());
-    spdlog::info("Copy dofmap (V1) : {}", dofmapV1.size());
-    thrust::copy(V[1]->dofmap()->map().data_handle(),
-                 V[1]->dofmap()->map().data_handle() + V[1]->dofmap()->map().size(),
-                 dofmapV1.begin());
-
-    thrust::device_vector<std::int32_t> dofmapV2(V[2]->dofmap()->map().size());
-    spdlog::info("Copy dofmap (V2) : {}", dofmapV2.size());
-    thrust::copy(V[2]->dofmap()->map().data_handle(),
-                 V[2]->dofmap()->map().data_handle() + V[2]->dofmap()->map().size(),
-                 dofmapV2.begin());
-
+    std::vector<thrust::device_vector<std::int32_t>> dofmapV(order.size());
     std::vector<std::span<std::int32_t>> device_dofmaps;
-    device_dofmaps.push_back(
-        std::span<std::int32_t>(thrust::raw_pointer_cast(dofmapV0.data()), dofmapV0.size()));
-    device_dofmaps.push_back(
-        std::span<std::int32_t>(thrust::raw_pointer_cast(dofmapV1.data()), dofmapV1.size()));
-    device_dofmaps.push_back(
-        std::span<std::int32_t>(thrust::raw_pointer_cast(dofmapV2.data()), dofmapV2.size()));
+    for (std::size_t i = 0; i < V.size(); ++i)
+    {
+      dofmapV[i].resize(V[i]->dofmap()->map().size());
+      spdlog::info("Copy dofmap (V{}) : {}", i, dofmapV[i].size());
+      thrust::copy(V[i]->dofmap()->map().data_handle(),
+                   V[i]->dofmap()->map().data_handle() + V[i]->dofmap()->map().size(),
+                   dofmapV[i].begin());
+      device_dofmaps.push_back(
+          std::span<std::int32_t>(thrust::raw_pointer_cast(dofmapV[i].data()), dofmapV[i].size()));
+    }
 
     // Copy geometry to device
     thrust::device_vector<T> geomx_device(mesh->geometry().x().size());
@@ -350,9 +342,8 @@ int main(int argc, char* argv[])
       spdlog::info("Eigenvalues level {}: {} - {}", i, eign.front(), eign.back());
     }
 
-    smoothers[0]->set_max_iterations(20);
-    smoothers[1]->set_max_iterations(10);
-    smoothers[2]->set_max_iterations(5);
+    smoothers[0]->set_max_iterations(10);
+    smoothers[1]->set_max_iterations(5);
 
     // Create Prolongation operator
     std::vector<std::shared_ptr<acc::MatrixOperator<T>>> prolongation(V.size() - 1);
@@ -365,30 +356,29 @@ int main(int argc, char* argv[])
     if (use_csr_interpolation)
     {
       spdlog::warn("Creating Prolongation Operators");
-      prolongation[0] = std::make_shared<acc::MatrixOperator<T>>(*V[0], *V[1]);
-      // From V2 to V1
-      prolongation[1] = std::make_shared<acc::MatrixOperator<T>>(*V[1], *V[2]);
+      for (int i = 0; i < V.size() - 1; ++i)
+        prolongation[i] = std::make_shared<acc::MatrixOperator<T>>(*V[i], *V[i + 1]);
     }
     else
     {
       // These are alternative restriction/prolongation kernels, which should replace the CSR
       // matrices when fully working
 
-      auto interpolator_V1_V0 = std::make_shared<Interpolator<T>>(
-          V[1]->element()->basix_element(), V[0]->element()->basix_element(), device_dofmaps[1],
-          device_dofmaps[0], ipcells_span, lcells_span, false);
-      auto interpolator_V2_V1 = std::make_shared<Interpolator<T>>(
-          V[2]->element()->basix_element(), V[1]->element()->basix_element(), device_dofmaps[2],
-          device_dofmaps[1], ipcells_span, lcells_span, false);
-      auto interpolator_V0_V1 = std::make_shared<Interpolator<T>>(
-          V[0]->element()->basix_element(), V[1]->element()->basix_element(), device_dofmaps[0],
-          device_dofmaps[1], ipcells_span, lcells_span, false);
-      auto interpolator_V1_V2 = std::make_shared<Interpolator<T>>(
-          V[1]->element()->basix_element(), V[2]->element()->basix_element(), device_dofmaps[1],
-          device_dofmaps[2], ipcells_span, lcells_span, false);
+      // auto interpolator_V1_V0 = std::make_shared<Interpolator<T>>(
+      //     V[1]->element()->basix_element(), V[0]->element()->basix_element(),
+      //     device_dofmaps[1], device_dofmaps[0], ipcells_span, lcells_span, false);
+      // auto interpolator_V2_V1 = std::make_shared<Interpolator<T>>(
+      //     V[2]->element()->basix_element(), V[1]->element()->basix_element(),
+      //     device_dofmaps[2], device_dofmaps[1], ipcells_span, lcells_span, false);
+      // auto interpolator_V0_V1 = std::make_shared<Interpolator<T>>(
+      //     V[0]->element()->basix_element(), V[1]->element()->basix_element(),
+      //     device_dofmaps[0], device_dofmaps[1], ipcells_span, lcells_span, false);
+      // auto interpolator_V1_V2 = std::make_shared<Interpolator<T>>(
+      //     V[1]->element()->basix_element(), V[2]->element()->basix_element(),
+      //     device_dofmaps[1], device_dofmaps[2], ipcells_span, lcells_span, false);
 
-      int_kerns = {interpolator_V1_V0, interpolator_V2_V1};
-      prolong_kerns = {interpolator_V0_V1, interpolator_V1_V2};
+      // int_kerns = {interpolator_V1_V0, interpolator_V2_V1};
+      // prolong_kerns = {interpolator_V0_V1, interpolator_V1_V2};
     }
 
 #ifdef MATRIX_FREE
