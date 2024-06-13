@@ -17,9 +17,12 @@ using namespace dolfinx;
 /// @param[in] A Input matrix
 /// @param[out] B Output matrix
 template <typename U, typename V>
-void transpose(const U& A, V& B) {
-  for (std::size_t i = 0; i < A.extent(0); ++i) {
-    for (std::size_t j = 0; j < A.extent(1); ++j) {
+void transpose(const U& A, V& B)
+{
+  for (std::size_t i = 0; i < A.extent(0); ++i)
+  {
+    for (std::size_t j = 0; j < A.extent(1); ++j)
+    {
       B(i, j) = A(j, i);
     }
   }
@@ -32,8 +35,8 @@ void transpose(const U& A, V& B) {
 /// @param[in] weights The weights evaluated at the quadrature points
 template <typename T>
 std::vector<T> compute_scaled_jacobian_determinant(std::shared_ptr<const mesh::Mesh<T>> mesh,
-                                                   std::vector<T> points,
-                                                   std::vector<T> weights) {
+                                                   std::vector<T> points, std::vector<T> weights)
+{
   // Number of points
   std::size_t nq = weights.size();
 
@@ -64,15 +67,18 @@ std::vector<T> compute_scaled_jacobian_determinant(std::shared_ptr<const mesh::M
   std::mdspan<T, std::dextents<std::size_t, 2>> detJ(detJ_b.data(), nc, nq);
   std::vector<T> det_scratch(2 * tdim * gdim);
 
-  for (std::size_t c = 0; c < nc; ++c) {
+  for (std::size_t c = 0; c < nc; ++c)
+  {
     // Get cell geometry (coordinates dofs)
-    for (std::size_t i = 0; i < x_dofmap.extent(1); ++i) {
+    for (std::size_t i = 0; i < x_dofmap.extent(1); ++i)
+    {
       for (std::size_t j = 0; j < gdim; ++j)
         coord_dofs(i, j) = x_g[3 * x_dofmap(c, i) + j];
     }
 
     // Compute the scaled Jacobian determinant
-    for (std::size_t q = 0; q < nq; ++q) {
+    for (std::size_t q = 0; q < nq; ++q)
+    {
       std::fill(J_b.begin(), J_b.end(), 0.0);
 
       // Get the derivatives at each quadrature points
@@ -100,8 +106,8 @@ std::vector<T> compute_scaled_jacobian_determinant(std::shared_ptr<const mesh::M
 /// @param[in] weights The weights evaluated at the quadrature points
 template <typename T>
 std::vector<T> compute_scaled_geometrical_factor(std::shared_ptr<const mesh::Mesh<T>> mesh,
-                                                 std::vector<T> points,
-                                                 std::vector<T> weights) {
+                                                 std::vector<T> points, std::vector<T> weights)
+{
   // The number of element of the upper triangular matrix
   std::map<int, int> gdim2dim;
   gdim2dim[2] = 3;
@@ -157,15 +163,18 @@ std::vector<T> compute_scaled_geometrical_factor(std::shared_ptr<const mesh::Mes
   std::mdspan<T, std::dextents<std::size_t, 2>> detJ(detJ_b.data(), nc, nq);
   std::vector<T> det_scratch(2 * gdim * tdim);
 
-  for (std::size_t c = 0; c < nc; ++c) {
+  for (std::size_t c = 0; c < nc; ++c)
+  {
     // Get cell geometry (coordinates dofs)
-    for (std::size_t i = 0; i < x_dofmap.extent(1); ++i) {
+    for (std::size_t i = 0; i < x_dofmap.extent(1); ++i)
+    {
       for (std::size_t j = 0; j < gdim; ++j)
         coord_dofs(i, j) = x_g[3 * x_dofmap(c, i) + j];
     }
 
     // Compute the scaled geometrical factor
-    for (std::size_t q = 0; q < nq; ++q) {
+    for (std::size_t q = 0; q < nq; ++q)
+    {
       std::fill(J_b.begin(), J_b.end(), 0.0);
       std::fill(K_b.begin(), K_b.end(), 0.0);
       std::fill(KT_b.begin(), KT_b.end(), 0.0);
@@ -195,11 +204,14 @@ std::vector<T> compute_scaled_geometrical_factor(std::shared_ptr<const mesh::Mes
       detJ(c, q) = std::fabs(detJ(c, q)) * weights[q];
 
       // Only store the upper triangular values since G is symmetric
-      if (gdim == 2) {
+      if (gdim == 2)
+      {
         Gs(c, q, 0) = detJ(c, q) * G(0, 0);
         Gs(c, q, 1) = detJ(c, q) * G(0, 1);
         Gs(c, q, 2) = detJ(c, q) * G(1, 1);
-      } else if (gdim == 3) {
+      }
+      else if (gdim == 3)
+      {
         Gs(c, q, 0) = detJ(c, q) * G(0, 0);
         Gs(c, q, 1) = detJ(c, q) * G(0, 1);
         Gs(c, q, 2) = detJ(c, q) * G(0, 2);
@@ -215,17 +227,16 @@ std::vector<T> compute_scaled_geometrical_factor(std::shared_ptr<const mesh::Mes
 /// ---------------------------------------------------------------------------
 /// Tabulate degree P basis functions on an interval
 template <typename T>
-std::vector<T> tabulate_1d(int P, int Q, int derivative) {
+std::vector<T> tabulate_1d(int P, int Q, int derivative)
+{
   // Create element
-  auto element = basix::create_element<T>(
-    basix::element::family::P, basix::cell::type::interval, P,
-    basix::element::lagrange_variant::gll_warped,
-    basix::element::dpc_variant::unset, false);
+  auto element = basix::create_element<T>(basix::element::family::P, basix::cell::type::interval, P,
+                                          basix::element::lagrange_variant::gll_warped,
+                                          basix::element::dpc_variant::unset, false);
 
   // Create quadrature
   auto [points, weights] = basix::quadrature::make_quadrature<T>(
-    basix::quadrature::type::gll, basix::cell::type::interval, 
-    basix::polyset::type::standard, Q);
+      basix::quadrature::type::gll, basix::cell::type::interval, basix::polyset::type::standard, Q);
 
   // Tabulate
   auto [table, shape] = element.tabulate(1, points, {weights.size(), 1});
