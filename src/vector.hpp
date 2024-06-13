@@ -337,6 +337,14 @@ public:
     this->scatter_rev_end();
   }
 
+  /// Copy data back to host
+  std::vector<T> data_copy()
+  {
+    std::vector<T> data(_x.size());
+    thrust::copy(_x.begin(), _x.end(), data.begin());
+    return data;
+  }
+
 private:
   // Map describing the data layout
   std::shared_ptr<const common::IndexMap> _map;
