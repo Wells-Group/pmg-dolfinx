@@ -9,7 +9,6 @@
 /// which share a vertex with this process are ghosted.
 /// @param mesh Input mesh
 /// @param coord_element A coordinate element for the new mesh. This may be tensor product ordering.
-
 template <std::floating_point T>
 dolfinx::mesh::Mesh<T> ghost_layer_mesh(dolfinx::mesh::Mesh<T>& mesh,
                                         dolfinx::fem::CoordinateElement<T> coord_element)
@@ -90,7 +89,7 @@ dolfinx::mesh::Mesh<T> ghost_layer_mesh(dolfinx::mesh::Mesh<T>& mesh,
 /// 1. cells which are "local", i.e. the dofs on
 /// these cells are not shared with any other process.
 /// 2. cells which share dofs with other processes.
-///
+/// @param mesh The mesh
 template <typename T>
 std::pair<std::vector<std::int32_t>, std::vector<std::int32_t>>
 compute_boundary_cells(std::shared_ptr<dolfinx::mesh::Mesh<T>> mesh)

@@ -1,6 +1,8 @@
 // Copyright (C) 2023 Igor A. Baratta
 // SPDX-License-Identifier:    MIT
 
+// TODO Is this needed?
+
 #pragma once
 
 #ifdef USE_HIP

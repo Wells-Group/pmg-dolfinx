@@ -88,7 +88,7 @@ int tqli(T* d, T* e, int n)
 namespace dolfinx::acc
 {
 
-/// Conjugate gradient method
+/// @brief Conjugate gradient method
 template <typename Vector>
 class CGSolver
 {
@@ -96,6 +96,9 @@ class CGSolver
   using T = typename Vector::value_type;
 
 public:
+  /// @brief Create a conjugate gradient solver
+  /// @param map The index map
+  /// @param bs The block size
   CGSolver(std::shared_ptr<const common::IndexMap> map, int bs) : _map{map}, _bs{bs}
   {
     _r = std::make_unique<Vector>(_map, _bs);
@@ -104,6 +107,8 @@ public:
     _diag_inv = std::make_unique<Vector>(_map, _bs);
   }
 
+  /// @brief Set the maximum number of iterations of the solver
+  /// @param max_iter The maximum number of iterations
   void set_max_iterations(int max_iter)
   {
     _max_iter = max_iter;
@@ -111,13 +116,27 @@ public:
     _betas.reserve(_max_iter);
     _residuals.reserve(_max_iter);
   }
+
+  /// @brief Set the relative tolerance used to test convergence
+  /// @param tolerance The relative decrease in the residual norm for convergence
   void set_tolerance(double tolerance) { _rtol = tolerance; }
 
+  /// @brief Set whether the CG coefficients (alpha, beta, and the residual) are
+  /// stored after each iteration
+  /// @param val If true, the coefficients will be stored. Otherwise, they won't be.
   void store_coefficients(bool val) { _store_coeffs = val; }
 
+  /// @brief Get the values of alpha at each iteration
+  /// @return A list of values whose ith entry is the value of alpha at iteration i
   std::vector<T> alphas() { return _alphas; }
+
+  /// @brief Get the values of beta at each iteration
+  /// @return A list of values whose ith entry is the value of beta at iteration i
   std::vector<T> betas() { return _betas; }
 
+  /// @brief Compute the eigenvalues of the operator. NOTE: `solve` must have been
+  /// called with `store_coefficients` set to true to use this function
+  /// @return A list of eigenvalues
   std::vector<T> compute_eigenvalues()
   {
     int ne = _alphas.size();
@@ -142,7 +161,13 @@ public:
 
   T residual() const { return _residuals.back(); }
 
-  // Solve Ax = b
+  /// @brief Solve Ax = b using the conjugate gradient algorithm
+  /// @tparam Operator The operator type
+  /// @param A The operator
+  /// @param x The solution vector
+  /// @param b The right-hand side vector
+  /// @param verbose If true, print the residual after each iteration
+  /// @return The number of iterations
   template <typename Operator>
   int solve(Operator& A, Vector& x, const Vector& b, bool verbose = false)
   {
