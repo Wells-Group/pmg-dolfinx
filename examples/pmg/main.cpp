@@ -297,9 +297,9 @@ int main(int argc, char* argv[])
       spdlog::info("Create operator on V[{}]", i);
       std::span<const std::int8_t> bc_span(thrust::raw_pointer_cast(device_bc_dofs[i].data()),
                                            device_bc_dofs[i].size());
-      operators[i] = std::make_shared<acc::MatFreeLaplacian<T>>(
-          degree, lcells_span, ipcells_span, device_constants, geom_x, geom_x_dofmap,
-          device_dofmaps[i], bc_span);
+      operators[i] = std::make_shared<acc::MatFreeLaplacian<T>>(degree, cell_list, device_constants,
+                                                                device_dofmaps[i], device_G[i]);
+
 #else
       operators[i] = std::make_shared<acc::MatrixOperator<T>>(a_i, bc_i);
       maps[i] = operators[i]->column_index_map();

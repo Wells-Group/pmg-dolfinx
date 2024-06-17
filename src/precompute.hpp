@@ -49,7 +49,8 @@ std::vector<T> compute_scaled_jacobian_determinant(std::shared_ptr<const mesh::M
   // Get dimensions
   const std::size_t tdim = mesh->topology()->dim();
   const std::size_t gdim = mesh->geometry().dim();
-  const std::size_t nc = mesh->topology()->index_map(tdim)->size_local();
+  const std::size_t nc = mesh->topology()->index_map(tdim)->size_local()
+                         + mesh->topology()->index_map(tdim)->num_ghosts();
 
   // Tabulate basis functions at quadrature points
   std::array<std::size_t, 4> phi_shape = cmap.tabulate_shape(1, nq);

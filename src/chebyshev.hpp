@@ -97,8 +97,6 @@ private:
   /// Eigenvalues
   std::array<T, 2> _eig_range;
 
-  acc::container<T, acc::Device::CPP> _coeffs;
-
   /// Working vectors
   std::unique_ptr<Vector> _p;
   std::unique_ptr<Vector> _z;

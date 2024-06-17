@@ -30,7 +30,8 @@
 /// @param G_entity Array of size (n_entities, nq, 6) with the geometry operator G for each entity
 /// @param entity_dofmap Array of size (n_entities, ndofs) with the dofmap for each entity
 /// @param dphi Array of size (nq, ndofs) with the basis function gradients in 1D.
-/// @param n_entities Number of entities (cells or facets) to compute the stiffness operator for
+/// @param entities List of entities to compute on
+/// @param n_entities Number of entries in `entities`
 
 /// @note The kernel is launched with a 3D grid of 1D blocks, where each block
 /// is responsible for computing the stiffness operator for a single entity.
@@ -73,7 +74,7 @@ __global__ void stiffness_operator(const T* x, const T* entity_constants, T* y, 
     return;
 
   // Get dof index that this thread is responsible for
-  int dof = entity_dofmap[block_id * cube_nd + thread_id];
+  int dof = entity_dofmap[entities[block_id] * cube_nd + thread_id];
 
   // Gather x values required in this cell
   // scratch has dimensions (nd, nd, nd)
@@ -233,6 +234,18 @@ public:
       impl_operator<3>(in, out);
   }
 
+  template <typename Vector>
+  void get_diag_inverse(Vector& diag_inv)
+  {
+    thrust::copy(_diag_inv.begin(), _diag_inv.end(), diag_inv.mutable_array().begin());
+  }
+
+  template <typename Vector>
+  void set_diag_inverse(const Vector& diag_inv)
+  {
+    thrust::copy(diag_inv.array().begin(), diag_inv.array().end(), _diag_inv.begin());
+  }
+
 private:
   int degree;
 
@@ -244,6 +257,10 @@ private:
 
   // On device storage for dphi
   thrust::device_vector<T> dphi_d;
+
+  // On device storage for the inverse diagonal, needed for Jacobi
+  // preconditioner (to remove in future)
+  thrust::device_vector<T> _diag_inv;
 };
 
 } // namespace dolfinx::acc

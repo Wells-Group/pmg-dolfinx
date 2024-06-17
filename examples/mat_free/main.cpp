@@ -3,6 +3,7 @@
 #include "src/chebyshev.hpp"
 #include "src/csr.hpp"
 #include "src/laplacian.hpp"
+#include "src/mesh.hpp"
 #include "src/operators.hpp"
 #include "src/precompute.hpp"
 #include "src/vector.hpp"
@@ -197,8 +198,27 @@ int main(int argc, char* argv[])
 
     dolfinx::fem::CoordinateElement<T> coord_element(element_1);
 
-    auto mesh = std::make_shared<mesh::Mesh<T>>(
-        build_hex<T>(comm, comm, {{{0, 0, 0}, {1, 1, 2}}}, {nx[0], nx[1], nx[2]}, coord_element));
+    // Create mesh
+    std::shared_ptr<mesh::Mesh<T>> mesh;
+    {
+      mesh::Mesh<T> base_mesh = mesh::create_box<T>(
+          comm, {{{0, 0, 0}, {1, 1, 1}}},
+          {(std::size_t)nx[0], (std::size_t)nx[1], (std::size_t)nx[2]}, mesh::CellType::hexahedron);
+
+      //      mesh::Mesh<T> base_mesh = build_hex<T>(comm, comm, {{{0, 0, 0}, {1, 1, 1}}},
+      //                                             {nx[0], nx[1], nx[2]}, coord_element);
+
+      //      mesh = std::make_shared<mesh::Mesh<T>>(base_mesh);
+      mesh = std::make_shared<mesh::Mesh<T>>(ghost_layer_mesh(base_mesh, coord_element));
+    }
+
+    std::stringstream sg;
+
+    for (auto q : mesh->geometry().x())
+      sg << q << " ";
+    spdlog::debug("x = {}", sg.str());
+
+    auto [lcells, bcells] = compute_boundary_cells(mesh);
 
     auto [Gpoints, Gweights] = basix::quadrature::make_quadrature<T>(
         basix::quadrature::type::gll, basix::cell::type::hexahedron, basix::polyset::type::standard,
@@ -207,8 +227,15 @@ int main(int argc, char* argv[])
     // Compute the geometrical factor and copy to device
     auto G_ = compute_scaled_geometrical_factor<T>(mesh, Gpoints, Gweights);
 
+    std::stringstream ssG;
+    for (auto q : G_)
+      ssG << q << " ";
+    spdlog::debug("G = [{}]", ssG.str());
+
     thrust::device_vector<T> G_d(G_.begin(), G_.end());
     std::span<const T> geometry_d_span(thrust::raw_pointer_cast(G_d.data()), G_d.size());
+
+    spdlog::info("Send G to GPU (size = {})", G_d.size());
 
     auto V = std::make_shared<fem::FunctionSpace<T>>(fem::create_functionspace(mesh, *element));
 
@@ -263,16 +290,25 @@ int main(int argc, char* argv[])
     // Copy data to GPU
     // Constants
     // TODO Pack these properly
-    const int num_cells_local = mesh->topology()->index_map(tdim)->size_local();
+    const int num_cells_local = mesh->topology()->index_map(tdim)->size_local()
+                                + mesh->topology()->index_map(tdim)->num_ghosts();
     thrust::device_vector<T> constants_d(num_cells_local, kappa->value[0]);
     std::span<const T> constants_d_span(thrust::raw_pointer_cast(constants_d.data()),
                                         constants_d.size());
+
+    spdlog::info("Send constants to GPU (size = {})", constants_d.size());
 
     // V dofmap
     thrust::device_vector<std::int32_t> dofmap_d(
         dofmap->map().data_handle(), dofmap->map().data_handle() + dofmap->map().size());
     std::span<const std::int32_t> dofmap_d_span(thrust::raw_pointer_cast(dofmap_d.data()),
                                                 dofmap_d.size());
+
+    spdlog::info("Send dofmap to GPU (size = {})", dofmap_d.size());
+    std::stringstream sd;
+    for (int i = 0; i < dofmap->map().size(); ++i)
+      sd << dofmap->map().data_handle()[i] << " ";
+    spdlog::debug("domfpa = {}", sd.str());
 
     // Define vectors
     using DeviceVector = dolfinx::acc::Vector<T, acc::Device::HIP>;
@@ -291,6 +327,8 @@ int main(int argc, char* argv[])
     std::span<const int> cells_local(thrust::raw_pointer_cast(cell_list_d.data()),
                                      cell_list_d.size());
 
+    spdlog::info("Send cell list to GPU (size = {})", cell_list_d.size());
+
     // Create matrix free operator
     spdlog::debug("Create MatFreLaplacian");
     acc::MatFreeLaplacian<T> op(3, cells_local, constants_d_span, dofmap_d_span, geometry_d_span);
@@ -306,8 +344,12 @@ int main(int argc, char* argv[])
     // b.scatter_rev(std::plus<T>());
     // fem::set_bc<T, T>(b.mutable_array(), {bc});
     u.copy_from_host(b); // Copy data from host vector to device vector
+    u.scatter_fwd();
 
+    // Matrix free
     op(u, y);
+    //    y.scatter_rev();
+
     std::cout << "Norm of u = " << acc::norm(u) << "\n";
     std::cout << "Norm of y = " << acc::norm(y) << "\n";
 
