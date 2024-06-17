@@ -126,7 +126,8 @@ std::vector<T> compute_scaled_geometrical_factor(std::shared_ptr<const mesh::Mes
   // Get dimensions
   const std::size_t tdim = mesh->topology()->dim();
   const std::size_t gdim = mesh->geometry().dim();
-  const std::size_t nc = mesh->topology()->index_map(tdim)->size_local();
+  const std::size_t nc = mesh->topology()->index_map(tdim)->size_local()
+                         + mesh->topology()->index_map(tdim)->num_ghosts();
   int dim = gdim2dim[gdim];
 
   // Tabulate basis functions at quadrature points
