@@ -46,8 +46,9 @@ dolfinx::mesh::Mesh<T> ghost_layer_mesh(dolfinx::mesh::Mesh<T>& mesh,
   spdlog::info("cell_to_dests= {}, ncells = {}", cell_to_dests.size(), ncells);
 
   auto partitioner
-      = [cell_to_dests, ncells](MPI_Comm comm, int nparts, dolfinx::mesh::CellType cell_type,
-                                const dolfinx::graph::AdjacencyList<std::int64_t>& cells)
+      = [cell_to_dests, ncells](MPI_Comm comm, int nparts,
+                                const std::vector<dolfinx::mesh::CellType>& cell_types,
+                                const std::vector<std::span<const std::int64_t>>& cells)
   {
     int rank = dolfinx::MPI::rank(comm);
     std::vector<std::int32_t> dests;
