@@ -337,8 +337,9 @@ int main(int argc, char* argv[])
     bc->mark_dofs(bc_marker);
     thrust::device_vector<std::int8_t> bc_marker_d(bc_marker.begin(), bc_marker.end());
     std::span<const std::int8_t> bc_marker_d_span(thrust::raw_pointer_cast(bc_marker_d.data()),
-                                                   bc_marker_d.size());
-    acc::MatFreeLaplacian<T> op(3, cells_local, constants_d_span, dofmap_d_span, geometry_d_span);
+                                                  bc_marker_d.size());
+    acc::MatFreeLaplacian<T> op(3, cells_local, constants_d_span, dofmap_d_span, geometry_d_span,
+                                bc_marker_d_span);
 
     la::Vector<T> b(map, 1);
     auto barr = b.mutable_array();

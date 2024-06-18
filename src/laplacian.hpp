@@ -173,9 +173,10 @@ class MatFreeLaplacian
 {
 public:
   MatFreeLaplacian(int degree, std::span<const int> cell_list, std::span<const T> coefficients,
-                   std::span<const std::int32_t> dofmap, std::span<const T> G)
+                   std::span<const std::int32_t> dofmap, std::span<const T> G,
+                   std::span<const std::int8_t> bc_marker)
       : degree(degree), cell_list(cell_list), cell_constants(coefficients), cell_dofmap(dofmap),
-        G_entity(G)
+        G_entity(G), bc_marker(bc_marker)
   {
 
     std::map<int, int> Qdegree = {{2, 3}, {3, 4}, {4, 6}, {5, 8}};
@@ -254,6 +255,7 @@ private:
   std::span<const T> cell_constants;
   std::span<const std::int32_t> cell_dofmap;
   std::span<const T> G_entity;
+  std::span<const std::int8_t> bc_marker;
 
   // On device storage for dphi
   thrust::device_vector<T> dphi_d;
