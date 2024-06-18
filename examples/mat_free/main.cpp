@@ -350,7 +350,7 @@ int main(int argc, char* argv[])
     // TODO BCs
     // fem::apply_lifting<T, T>(b.mutable_array(), {a}, {{bc}}, {}, T(1));
     // b.scatter_rev(std::plus<T>());
-    // fem::set_bc<T, T>(b.mutable_array(), {bc});
+    fem::set_bc<T, T>(b.mutable_array(), {bc});
     u.copy_from_host(b); // Copy data from host vector to device vector
     u.scatter_fwd();
 

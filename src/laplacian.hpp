@@ -165,6 +165,10 @@ __global__ void stiffness_operator(const T* x, const T* entity_constants, T* y, 
   // Sum contributions
   T val = val_x + val_y + val_z;
 
+  // TODO: Need to set BC value in y!
+  if (bc_marker[dof])
+    val = 0.0;
+
   // Atomically add the computed value to the output array `y`
   atomicAdd(&y[dof], val);
 }
