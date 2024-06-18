@@ -202,8 +202,7 @@ int main(int argc, char* argv[])
     std::shared_ptr<mesh::Mesh<T>> mesh;
     {
       mesh::Mesh<T> base_mesh = mesh::create_box<T>(
-          comm, {{{0, 0, 0}, {1, 1, 1}}},
-          {(std::size_t)nx[0], (std::size_t)nx[1], (std::size_t)nx[2]}, mesh::CellType::hexahedron);
+          comm, {{{0, 0, 0}, {1, 1, 1}}}, {nx[0], nx[1], nx[2]}, mesh::CellType::hexahedron);
 
       //      mesh::Mesh<T> base_mesh = build_hex<T>(comm, comm, {{{0, 0, 0}, {1, 1, 1}}},
       //                                             {nx[0], nx[1], nx[2]}, coord_element);
@@ -331,6 +330,14 @@ int main(int argc, char* argv[])
 
     // Create matrix free operator
     spdlog::debug("Create MatFreLaplacian");
+
+    // TODO Ghosts
+    const int num_dofs = map->size_local() + map->num_ghosts();
+    std::vector<std::int8_t> bc_marker(num_dofs, 0);
+    bc->mark_dofs(bc_marker);
+    thrust::device_vector<std::int8_t> bc_marker_d(bc_marker.begin(), bc_marker.end());
+    std::span<const std::int8_t> bc_marker_d_span(thrust::raw_pointer_cast(bc_marker_d.data()),
+                                                   bc_marker_d.size());
     acc::MatFreeLaplacian<T> op(3, cells_local, constants_d_span, dofmap_d_span, geometry_d_span);
 
     la::Vector<T> b(map, 1);
@@ -359,7 +366,7 @@ int main(int argc, char* argv[])
     DeviceVector z(map, 1);
     z.set(T{0.0});
 
-    acc::MatrixOperator<T> mat_op(a, {});
+    acc::MatrixOperator<T> mat_op(a, {bc});
     mat_op(u, z);
     std::cout << "Norm of u = " << acc::norm(u) << "\n";
     std::cout << "Norm of z = " << acc::norm(z) << "\n";
