@@ -39,7 +39,8 @@
 template <typename T, int P>
 __global__ void stiffness_operator(const T* x, const T* entity_constants, T* y, const T* G_entity,
                                    const std::int32_t* entity_dofmap, const T* dphi,
-                                   const int* entities, int n_entities)
+                                   const int* entities, int n_entities,
+                                   const std::int8_t* bc_marker)
 {
   constexpr int nd = P + 1; // Number of dofs per direction in 1D
   constexpr int nq = nd;    // Number of quadrature points in 1D (must be the same as nd)
@@ -78,7 +79,10 @@ __global__ void stiffness_operator(const T* x, const T* entity_constants, T* y, 
 
   // Gather x values required in this cell
   // scratch has dimensions (nd, nd, nd)
-  scratch[thread_id] = x[dof];
+  if (bc_marker[dof])
+    scratch[thread_id] = 0.0;
+  else
+    scratch[thread_id] = x[dof];
   __syncthreads();
 
   // Compute val_x, val_y, val_z at quadrature point of this thread
@@ -219,7 +223,7 @@ public:
     std::span<const T> dphi(thrust::raw_pointer_cast(dphi_d.data()), dphi_d.size());
     hipLaunchKernelGGL(HIP_KERNEL_NAME(stiffness_operator<T, P>), grid_size, block_size, shm_size,
                        0, x, cell_constants.data(), y, G_entity.data(), cell_dofmap.data(),
-                       dphi.data(), cell_list.data(), cell_list.size());
+                       dphi.data(), cell_list.data(), cell_list.size(), bc_marker.data());
 
     err_check(hipGetLastError());
   }
