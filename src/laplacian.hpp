@@ -165,7 +165,7 @@ __global__ void stiffness_operator(const T* x, const T* entity_constants, T* y, 
   // Sum contributions
   T val = val_x + val_y + val_z;
 
-  // TODO: Need to set BC value in y!
+  // FIXME Set correct BC val for y outside kernel (multiple cell may share the dof)
   if (bc_marker[dof])
     val = 0.0;
 
