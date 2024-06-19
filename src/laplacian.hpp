@@ -9,15 +9,16 @@
 #pragma once
 
 /// @brief Computes weighted geometry tensor G from the coordinates and quadrature weights
-/// @note Currently hard-wired for a Q3 cell
-/// @param [in] xgeom Geometry points
-/// @param [out] G_entity geometry data
-/// @param [in] geometry_dofmap Location of coordinates for each cell in xgeom
-/// @param [in] _dphi Basis derivative tabulation for cell at quadrature points
-/// @param [in] weights Quadrature weights
-/// @param [in] entities list of cells to compute for
+/// @param [in] xgeom Geometry points [*, 3]
+/// @param [out] G_entity geometry data [n_entities, nq, 6]
+/// @param [in] geometry_dofmap Location of coordinates for each cell in xgeom [*, ncdofs]
+/// @param [in] _dphi Basis derivative tabulation for cell at quadrature points [3, nq, ncdofs]
+/// @param [in] weights Quadrature weights [nq]
+/// @param [in] entities list of cells to compute for [n_entities]
 /// @param [in] n_entities total number of cells to compute for
-template <typename T>
+/// @tparam T scalar type
+/// @tparam P degree of kernel to compute geometry for
+template <typename T, int P>
 __global__ void geometry_computation(const T* xgeom, T* G_entity,
                                      const std::int32_t* geometry_dofmap, const T* _dphi,
                                      const T* weights, const int* entities, int n_entities)
@@ -26,14 +27,14 @@ __global__ void geometry_computation(const T* xgeom, T* G_entity,
   int c = blockIdx.x;
 
   // Limit to cells in list
-  if (c > n_entities)
+  if (c >= n_entities)
     return;
 
   // Cell index
   int cell = entities[c];
 
   // Number of quadrature points (must match arrays in weights and dphi)
-  constexpr int nq = 64;
+  constexpr int nq = (P + 1) * (P + 1) * (P + 1);
   // Number of coordinate dofs
   constexpr int ncdofs = 8;
   // Geometric dimension
@@ -53,6 +54,9 @@ __global__ void geometry_computation(const T* xgeom, T* G_entity,
     _coord_dofs[iq] = xgeom[3 * geometry_dofmap[cell * ncdofs + i] + j];
 
   __syncthreads();
+
+  if (iq >= nq)
+    return;
 
   // Jacobian
   T J[3][3];
@@ -296,9 +300,10 @@ public:
     dim3 block_size(weights.size());
     dim3 grid_size(cell_list.size());
     std::size_t shm_size = 24 * sizeof(T); // coordinate size (8x3)
-    hipLaunchKernelGGL(geometry_computation<T>, grid_size, block_size, shm_size, 0, xgeom.data(),
-                       thrust::raw_pointer_cast(G_entity.data()), geometry_dofmap.data(),
-                       dphi.data(), weights.data(), cell_list.data(), cell_list.size());
+    hipLaunchKernelGGL(HIP_KERNEL_NAME(geometry_computation<T, 3>), grid_size, block_size, shm_size,
+                       0, xgeom.data(), thrust::raw_pointer_cast(G_entity.data()),
+                       geometry_dofmap.data(), dphi.data(), weights.data(), cell_list.data(),
+                       cell_list.size());
   }
 
   template <int P, typename Vector>
