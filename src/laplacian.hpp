@@ -44,6 +44,8 @@ __global__ void geometry_computation(const T* xgeom, T* G_entity,
   // coord_dofs has shape [ncdofs, gdim]
   T* _coord_dofs = shared_mem;
 
+  // One quadrature point per thread
+  // First collect geometry into shared memory
   int iq = threadIdx.x;
   int i = iq / gdim;
   int j = iq % gdim;
@@ -53,46 +55,46 @@ __global__ void geometry_computation(const T* xgeom, T* G_entity,
   __syncthreads();
 
   // Jacobian
-  T _J[3][3];
-  auto J = [&_J](int i, int j) -> T& { return _J[i][j]; };
+  T J[3][3];
   auto coord_dofs = [&_coord_dofs](int i, int j) -> T& { return _coord_dofs[i * gdim + j]; };
 
   // For each quadrature point / thread
   {
-    // dphi has shape [gdim, ncdofs]
-    auto dphi
-        = [&_dphi, iq](int i, int j) -> const T& { return _dphi[(i * nq + iq) * ncdofs + j]; };
+    // dphi has shape [gdim, ncdofs] - swapping coordinate directions i -> 2-i
+    auto dphi = [&_dphi, iq](int i, int j) -> const T&
+    { return _dphi[((2 - i) * nq + iq) * ncdofs + j]; };
 
     for (std::size_t i = 0; i < gdim; i++)
       for (std::size_t j = 0; j < gdim; j++)
       {
-        J(i, j) = 0.0;
+        J[i][j] = 0.0;
         for (std::size_t k = 0; k < ncdofs; k++)
-          J(i, j) += coord_dofs(k, i) * dphi(j, k);
+          J[i][j] += coord_dofs(k, i) * dphi(j, k);
       }
 
-    // Components of K = J^-1
-    T Ka = J(0, 1) * J(1, 2) - J(0, 2) * J(1, 1);
-    T Kb = J(0, 1) * J(2, 2) - J(0, 2) * J(2, 1);
-    T Kc = J(1, 1) * J(2, 2) - J(1, 2) * J(2, 1);
+    // Components of K = J^-1 (detJ)
+    T K[3][3] = {{J[1][1] * J[2][2] - J[1][2] * J[2][1], -J[0][1] * J[2][2] + J[0][2] * J[2][1],
+                  J[0][1] * J[1][2] - J[0][2] * J[1][1]},
+                 {-J[1][0] * J[2][2] + J[1][2] * J[2][0], J[0][0] * J[2][2] - J[0][2] * J[2][0],
+                  -J[0][0] * J[1][2] + J[0][2] * J[1][0]},
+                 {J[1][0] * J[2][1] - J[1][1] * J[2][0], -J[0][0] * J[2][1] + J[0][1] * J[2][0],
+                  J[0][0] * J[1][1] - J[0][1] * J[1][0]}};
 
-    T Kd = J(0, 0) * J(1, 2) - J(0, 2) * J(1, 0);
-    T Ke = J(0, 0) * J(2, 2) - J(0, 2) * J(2, 0);
-    T Kf = J(1, 0) * J(2, 2) - J(1, 2) * J(2, 0);
-
-    T Kg = J(0, 0) * J(1, 1) - J(0, 1) * J(1, 0);
-    T Kh = J(0, 0) * J(2, 1) - J(0, 1) * J(2, 0);
-    T Ki = J(1, 0) * J(2, 1) - J(1, 1) * J(2, 0);
-
-    T detJ = J(0, 0) * Kc - J(1, 0) * Kf + J(0, 2) * Ki;
+    T detJ = J[0][0] * K[0][0] - J[1][0] * K[0][1] + J[0][2] * K[2][0];
 
     int offset = (c * nq + iq) * 6;
-    G_entity[offset] = (Ka * Ka + Kb * Kb + Kc * Kc) * weights[iq] / detJ;
-    G_entity[offset + 1] = -(Kd * Ka + Ke * Kb + Kf * Kc) * weights[iq] / detJ;
-    G_entity[offset + 2] = (Kg * Ka + Kh * Kb + Ki * Kc) * weights[iq] / detJ;
-    G_entity[offset + 3] = (Kd * Kd + Ke * Ke + Kf * Kf) * weights[iq] / detJ;
-    G_entity[offset + 4] = -(Kg * Kd + Kh * Ke + Ki * Kf) * weights[iq] / detJ;
-    G_entity[offset + 5] = (Kg * Kg + Kh * Kh + Ki * Ki) * weights[iq] / detJ;
+    G_entity[offset]
+        = (K[0][0] * K[0][0] + K[0][1] * K[0][1] + K[0][2] * K[0][2]) * weights[iq] / detJ;
+    G_entity[offset + 1]
+        = (K[1][0] * K[0][0] + K[1][1] * K[0][1] + K[1][2] * K[0][2]) * weights[iq] / detJ;
+    G_entity[offset + 2]
+        = (K[2][0] * K[0][0] + K[2][1] * K[0][1] + K[2][2] * K[0][2]) * weights[iq] / detJ;
+    G_entity[offset + 3]
+        = (K[1][0] * K[1][0] + K[1][1] * K[1][1] + K[1][2] * K[1][2]) * weights[iq] / detJ;
+    G_entity[offset + 4]
+        = (K[2][0] * K[1][0] + K[2][1] * K[1][1] + K[2][2] * K[1][2]) * weights[iq] / detJ;
+    G_entity[offset + 5]
+        = (K[2][0] * K[2][0] + K[2][1] * K[2][1] + K[2][2] * K[2][2]) * weights[iq] / detJ;
   }
 }
 
