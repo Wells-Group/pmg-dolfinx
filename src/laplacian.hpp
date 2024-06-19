@@ -82,7 +82,7 @@ __global__ void geometry_computation(const T* xgeom, T* G_entity,
 
     T detJ = J(0, 0) * Jc - J(1, 0) * Jf + J(0, 2) * Ji;
 
-    int offset = (cell * nq + iq) * 6;
+    int offset = (c * nq + iq) * 6;
     G_entity[offset] = (Ja * Ja + Jb * Jb + Jc * Jc) * weights[iq] / detJ;
     G_entity[offset + 1] = -(Jd * Ja + Je * Jb + Jf * Jc) * weights[iq] / detJ;
     G_entity[offset + 2] = (Jg * Ja + Jh * Jb + Ji * Jc) * weights[iq] / detJ;
@@ -257,9 +257,8 @@ class MatFreeLaplacian
 {
 public:
   MatFreeLaplacian(int degree, std::span<const int> cell_list, std::span<const T> coefficients,
-                   std::span<const std::int32_t> dofmap, std::span<T> G)
-      : degree(degree), cell_list(cell_list), cell_constants(coefficients), cell_dofmap(dofmap),
-        G_entity(G)
+                   std::span<const std::int32_t> dofmap)
+      : degree(degree), cell_list(cell_list), cell_constants(coefficients), cell_dofmap(dofmap)
   {
 
     std::map<int, int> Qdegree = {{2, 3}, {3, 4}, {4, 6}, {5, 8}};
@@ -277,8 +276,6 @@ public:
     // Tabulate 1D
     auto [table, shape] = element1D.tabulate(1, points, {weights.size(), 1});
 
-    spdlog::debug("1D table = {}, G = {}", weights.size(), G.size());
-
     spdlog::debug("Create device vector for phi");
     // Basis value gradient evualation table
     dphi_d.resize(table.size() / 2);
@@ -289,11 +286,12 @@ public:
   void compute_geometry(std::span<const T> xgeom, std::span<const std::int32_t> geometry_dofmap,
                         std::span<const T> dphi, std::span<const T> weights)
   {
+    G_entity.resize(weights.size() * cell_list.size() * 6);
     dim3 block_size(cell_list.size());
     dim3 grid_size(1);
     hipLaunchKernelGGL(geometry_computation<T>, grid_size, block_size, 0, 0, xgeom.data(),
-                       G_entity.data(), geometry_dofmap.data(), dphi.data(), weights.data(),
-                       cell_list.data(), cell_list.size());
+                       thrust::raw_pointer_cast(G_entity.data()), geometry_dofmap.data(),
+                       dphi.data(), weights.data(), cell_list.data(), cell_list.size());
   }
 
   template <int P, typename Vector>
@@ -311,8 +309,8 @@ public:
     T* y = out.mutable_array().data();
     std::span<const T> dphi(thrust::raw_pointer_cast(dphi_d.data()), dphi_d.size());
     hipLaunchKernelGGL(HIP_KERNEL_NAME(stiffness_operator<T, P>), grid_size, block_size, shm_size,
-                       0, x, cell_constants.data(), y, G_entity.data(), cell_dofmap.data(),
-                       dphi.data(), cell_list.data(), cell_list.size());
+                       0, x, cell_constants.data(), y, thrust::raw_pointer_cast(G_entity.data()),
+                       cell_dofmap.data(), dphi.data(), cell_list.data(), cell_list.size());
 
     err_check(hipGetLastError());
   }
@@ -350,7 +348,9 @@ private:
   std::span<const int> cell_list;
   std::span<const T> cell_constants;
   std::span<const std::int32_t> cell_dofmap;
-  std::span<T> G_entity;
+
+  // On device storage for geometry data (computed for each batch of cells)
+  thrust::device_vector<T> G_entity;
 
   // On device storage for dphi
   thrust::device_vector<T> dphi_d;

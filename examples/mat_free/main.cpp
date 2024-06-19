@@ -316,13 +316,6 @@ int main(int argc, char* argv[])
 
     spdlog::info("Send cell list to GPU (size = {})", cell_list_d.size());
 
-    // Compute the geometrical factor and copy to device
-    //    auto G_ = compute_scaled_geometrical_factor<T>(mesh, Gpoints, Gweights);
-    //    thrust::device_vector<T> G_d(G_.begin(), G_.end());
-    thrust::device_vector<T> G_d(cells_local.size() * Gweights.size() * 6);
-    std::span<T> geometry_d_span(thrust::raw_pointer_cast(G_d.data()), G_d.size());
-    spdlog::info("Send G to GPU (size = {})", G_d.size());
-
     // Get geometry information onto device
     const fem::CoordinateElement<T>& cmap = mesh->geometry().cmap();
     auto xdofmap = mesh->geometry().dofmap();
@@ -334,19 +327,18 @@ int main(int argc, char* argv[])
     cmap.tabulate(1, Gpoints, {Gweights.size(), 3}, phi_b);
     // Copy dphi to device (skipping phi in table)
     thrust::device_vector<T> dphi_d(phi_b.begin() + phi_b.size() / 4, phi_b.end());
+    // Copy quadrature weights to device
     thrust::device_vector<T> Gweights_d(Gweights.begin(), Gweights.end());
 
     // Create matrix free operator
     spdlog::debug("Create MatFreLaplacian");
-    acc::MatFreeLaplacian<T> op(3, cells_local, constants_d_span, dofmap_d_span, geometry_d_span);
+    acc::MatFreeLaplacian<T> op(3, cells_local, constants_d_span, dofmap_d_span);
 
-    dolfinx::common::Timer tg("Geometry computation");
     op.compute_geometry(
         std::span<const T>(thrust::raw_pointer_cast(xgeom_d.data()), xgeom_d.size()),
         std::span<const std::int32_t>(thrust::raw_pointer_cast(xdofmap_d.data()), xdofmap_d.size()),
         std::span<const T>(thrust::raw_pointer_cast(dphi_d.data()), dphi_d.size()),
         std::span<const T>(thrust::raw_pointer_cast(Gweights_d.data()), Gweights_d.size()));
-    tg.stop();
 
     la::Vector<T> b(map, 1);
     auto barr = b.mutable_array();
@@ -371,6 +363,12 @@ int main(int argc, char* argv[])
     std::span<const int> cells_boundary(thrust::raw_pointer_cast(cell_list_d.data()),
                                         cell_list_d.size());
     op.set_cell_list(cells_boundary);
+    op.compute_geometry(
+        std::span<const T>(thrust::raw_pointer_cast(xgeom_d.data()), xgeom_d.size()),
+        std::span<const std::int32_t>(thrust::raw_pointer_cast(xdofmap_d.data()), xdofmap_d.size()),
+        std::span<const T>(thrust::raw_pointer_cast(dphi_d.data()), dphi_d.size()),
+        std::span<const T>(thrust::raw_pointer_cast(Gweights_d.data()), Gweights_d.size()));
+
     spdlog::debug("Call op on bcells {}", cells_boundary.size());
     op(u, y);
 
