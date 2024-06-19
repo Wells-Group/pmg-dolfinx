@@ -9,9 +9,10 @@
 #pragma once
 
 /// @brief Computes weighted geometry tensor G from the coordinates and quadrature weights
-/// @param xgeom Geometry points
+/// @note Currently hard-wired for a Q3 cell
+/// @param [in] xgeom Geometry points
 /// @param [out] G_entity geometry data
-/// @param geometry_dofmap Location of coordinates for each cell in xgeom
+/// @param [in] geometry_dofmap Location of coordinates for each cell in xgeom
 /// @param [in] _dphi Basis derivative tabulation for cell at quadrature points
 /// @param [in] weights Quadrature weights
 /// @param [in] entities list of cells to compute for
@@ -21,8 +22,8 @@ __global__ void geometry_computation(const T* xgeom, T* G_entity,
                                      const std::int32_t* geometry_dofmap, const T* _dphi,
                                      const T* weights, const int* entities, int n_entities)
 {
-  // One thread per cell
-  int c = threadIdx.x;
+  // One block per cell
+  int c = blockIdx.x;
 
   // Limit to cells in list
   if (c > n_entities)
@@ -38,22 +39,25 @@ __global__ void geometry_computation(const T* xgeom, T* G_entity,
   // Geometric dimension
   constexpr int gdim = 3;
 
-  // coord_dofs has shape [ncdofs, gdim]
-  T _coord_dofs[ncdofs * gdim];
-  auto coord_dofs = [&_coord_dofs](int i, int j) -> T& { return _coord_dofs[i * gdim + j]; };
+  extern __shared__ T shared_mem[];
 
-  for (int i = 0; i < ncdofs; ++i)
-  {
-    for (int j = 0; j < 3; ++j)
-      coord_dofs(i, j) = xgeom[3 * geometry_dofmap[cell * ncdofs + i] + j];
-  }
+  // coord_dofs has shape [ncdofs, gdim]
+  T* _coord_dofs = shared_mem;
+
+  int iq = threadIdx.x;
+  int i = iq / gdim;
+  int j = iq % gdim;
+  if (i < ncdofs)
+    _coord_dofs[iq] = xgeom[3 * geometry_dofmap[cell * ncdofs + i] + j];
+
+  __syncthreads();
 
   // Jacobian
   T _J[3][3];
   auto J = [&_J](int i, int j) -> T& { return _J[i][j]; };
+  auto coord_dofs = [&_coord_dofs](int i, int j) -> T& { return _coord_dofs[i * gdim + j]; };
 
-  // For each quadrature point
-  for (int iq = 0; iq < nq; ++iq)
+  // For each quadrature point / thread
   {
     // dphi has shape [gdim, ncdofs]
     auto dphi
@@ -68,27 +72,27 @@ __global__ void geometry_computation(const T* xgeom, T* G_entity,
       }
 
     // Components of K = J^-1
-    T Ja = J(0, 1) * J(1, 2) - J(0, 2) * J(1, 1);
-    T Jb = J(0, 1) * J(2, 2) - J(0, 2) * J(2, 1);
-    T Jc = J(1, 1) * J(2, 2) - J(1, 2) * J(2, 1);
+    T Ka = J(0, 1) * J(1, 2) - J(0, 2) * J(1, 1);
+    T Kb = J(0, 1) * J(2, 2) - J(0, 2) * J(2, 1);
+    T Kc = J(1, 1) * J(2, 2) - J(1, 2) * J(2, 1);
 
-    T Jd = J(0, 0) * J(1, 2) - J(0, 2) * J(1, 0);
-    T Je = J(0, 0) * J(2, 2) - J(0, 2) * J(2, 0);
-    T Jf = J(1, 0) * J(2, 2) - J(1, 2) * J(2, 0);
+    T Kd = J(0, 0) * J(1, 2) - J(0, 2) * J(1, 0);
+    T Ke = J(0, 0) * J(2, 2) - J(0, 2) * J(2, 0);
+    T Kf = J(1, 0) * J(2, 2) - J(1, 2) * J(2, 0);
 
-    T Jg = J(0, 0) * J(1, 1) - J(0, 1) * J(1, 0);
-    T Jh = J(0, 0) * J(2, 1) - J(0, 1) * J(2, 0);
-    T Ji = J(1, 0) * J(2, 1) - J(1, 1) * J(2, 0);
+    T Kg = J(0, 0) * J(1, 1) - J(0, 1) * J(1, 0);
+    T Kh = J(0, 0) * J(2, 1) - J(0, 1) * J(2, 0);
+    T Ki = J(1, 0) * J(2, 1) - J(1, 1) * J(2, 0);
 
-    T detJ = J(0, 0) * Jc - J(1, 0) * Jf + J(0, 2) * Ji;
+    T detJ = J(0, 0) * Kc - J(1, 0) * Kf + J(0, 2) * Ki;
 
     int offset = (c * nq + iq) * 6;
-    G_entity[offset] = (Ja * Ja + Jb * Jb + Jc * Jc) * weights[iq] / detJ;
-    G_entity[offset + 1] = -(Jd * Ja + Je * Jb + Jf * Jc) * weights[iq] / detJ;
-    G_entity[offset + 2] = (Jg * Ja + Jh * Jb + Ji * Jc) * weights[iq] / detJ;
-    G_entity[offset + 3] = (Jd * Jd + Je * Je + Jf * Jf) * weights[iq] / detJ;
-    G_entity[offset + 4] = -(Jg * Jd + Jh * Je + Ji * Jf) * weights[iq] / detJ;
-    G_entity[offset + 5] = (Jg * Jg + Jh * Jh + Ji * Ji) * weights[iq] / detJ;
+    G_entity[offset] = (Ka * Ka + Kb * Kb + Kc * Kc) * weights[iq] / detJ;
+    G_entity[offset + 1] = -(Kd * Ka + Ke * Kb + Kf * Kc) * weights[iq] / detJ;
+    G_entity[offset + 2] = (Kg * Ka + Kh * Kb + Ki * Kc) * weights[iq] / detJ;
+    G_entity[offset + 3] = (Kd * Kd + Ke * Ke + Kf * Kf) * weights[iq] / detJ;
+    G_entity[offset + 4] = -(Kg * Kd + Kh * Ke + Ki * Kf) * weights[iq] / detJ;
+    G_entity[offset + 5] = (Kg * Kg + Kh * Kh + Ki * Ki) * weights[iq] / detJ;
   }
 }
 
@@ -287,9 +291,10 @@ public:
                         std::span<const T> dphi, std::span<const T> weights)
   {
     G_entity.resize(weights.size() * cell_list.size() * 6);
-    dim3 block_size(cell_list.size());
-    dim3 grid_size(1);
-    hipLaunchKernelGGL(geometry_computation<T>, grid_size, block_size, 0, 0, xgeom.data(),
+    dim3 block_size(weights.size());
+    dim3 grid_size(cell_list.size());
+    std::size_t shm_size = 24 * sizeof(T); // coordinate size (8x3)
+    hipLaunchKernelGGL(geometry_computation<T>, grid_size, block_size, shm_size, 0, xgeom.data(),
                        thrust::raw_pointer_cast(G_entity.data()), geometry_dofmap.data(),
                        dphi.data(), weights.data(), cell_list.data(), cell_list.size());
   }

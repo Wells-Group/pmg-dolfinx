@@ -333,7 +333,6 @@ int main(int argc, char* argv[])
     // Create matrix free operator
     spdlog::debug("Create MatFreLaplacian");
     acc::MatFreeLaplacian<T> op(3, cells_local, constants_d_span, dofmap_d_span);
-
     op.compute_geometry(
         std::span<const T>(thrust::raw_pointer_cast(xgeom_d.data()), xgeom_d.size()),
         std::span<const std::int32_t>(thrust::raw_pointer_cast(xdofmap_d.data()), xdofmap_d.size()),
