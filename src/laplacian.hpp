@@ -8,6 +8,90 @@
 
 #pragma once
 
+/// @brief Computes weighted geometry tensor G from the coordinates and quadrature weights
+/// @param xgeom Geometry points
+/// @param [out] G_entity geometry data
+/// @param geometry_dofmap Location of coordinates for each cell in xgeom
+/// @param [in] _dphi Basis derivative tabulation for cell at quadrature points
+/// @param [in] weights Quadrature weights
+/// @param [in] entities list of cells to compute for
+/// @param [in] n_entities total number of cells to compute for
+template <typename T>
+__global__ void geometry_computation(const T* xgeom, T* G_entity,
+                                     const std::int32_t* geometry_dofmap, const T* _dphi,
+                                     const T* weights, const int* entities, int n_entities)
+{
+  // One thread per cell
+  int c = threadIdx.x;
+
+  // Limit to cells in list
+  if (c > n_entities)
+    return;
+
+  // Cell index
+  int cell = entities[c];
+
+  // Number of quadrature points (must match arrays in weights and dphi)
+  constexpr int nq = 64;
+  // Number of coordinate dofs
+  constexpr int ncdofs = 8;
+  // Geometric dimension
+  constexpr int gdim = 3;
+
+  // coord_dofs has shape [ncdofs, gdim]
+  T _coord_dofs[ncdofs * gdim];
+  auto coord_dofs = [&_coord_dofs](int i, int j) -> T& { return _coord_dofs[i * gdim + j]; };
+
+  for (int i = 0; i < ncdofs; ++i)
+  {
+    for (int j = 0; j < 3; ++j)
+      coord_dofs(i, j) = xgeom[3 * geometry_dofmap[cell * ncdofs + i] + j];
+  }
+
+  // Jacobian
+  T _J[3][3];
+  auto J = [&_J](int i, int j) -> T& { return _J[i][j]; };
+
+  // For each quadrature point
+  for (int iq = 0; iq < nq; ++iq)
+  {
+    // dphi has shape [gdim, ncdofs]
+    auto dphi
+        = [&_dphi, iq](int i, int j) -> const T& { return _dphi[(i * nq + iq) * ncdofs + j]; };
+
+    for (std::size_t i = 0; i < gdim; i++)
+      for (std::size_t j = 0; j < gdim; j++)
+      {
+        J(i, j) = 0.0;
+        for (std::size_t k = 0; k < ncdofs; k++)
+          J(i, j) += coord_dofs(k, i) * dphi(j, k);
+      }
+
+    // Components of K = J^-1
+    T Ja = J(0, 1) * J(1, 2) - J(0, 2) * J(1, 1);
+    T Jb = J(0, 1) * J(2, 2) - J(0, 2) * J(2, 1);
+    T Jc = J(1, 1) * J(2, 2) - J(1, 2) * J(2, 1);
+
+    T Jd = J(0, 0) * J(1, 2) - J(0, 2) * J(1, 0);
+    T Je = J(0, 0) * J(2, 2) - J(0, 2) * J(2, 0);
+    T Jf = J(1, 0) * J(2, 2) - J(1, 2) * J(2, 0);
+
+    T Jg = J(0, 0) * J(1, 1) - J(0, 1) * J(1, 0);
+    T Jh = J(0, 0) * J(2, 1) - J(0, 1) * J(2, 0);
+    T Ji = J(1, 0) * J(2, 1) - J(1, 1) * J(2, 0);
+
+    T detJ = J(0, 0) * Jc - J(1, 0) * Jf + J(0, 2) * Ji;
+
+    int offset = (cell * nq + iq) * 6;
+    G_entity[offset] = (Ja * Ja + Jb * Jb + Jc * Jc) * weights[iq] / detJ;
+    G_entity[offset + 1] = -(Jd * Ja + Je * Jb + Jf * Jc) * weights[iq] / detJ;
+    G_entity[offset + 2] = (Jg * Ja + Jh * Jb + Ji * Jc) * weights[iq] / detJ;
+    G_entity[offset + 3] = (Jd * Jd + Je * Je + Jf * Jf) * weights[iq] / detJ;
+    G_entity[offset + 4] = -(Jg * Jd + Jh * Je + Ji * Jf) * weights[iq] / detJ;
+    G_entity[offset + 5] = (Jg * Jg + Jh * Jh + Ji * Ji) * weights[iq] / detJ;
+  }
+}
+
 /// Compute y = A * x where A is the stiffness operator
 /// for a set of entities (cells or facets) in a mesh.
 ///
@@ -173,7 +257,7 @@ class MatFreeLaplacian
 {
 public:
   MatFreeLaplacian(int degree, std::span<const int> cell_list, std::span<const T> coefficients,
-                   std::span<const std::int32_t> dofmap, std::span<const T> G)
+                   std::span<const std::int32_t> dofmap, std::span<T> G)
       : degree(degree), cell_list(cell_list), cell_constants(coefficients), cell_dofmap(dofmap),
         G_entity(G)
   {
@@ -195,19 +279,29 @@ public:
 
     spdlog::debug("1D table = {}, G = {}", weights.size(), G.size());
 
-    int nq = weights.size();
-    // 6 geometry values per quadrature point on each cell
-    assert(nq * nq * nq * cell_list.size() * 6 == G.size());
-
     spdlog::debug("Create device vector for phi");
     // Basis value gradient evualation table
     dphi_d.resize(table.size() / 2);
     thrust::copy(std::next(table.begin(), table.size() / 2), table.end(), dphi_d.begin());
   }
 
+  // Compute weighted geometry data on GPU
+  void compute_geometry(std::span<const T> xgeom, std::span<const std::int32_t> geometry_dofmap,
+                        std::span<const T> dphi, std::span<const T> weights)
+  {
+    dim3 block_size(cell_list.size());
+    dim3 grid_size(1);
+    hipLaunchKernelGGL(geometry_computation<T>, grid_size, block_size, 0, 0, xgeom.data(),
+                       G_entity.data(), geometry_dofmap.data(), dphi.data(), weights.data(),
+                       cell_list.data(), cell_list.size());
+  }
+
   template <int P, typename Vector>
   void impl_operator(Vector& in, Vector& out)
   {
+    if (cell_list.size() == 0)
+      return;
+
     dim3 block_size(P + 1, P + 1, P + 1);
     int p1cubed = (P + 1) * (P + 1) * (P + 1);
     dim3 grid_size(cell_list.size());
@@ -234,6 +328,9 @@ public:
       impl_operator<3>(in, out);
   }
 
+  /// Update list of cells to use
+  void set_cell_list(std::span<const int> new_cell_list) { cell_list = new_cell_list; }
+
   template <typename Vector>
   void get_diag_inverse(Vector& diag_inv)
   {
@@ -253,7 +350,7 @@ private:
   std::span<const int> cell_list;
   std::span<const T> cell_constants;
   std::span<const std::int32_t> cell_dofmap;
-  std::span<const T> G_entity;
+  std::span<T> G_entity;
 
   // On device storage for dphi
   thrust::device_vector<T> dphi_d;

@@ -220,25 +220,13 @@ int main(int argc, char* argv[])
 
     auto [lcells, bcells] = compute_boundary_cells(mesh);
 
+    spdlog::info("lcells = {}, bcells = {}", lcells.size(), bcells.size());
+
     auto [Gpoints, Gweights] = basix::quadrature::make_quadrature<T>(
         basix::quadrature::type::gll, basix::cell::type::hexahedron, basix::polyset::type::standard,
         4);
 
-    // Compute the geometrical factor and copy to device
-    auto G_ = compute_scaled_geometrical_factor<T>(mesh, Gpoints, Gweights);
-
-    std::stringstream ssG;
-    for (auto q : G_)
-      ssG << q << " ";
-    spdlog::debug("G = [{}]", ssG.str());
-
-    thrust::device_vector<T> G_d(G_.begin(), G_.end());
-    std::span<const T> geometry_d_span(thrust::raw_pointer_cast(G_d.data()), G_d.size());
-
-    spdlog::info("Send G to GPU (size = {})", G_d.size());
-
     auto V = std::make_shared<fem::FunctionSpace<T>>(fem::create_functionspace(mesh, *element));
-
     auto topology = V->mesh()->topology_mutable();
     int tdim = topology->dim();
     std::size_t ncells = mesh->topology()->index_map(tdim)->size_global();
@@ -290,9 +278,9 @@ int main(int argc, char* argv[])
     // Copy data to GPU
     // Constants
     // TODO Pack these properly
-    const int num_cells_local = mesh->topology()->index_map(tdim)->size_local()
-                                + mesh->topology()->index_map(tdim)->num_ghosts();
-    thrust::device_vector<T> constants_d(num_cells_local, kappa->value[0]);
+    const int num_cells_all = mesh->topology()->index_map(tdim)->size_local()
+                              + mesh->topology()->index_map(tdim)->num_ghosts();
+    thrust::device_vector<T> constants_d(num_cells_all, kappa->value[0]);
     std::span<const T> constants_d_span(thrust::raw_pointer_cast(constants_d.data()),
                                         constants_d.size());
 
@@ -322,16 +310,43 @@ int main(int argc, char* argv[])
     DeviceVector y(map, 1);
     y.set(T{0.0});
 
-    thrust::device_vector<int> cell_list_d(num_cells_local);
-    thrust::sequence(cell_list_d.begin(), cell_list_d.end());
+    thrust::device_vector<int> cell_list_d(lcells.begin(), lcells.end());
     std::span<const int> cells_local(thrust::raw_pointer_cast(cell_list_d.data()),
                                      cell_list_d.size());
 
     spdlog::info("Send cell list to GPU (size = {})", cell_list_d.size());
 
+    // Compute the geometrical factor and copy to device
+    //    auto G_ = compute_scaled_geometrical_factor<T>(mesh, Gpoints, Gweights);
+    //    thrust::device_vector<T> G_d(G_.begin(), G_.end());
+    thrust::device_vector<T> G_d(cells_local.size() * Gweights.size() * 6);
+    std::span<T> geometry_d_span(thrust::raw_pointer_cast(G_d.data()), G_d.size());
+    spdlog::info("Send G to GPU (size = {})", G_d.size());
+
+    // Get geometry information onto device
+    const fem::CoordinateElement<T>& cmap = mesh->geometry().cmap();
+    auto xdofmap = mesh->geometry().dofmap();
+    thrust::device_vector<std::int32_t> xdofmap_d(xdofmap.data_handle(),
+                                                  xdofmap.data_handle() + xdofmap.size());
+    thrust::device_vector<T> xgeom_d(mesh->geometry().x().begin(), mesh->geometry().x().end());
+    std::array<std::size_t, 4> phi_shape = cmap.tabulate_shape(1, Gweights.size());
+    std::vector<T> phi_b(std::reduce(phi_shape.begin(), phi_shape.end(), 1, std::multiplies{}));
+    cmap.tabulate(1, Gpoints, {Gweights.size(), 3}, phi_b);
+    // Copy dphi to device (skipping phi in table)
+    thrust::device_vector<T> dphi_d(phi_b.begin() + phi_b.size() / 4, phi_b.end());
+    thrust::device_vector<T> Gweights_d(Gweights.begin(), Gweights.end());
+
     // Create matrix free operator
     spdlog::debug("Create MatFreLaplacian");
     acc::MatFreeLaplacian<T> op(3, cells_local, constants_d_span, dofmap_d_span, geometry_d_span);
+
+    dolfinx::common::Timer tg("Geometry computation");
+    op.compute_geometry(
+        std::span<const T>(thrust::raw_pointer_cast(xgeom_d.data()), xgeom_d.size()),
+        std::span<const std::int32_t>(thrust::raw_pointer_cast(xdofmap_d.data()), xdofmap_d.size()),
+        std::span<const T>(thrust::raw_pointer_cast(dphi_d.data()), dphi_d.size()),
+        std::span<const T>(thrust::raw_pointer_cast(Gweights_d.data()), Gweights_d.size()));
+    tg.stop();
 
     la::Vector<T> b(map, 1);
     auto barr = b.mutable_array();
@@ -347,8 +362,17 @@ int main(int argc, char* argv[])
     u.scatter_fwd();
 
     // Matrix free
+    spdlog::debug("Call op on lcells {}", cells_local.size());
     op(u, y);
-    //    y.scatter_rev();
+
+    // Now change the cells to be the 'boundary cells'
+    cell_list_d.resize(bcells.size());
+    thrust::copy(bcells.begin(), bcells.end(), cell_list_d.begin());
+    std::span<const int> cells_boundary(thrust::raw_pointer_cast(cell_list_d.data()),
+                                        cell_list_d.size());
+    op.set_cell_list(cells_boundary);
+    spdlog::debug("Call op on bcells {}", cells_boundary.size());
+    op(u, y);
 
     std::cout << "Norm of u = " << acc::norm(u) << "\n";
     std::cout << "Norm of y = " << acc::norm(y) << "\n";

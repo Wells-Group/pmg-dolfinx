@@ -161,9 +161,9 @@ std::vector<T> compute_scaled_geometrical_factor(std::shared_ptr<const mesh::Mes
   std::mdspan<T, std::dextents<std::size_t, 3>> Gs(Gs_b.data(), nc, nq, dim);
 
   // Jacobian determinants
-  std::vector<T> detJ_b(nc * nq);
-  std::mdspan<T, std::dextents<std::size_t, 2>> detJ(detJ_b.data(), nc, nq);
-  std::vector<T> det_scratch(2 * gdim * tdim);
+  //  std::vector<T> detJ_b(nc * nq);
+  //  std::mdspan<T, std::dextents<std::size_t, 2>> detJ(detJ_b.data(), nc, nq);
+  //  std::vector<T> det_scratch(2 * gdim * tdim);
 
   for (std::size_t c = 0; c < nc; ++c)
   {
@@ -186,40 +186,64 @@ std::vector<T> compute_scaled_geometrical_factor(std::shared_ptr<const mesh::Mes
       auto dphi = std::submdspan(phi, std::pair(1, tdim + 1), q, std::full_extent, 0);
 
       // Compute Jacobian matrix
-      auto _J = std::submdspan(J, std::full_extent, std::full_extent);
-      cmap.compute_jacobian(dphi, coord_dofs, _J);
+      //      auto _J = std::submdspan(J, std::full_extent, std::full_extent);
+      //      cmap.compute_jacobian(dphi, coord_dofs, _J);
 
-      // Compute the inverse Jacobian matrix
-      auto _K = std::submdspan(K, std::full_extent, std::full_extent);
-      cmap.compute_jacobian_inverse(_J, _K);
+      for (std::size_t i = 0; i < coord_dofs.extent(1); i++)
+        for (std::size_t j = 0; j < dphi.extent(0); j++)
+          for (std::size_t k = 0; k < coord_dofs.extent(0); k++)
+            J(i, j) += coord_dofs(k, i) * dphi(j, k);
 
-      // Transpose K -> K^{T}
-      auto _KT = std::submdspan(KT, std::full_extent, std::full_extent);
-      transpose(_K, _KT);
+      T Ja = J(0, 1) * J(1, 2) - J(0, 2) * J(1, 1);
+      T Jb = J(0, 1) * J(2, 2) - J(0, 2) * J(2, 1);
+      T Jc = J(1, 1) * J(2, 2) - J(1, 2) * J(2, 1);
+      T Jd = J(0, 0) * J(1, 2) - J(0, 2) * J(1, 0);
+      T Je = J(0, 0) * J(2, 2) - J(0, 2) * J(2, 0);
+      T Jf = J(1, 0) * J(2, 2) - J(1, 2) * J(2, 0);
+      T Jg = J(0, 0) * J(1, 1) - J(0, 1) * J(1, 0);
+      T Jh = J(0, 0) * J(2, 1) - J(0, 1) * J(2, 0);
+      T Ji = J(1, 0) * J(2, 1) - J(1, 1) * J(2, 0);
 
-      // Compute the scaled geometrical factor (K * K^{T})
-      auto _G = std::submdspan(G, std::full_extent, std::full_extent);
-      math::dot(_K, _KT, _G);
+      T detJ = J(0, 0) * Jc - J(1, 0) * Jf + J(0, 2) * Ji;
+
+      // // Compute the inverse Jacobian matrix
+      // auto _K = std::submdspan(K, std::full_extent, std::full_extent);
+      // cmap.compute_jacobian_inverse(_J, _K);
+
+      // // Transpose K -> K^{T}
+      // auto _KT = std::submdspan(KT, std::full_extent, std::full_extent);
+      // transpose(_K, _KT);
+
+      // // Compute the scaled geometrical factor (K * K^{T})
+      // auto _G = std::submdspan(G, std::full_extent, std::full_extent);
+      // math::dot(_K, _KT, _G);
+
+      G(0, 0) = (Ja * Ja + Jb * Jb + Jc * Jc);
+      G(0, 1) = -(Jd * Ja + Je * Jb + Jf * Jc);
+      G(0, 2) = (Jg * Ja + Jh * Jb + Ji * Jc);
+      G(1, 1) = (Jd * Jd + Je * Je + Jf * Jf);
+      G(1, 2) = -(Jg * Jd + Jh * Je + Ji * Jf);
+      G(2, 2) = (Jg * Jg + Jh * Jh + Ji * Ji);
 
       // Compute the scaled Jacobian determinant
-      detJ(c, q) = cmap.compute_jacobian_determinant(_J, det_scratch);
-      detJ(c, q) = std::fabs(detJ(c, q)) * weights[q];
+      //      detJ(c, q) = cmap.compute_jacobian_determinant(_J, det_scratch);
+      detJ = std::fabs(detJ);
 
       // Only store the upper triangular values since G is symmetric
       if (gdim == 2)
       {
-        Gs(c, q, 0) = detJ(c, q) * G(0, 0);
-        Gs(c, q, 1) = detJ(c, q) * G(0, 1);
-        Gs(c, q, 2) = detJ(c, q) * G(1, 1);
+        Gs(c, q, 0) = detJ * G(0, 0);
+        Gs(c, q, 1) = detJ * G(0, 1);
+        Gs(c, q, 2) = detJ * G(1, 1);
       }
       else if (gdim == 3)
       {
-        Gs(c, q, 0) = detJ(c, q) * G(0, 0);
-        Gs(c, q, 1) = detJ(c, q) * G(0, 1);
-        Gs(c, q, 2) = detJ(c, q) * G(0, 2);
-        Gs(c, q, 3) = detJ(c, q) * G(1, 1);
-        Gs(c, q, 4) = detJ(c, q) * G(1, 2);
-        Gs(c, q, 5) = detJ(c, q) * G(2, 2);
+        Gs(c, q, 0) = weights[q] / detJ * G(0, 0);
+        Gs(c, q, 1) = weights[q] / detJ * G(0, 1);
+        Gs(c, q, 2) = weights[q] / detJ * G(0, 2);
+        Gs(c, q, 3) = weights[q] / detJ * G(1, 1);
+        Gs(c, q, 4) = weights[q] / detJ * G(1, 2);
+        Gs(c, q, 5) = weights[q] / detJ * G(2, 2);
       }
     }
   }
