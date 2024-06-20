@@ -279,9 +279,9 @@ public:
                    std::span<const T> G_weights, const std::vector<int>& lcells,
                    const std::vector<int>& bcells, std::span<const std::int8_t> bc_marker,
                    std::span<const T> bc_vec)
-      : degree(degree), cell_constants(coefficients), cell_dofmap(dofmap), xgeom(xgeom), ,
-        bc_marker(bc_marker), bc_vec(bc_vec), geometry_dofmap(geometry_dofmap),
-        dphi_geometry(dphi_geometry), G_weights(G_weights), lcells(lcells), bcells(bcells)
+      : degree(degree), cell_constants(coefficients), cell_dofmap(dofmap), xgeom(xgeom),
+        geometry_dofmap(geometry_dofmap),
+        dphi_geometry(dphi_geometry), G_weights(G_weights), bc_marker(bc_marker), bc_vec(bc_vec), lcells(lcells), bcells(bcells)
   {
     std::map<int, int> Qdegree = {{2, 3}, {3, 4}, {4, 6}, {5, 8}};
 
