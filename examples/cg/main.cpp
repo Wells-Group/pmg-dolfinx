@@ -94,8 +94,8 @@ int main(int argc, char* argv[])
     {
       const int order = 3;
       double nx_approx = (std::pow(ndofs * size, 1.0 / 3.0) - 1) / order;
-      std::size_t n0 = static_cast<int>(nx_approx);
-      std::array<std::size_t, 3> nx = {n0, n0, n0};
+      std::int64_t n0 = static_cast<std::int64_t>(nx_approx);
+      std::array<std::int64_t, 3> nx = {n0, n0, n0};
 
       // Try to improve fit to ndofs +/- 5 in each direction
       if (n0 > 5)
@@ -103,9 +103,9 @@ int main(int argc, char* argv[])
         std::int64_t best_misfit
             = (n0 * order + 1) * (n0 * order + 1) * (n0 * order + 1) - ndofs * size;
         best_misfit = std::abs(best_misfit);
-        for (std::size_t nx0 = n0 - 5; nx0 < n0 + 6; ++nx0)
-          for (std::size_t ny0 = n0 - 5; ny0 < n0 + 6; ++ny0)
-            for (std::size_t nz0 = n0 - 5; nz0 < n0 + 6; ++nz0)
+        for (std::int64_t nx0 = n0 - 5; nx0 < n0 + 6; ++nx0)
+          for (std::int64_t ny0 = n0 - 5; ny0 < n0 + 6; ++ny0)
+            for (std::int64_t nz0 = n0 - 5; nz0 < n0 + 6; ++nz0)
             {
               std::int64_t misfit
                   = (nx0 * order + 1) * (ny0 * order + 1) * (nz0 * order + 1) - ndofs * size;
@@ -243,9 +243,12 @@ int main(int argc, char* argv[])
 #endif
     b.set(T(0.0));
     fem::assemble_vector(b.mutable_array(), *L);
-    fem::apply_lifting<T, T>(b.mutable_array(), {a}, {{bc}}, {}, T(1));
-    b.scatter_rev(std::plus<T>());
-    fem::set_bc<T, T>(b.mutable_array(), {bc});
+    //    fem::apply_lifting<T, T>(b.mutable_array(), {a}, {{bc}}, {}, T(1));
+    //    b.scatter_rev(std::plus<T>());
+    //    fem::set_bc<T, T>(b.mutable_array(), {bc});
+
+    spdlog::info("b.norm = {}", dolfinx::la::norm(b));
+
 #ifdef ROCM_TRACING
     remove_profiling_annotation("assembling and scattering");
 #endif
@@ -287,7 +290,7 @@ int main(int argc, char* argv[])
       peak_mem = mem;
 #endif
     // Create operator
-    op(y, x);
+    //    op(y, x);
 
     T norm = acc::norm(x);
     if (rank == 0)
@@ -387,7 +390,7 @@ int main(int argc, char* argv[])
 #endif
 
     // Reset x to zero
-    x.set(1.0);
+    x.set(0.0);
     err_check(hipDeviceSynchronize());
     T xnorm = acc::norm(x);
     spdlog::info("Before set bc, x norm = {}", xnorm);
