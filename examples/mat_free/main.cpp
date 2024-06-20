@@ -5,7 +5,6 @@
 #include "src/laplacian.hpp"
 #include "src/mesh.hpp"
 #include "src/operators.hpp"
-#include "src/precompute.hpp"
 #include "src/vector.hpp"
 
 #include <array>
@@ -28,113 +27,6 @@
 using namespace dolfinx;
 using T = double;
 namespace po = boost::program_options;
-
-template <std::floating_point T>
-std::vector<T> create_geom(MPI_Comm comm, std::array<std::array<double, 3>, 2> p,
-                           std::array<std::int64_t, 3> n)
-{
-  // Extract data
-  const std::array<double, 3> p0 = p[0];
-  const std::array<double, 3> p1 = p[1];
-  std::int64_t nx = n[0];
-  std::int64_t ny = n[1];
-  std::int64_t nz = n[2];
-
-  const std::int64_t n_points = (nx + 1) * (ny + 1) * (nz + 1);
-  std::array range_p
-      = dolfinx::MPI::local_range(dolfinx::MPI::rank(comm), n_points, dolfinx::MPI::size(comm));
-
-  // Extract minimum and maximum coordinates
-  const double x0 = std::min(p0[0], p1[0]);
-  const double x1 = std::max(p0[0], p1[0]);
-  const double y0 = std::min(p0[1], p1[1]);
-  const double y1 = std::max(p0[1], p1[1]);
-  const double z0 = std::min(p0[2], p1[2]);
-  const double z1 = std::max(p0[2], p1[2]);
-
-  const T a = x0;
-  const T b = x1;
-  const T ab = (b - a) / static_cast<T>(nx);
-  const T c = y0;
-  const T d = y1;
-  const T cd = (d - c) / static_cast<T>(ny);
-  const T e = z0;
-  const T f = z1;
-  const T ef = (f - e) / static_cast<T>(nz);
-
-  if (std::abs(x0 - x1) < 2.0 * std::numeric_limits<double>::epsilon()
-      or std::abs(y0 - y1) < 2.0 * std::numeric_limits<double>::epsilon()
-      or std::abs(z0 - z1) < 2.0 * std::numeric_limits<double>::epsilon())
-  {
-    throw std::runtime_error("Box seems to have zero width, height or depth. Check dimensions");
-  }
-
-  if (nx < 1 or ny < 1 or nz < 1)
-  {
-    throw std::runtime_error("BoxMesh has non-positive number of vertices in some dimension");
-  }
-
-  std::vector<T> geom;
-  geom.reserve((range_p[1] - range_p[0]) * 3);
-  const std::int64_t sqxy = (nx + 1) * (ny + 1);
-  for (std::int64_t v = range_p[0]; v < range_p[1]; ++v)
-  {
-    const std::int64_t iz = v / sqxy;
-    const std::int64_t p = v % sqxy;
-    const std::int64_t iy = p / (nx + 1);
-    const std::int64_t ix = p % (nx + 1);
-    const T z = e + ef * static_cast<T>(iz);
-    const T y = c + cd * static_cast<T>(iy);
-    const T x = a + ab * static_cast<T>(ix);
-    geom.insert(geom.end(), {x, y, z});
-  }
-
-  return geom;
-}
-
-template <std::floating_point T>
-dolfinx::mesh::Mesh<T>
-build_hex(MPI_Comm comm, MPI_Comm subcomm, std::array<std::array<double, 3>, 2> p,
-          std::array<std::int64_t, 3> n, const dolfinx::fem::CoordinateElement<T>& element)
-{
-  common::Timer timer("Build BoxMesh (hexahedra)");
-  std::vector<T> x;
-  std::vector<std::int64_t> cells;
-  if (subcomm != MPI_COMM_NULL)
-  {
-    x = create_geom<T>(subcomm, p, n);
-
-    // Create cuboids
-    const std::int64_t nx = n[0];
-    const std::int64_t ny = n[1];
-    const std::int64_t nz = n[2];
-    const std::int64_t n_cells = nx * ny * nz;
-    std::array range_c = dolfinx::MPI::local_range(dolfinx::MPI::rank(subcomm), n_cells,
-                                                   dolfinx::MPI::size(subcomm));
-    cells.reserve((range_c[1] - range_c[0]) * 8);
-    for (std::int64_t i = range_c[0]; i < range_c[1]; ++i)
-    {
-      const std::int64_t iz = i / (nx * ny);
-      const std::int64_t j = i % (nx * ny);
-      const std::int64_t iy = j / nx;
-      const std::int64_t ix = j % nx;
-
-      const std::int64_t v0 = (iz * (ny + 1) + iy) * (nx + 1) + ix;
-      const std::int64_t v1 = v0 + 1;
-      const std::int64_t v2 = v0 + (nx + 1);
-      const std::int64_t v3 = v1 + (nx + 1);
-      const std::int64_t v4 = v0 + (nx + 1) * (ny + 1);
-      const std::int64_t v5 = v1 + (nx + 1) * (ny + 1);
-      const std::int64_t v6 = v2 + (nx + 1) * (ny + 1);
-      const std::int64_t v7 = v3 + (nx + 1) * (ny + 1);
-      cells.insert(cells.end(), {v0, v1, v2, v3, v4, v5, v6, v7});
-    }
-  }
-
-  auto partitioner = dolfinx::mesh::create_cell_partitioner();
-
-  return create_mesh(comm, subcomm, cells, element, subcomm, x, {x.size() / 3, 3}, partitioner);
-}
 
 int main(int argc, char* argv[])
 {
@@ -192,51 +84,29 @@ int main(int argc, char* argv[])
         basix::element::family::P, basix::cell::type::hexahedron, order,
         basix::element::lagrange_variant::gll_warped, basix::element::dpc_variant::unset, false));
 
+    // First order coordinate element
     auto element_1 = std::make_shared<basix::FiniteElement<T>>(basix::create_tp_element<T>(
         basix::element::family::P, basix::cell::type::hexahedron, 1,
         basix::element::lagrange_variant::gll_warped, basix::element::dpc_variant::unset, false));
-
     dolfinx::fem::CoordinateElement<T> coord_element(element_1);
 
-    // Create mesh
+    // Create mesh with overlap region
     std::shared_ptr<mesh::Mesh<T>> mesh;
     {
       mesh::Mesh<T> base_mesh = mesh::create_box<T>(
           comm, {{{0, 0, 0}, {1, 1, 1}}}, {nx[0], nx[1], nx[2]}, mesh::CellType::hexahedron);
 
-      //      mesh::Mesh<T> base_mesh = build_hex<T>(comm, comm, {{{0, 0, 0}, {1, 1, 1}}},
-      //                                             {nx[0], nx[1], nx[2]}, coord_element);
-
-      //      mesh = std::make_shared<mesh::Mesh<T>>(base_mesh);
       mesh = std::make_shared<mesh::Mesh<T>>(ghost_layer_mesh(base_mesh, coord_element));
     }
 
-    std::stringstream sg;
-
-    for (auto q : mesh->geometry().x())
-      sg << q << " ";
-    spdlog::debug("x = {}", sg.str());
-
-    auto [lcells, bcells] = compute_boundary_cells(mesh);
-
+    // Quadrature points and weights on hex (3D)
     auto [Gpoints, Gweights] = basix::quadrature::make_quadrature<T>(
         basix::quadrature::type::gll, basix::cell::type::hexahedron, basix::polyset::type::standard,
-        4);
-
-    // Compute the geometrical factor and copy to device
-    auto G_ = compute_scaled_geometrical_factor<T>(mesh, Gpoints, Gweights);
-
-    std::stringstream ssG;
-    for (auto q : G_)
-      ssG << q << " ";
-    spdlog::debug("G = [{}]", ssG.str());
-
-    thrust::device_vector<T> G_d(G_.begin(), G_.end());
-    std::span<const T> geometry_d_span(thrust::raw_pointer_cast(G_d.data()), G_d.size());
-
-    spdlog::info("Send G to GPU (size = {})", G_d.size());
+        order + 1);
 
     auto V = std::make_shared<fem::FunctionSpace<T>>(fem::create_functionspace(mesh, *element));
+    auto [lcells, bcells] = compute_boundary_cells(V);
+    spdlog::debug("lcells = {}, bcells = {}", lcells.size(), bcells.size());
 
     auto topology = V->mesh()->topology_mutable();
     int tdim = topology->dim();
@@ -289,12 +159,11 @@ int main(int argc, char* argv[])
     // Copy data to GPU
     // Constants
     // TODO Pack these properly
-    const int num_cells_local = mesh->topology()->index_map(tdim)->size_local()
-                                + mesh->topology()->index_map(tdim)->num_ghosts();
-    thrust::device_vector<T> constants_d(num_cells_local, kappa->value[0]);
+    const int num_cells_all = mesh->topology()->index_map(tdim)->size_local()
+                              + mesh->topology()->index_map(tdim)->num_ghosts();
+    thrust::device_vector<T> constants_d(num_cells_all, kappa->value[0]);
     std::span<const T> constants_d_span(thrust::raw_pointer_cast(constants_d.data()),
                                         constants_d.size());
-
     spdlog::info("Send constants to GPU (size = {})", constants_d.size());
 
     // V dofmap
@@ -302,12 +171,7 @@ int main(int argc, char* argv[])
         dofmap->map().data_handle(), dofmap->map().data_handle() + dofmap->map().size());
     std::span<const std::int32_t> dofmap_d_span(thrust::raw_pointer_cast(dofmap_d.data()),
                                                 dofmap_d.size());
-
     spdlog::info("Send dofmap to GPU (size = {})", dofmap_d.size());
-    std::stringstream sd;
-    for (int i = 0; i < dofmap->map().size(); ++i)
-      sd << dofmap->map().data_handle()[i] << " ";
-    spdlog::debug("domfpa = {}", sd.str());
 
     // Define vectors
     using DeviceVector = dolfinx::acc::Vector<T, acc::Device::HIP>;
@@ -321,15 +185,29 @@ int main(int argc, char* argv[])
     DeviceVector y(map, 1);
     y.set(T{0.0});
 
-    thrust::device_vector<int> cell_list_d(num_cells_local);
-    thrust::sequence(cell_list_d.begin(), cell_list_d.end());
+    // List of local cells (no dofs shared with other processes)
+    thrust::device_vector<int> cell_list_d(lcells.begin(), lcells.end());
     std::span<const int> cells_local(thrust::raw_pointer_cast(cell_list_d.data()),
                                      cell_list_d.size());
-
     spdlog::info("Send cell list to GPU (size = {})", cell_list_d.size());
 
+    // Put geometry information onto device
+    // FIXME: move some/all of this to MatFreeLaplacian
+    const fem::CoordinateElement<T>& cmap = mesh->geometry().cmap();
+    auto xdofmap = mesh->geometry().dofmap();
+    thrust::device_vector<std::int32_t> xdofmap_d(xdofmap.data_handle(),
+                                                  xdofmap.data_handle() + xdofmap.size());
+    thrust::device_vector<T> xgeom_d(mesh->geometry().x().begin(), mesh->geometry().x().end());
+    std::array<std::size_t, 4> phi_shape = cmap.tabulate_shape(1, Gweights.size());
+    std::vector<T> phi_b(std::reduce(phi_shape.begin(), phi_shape.end(), 1, std::multiplies{}));
+    cmap.tabulate(1, Gpoints, {Gweights.size(), 3}, phi_b);
+    // Copy dphi to device (skipping phi in table)
+    thrust::device_vector<T> dphi_d(phi_b.begin() + phi_b.size() / 4, phi_b.end());
+    // Copy quadrature weights to device
+    thrust::device_vector<T> Gweights_d(Gweights.begin(), Gweights.end());
+
     // Create matrix free operator
-    spdlog::debug("Create MatFreLaplacian");
+    spdlog::debug("Create MatFreeLaplacian");
 
     // TODO Ghosts
     const int num_dofs = map->size_local() + map->num_ghosts();
@@ -343,8 +221,14 @@ int main(int argc, char* argv[])
     fem::set_bc<T, T>(bc_vec.mutable_array(), {bc});
     thrust::device_vector<T> bc_vec_d(bc_vec.array().begin(), bc_vec.array().end());
     std::span<const T> bc_vec_d_span(thrust::raw_pointer_cast(bc_vec_d.data()), bc_vec_d.size());
-    acc::MatFreeLaplacian<T> op(3, cells_local, constants_d_span, dofmap_d_span, geometry_d_span,
-                                bc_marker_d_span, bc_vec_d_span);
+
+    acc::MatFreeLaplacian<T> op(3, cells_local, constants_d_span, dofmap_d_span, bc_marker_d_span,
+                                bc_vec_d_span);
+    op.compute_geometry(
+        std::span<const T>(thrust::raw_pointer_cast(xgeom_d.data()), xgeom_d.size()),
+        std::span<const std::int32_t>(thrust::raw_pointer_cast(xdofmap_d.data()), xdofmap_d.size()),
+        std::span<const T>(thrust::raw_pointer_cast(dphi_d.data()), dphi_d.size()),
+        std::span<const T>(thrust::raw_pointer_cast(Gweights_d.data()), Gweights_d.size()));
 
     la::Vector<T> b(map, 1);
     auto barr = b.mutable_array();
@@ -357,16 +241,31 @@ int main(int argc, char* argv[])
     // b.scatter_rev(std::plus<T>());
     fem::set_bc<T, T>(b.mutable_array(), {bc});
     u.copy_from_host(b); // Copy data from host vector to device vector
-    u.scatter_fwd();
+    u.scatter_fwd_begin();
 
     // Matrix free
+    spdlog::debug("Call op on lcells {}", cells_local.size());
     op(u, y);
-    //    y.scatter_rev();
+
+    // Now change the cells to be the 'boundary cells'
+    cell_list_d.resize(bcells.size());
+    thrust::copy(bcells.begin(), bcells.end(), cell_list_d.begin());
+    std::span<const int> cells_boundary(thrust::raw_pointer_cast(cell_list_d.data()),
+                                        cell_list_d.size());
+    op.set_cell_list(cells_boundary);
+    // Compute geometry for bcells
+    op.compute_geometry(
+        std::span<const T>(thrust::raw_pointer_cast(xgeom_d.data()), xgeom_d.size()),
+        std::span<const std::int32_t>(thrust::raw_pointer_cast(xdofmap_d.data()), xdofmap_d.size()),
+        std::span<const T>(thrust::raw_pointer_cast(dphi_d.data()), dphi_d.size()),
+        std::span<const T>(thrust::raw_pointer_cast(Gweights_d.data()), Gweights_d.size()));
+
+    spdlog::debug("Call op on bcells {}", cells_boundary.size());
+    u.scatter_fwd_end();
+    op(u, y);
 
     std::cout << "Norm of u = " << acc::norm(u) << "\n";
     std::cout << "Norm of y = " << acc::norm(y) << "\n";
-
-    std::vector<T> yhost = y.data_copy();
 
     // Compare to assembling on CPU and copying matrix to GPU
     DeviceVector z(map, 1);
@@ -376,14 +275,6 @@ int main(int argc, char* argv[])
     mat_op(u, z);
     std::cout << "Norm of u = " << acc::norm(u) << "\n";
     std::cout << "Norm of z = " << acc::norm(z) << "\n";
-
-    std::vector<T> zhost = z.data_copy();
-
-    // for (std::size_t i = 0; i < zhost.size(); ++i)
-    // {
-    //   if (std::abs(zhost[i] - yhost[i]) > 1e-8)
-    //     std::cout << i << ": " << zhost[i] << ", " << yhost[i] << "\n";
-    // }
 
     // Display timings
     dolfinx::list_timings(MPI_COMM_WORLD, {dolfinx::TimingType::wall});

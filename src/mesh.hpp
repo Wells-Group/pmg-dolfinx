@@ -1,9 +1,118 @@
 
 #include <dolfinx/fem/CoordinateElement.h>
+#include <dolfinx/fem/FunctionSpace.h>
 #include <dolfinx/mesh/Mesh.h>
 #include <dolfinx/mesh/utils.h>
 #include <map>
 #include <span>
+
+template <std::floating_point T>
+std::vector<T> create_geom(MPI_Comm comm, std::array<std::array<double, 3>, 2> p,
+                           std::array<std::int64_t, 3> n)
+{
+  // Extract data
+  const std::array<double, 3> p0 = p[0];
+  const std::array<double, 3> p1 = p[1];
+  std::int64_t nx = n[0];
+  std::int64_t ny = n[1];
+  std::int64_t nz = n[2];
+
+  const std::int64_t n_points = (nx + 1) * (ny + 1) * (nz + 1);
+  std::array range_p
+      = dolfinx::MPI::local_range(dolfinx::MPI::rank(comm), n_points, dolfinx::MPI::size(comm));
+
+  // Extract minimum and maximum coordinates
+  const double x0 = std::min(p0[0], p1[0]);
+  const double x1 = std::max(p0[0], p1[0]);
+  const double y0 = std::min(p0[1], p1[1]);
+  const double y1 = std::max(p0[1], p1[1]);
+  const double z0 = std::min(p0[2], p1[2]);
+  const double z1 = std::max(p0[2], p1[2]);
+
+  const T a = x0;
+  const T b = x1;
+  const T ab = (b - a) / static_cast<T>(nx);
+  const T c = y0;
+  const T d = y1;
+  const T cd = (d - c) / static_cast<T>(ny);
+  const T e = z0;
+  const T f = z1;
+  const T ef = (f - e) / static_cast<T>(nz);
+
+  if (std::abs(x0 - x1) < 2.0 * std::numeric_limits<double>::epsilon()
+      or std::abs(y0 - y1) < 2.0 * std::numeric_limits<double>::epsilon()
+      or std::abs(z0 - z1) < 2.0 * std::numeric_limits<double>::epsilon())
+  {
+    throw std::runtime_error("Box seems to have zero width, height or depth. Check dimensions");
+  }
+
+  if (nx < 1 or ny < 1 or nz < 1)
+  {
+    throw std::runtime_error("BoxMesh has non-positive number of vertices in some dimension");
+  }
+
+  std::vector<T> geom;
+  geom.reserve((range_p[1] - range_p[0]) * 3);
+  const std::int64_t sqxy = (nx + 1) * (ny + 1);
+  for (std::int64_t v = range_p[0]; v < range_p[1]; ++v)
+  {
+    const std::int64_t iz = v / sqxy;
+    const std::int64_t p = v % sqxy;
+    const std::int64_t iy = p / (nx + 1);
+    const std::int64_t ix = p % (nx + 1);
+    const T z = e + ef * static_cast<T>(iz);
+    const T y = c + cd * static_cast<T>(iy);
+    const T x = a + ab * static_cast<T>(ix);
+    geom.insert(geom.end(), {x, y, z});
+  }
+
+  return geom;
+}
+
+/// Create hex mesh with a coordinate element
+template <std::floating_point T>
+dolfinx::mesh::Mesh<T>
+build_hex(MPI_Comm comm, MPI_Comm subcomm, std::array<std::array<double, 3>, 2> p,
+          std::array<std::int64_t, 3> n, const dolfinx::fem::CoordinateElement<T>& element)
+{
+  common::Timer timer("Build BoxMesh (hexahedra)");
+  std::vector<T> x;
+  std::vector<std::int64_t> cells;
+  if (subcomm != MPI_COMM_NULL)
+  {
+    x = create_geom<T>(subcomm, p, n);
+
+    // Create cuboids
+    const std::int64_t nx = n[0];
+    const std::int64_t ny = n[1];
+    const std::int64_t nz = n[2];
+    const std::int64_t n_cells = nx * ny * nz;
+    std::array range_c = dolfinx::MPI::local_range(dolfinx::MPI::rank(subcomm), n_cells,
+                                                   dolfinx::MPI::size(subcomm));
+    cells.reserve((range_c[1] - range_c[0]) * 8);
+    for (std::int64_t i = range_c[0]; i < range_c[1]; ++i)
+    {
+      const std::int64_t iz = i / (nx * ny);
+      const std::int64_t j = i % (nx * ny);
+      const std::int64_t iy = j / nx;
+      const std::int64_t ix = j % nx;
+
+      const std::int64_t v0 = (iz * (ny + 1) + iy) * (nx + 1) + ix;
+      const std::int64_t v1 = v0 + 1;
+      const std::int64_t v2 = v0 + (nx + 1);
+      const std::int64_t v3 = v1 + (nx + 1);
+      const std::int64_t v4 = v0 + (nx + 1) * (ny + 1);
+      const std::int64_t v5 = v1 + (nx + 1) * (ny + 1);
+      const std::int64_t v6 = v2 + (nx + 1) * (ny + 1);
+      const std::int64_t v7 = v3 + (nx + 1) * (ny + 1);
+      cells.insert(cells.end(), {v0, v1, v2, v3, v4, v5, v6, v7});
+    }
+  }
+
+  auto partitioner = dolfinx::mesh::create_cell_partitioner();
+
+  return create_mesh(comm, subcomm, cells, element, subcomm, x, {x.size() / 3, 3}, partitioner);
+}
 
 /// @brief Create a new mesh with an extra boundary layer, such that all cells on other processes
 /// which share a vertex with this process are ghosted.
@@ -94,41 +203,38 @@ dolfinx::mesh::Mesh<T> ghost_layer_mesh(dolfinx::mesh::Mesh<T>& mesh,
 ///
 template <typename T>
 std::pair<std::vector<std::int32_t>, std::vector<std::int32_t>>
-compute_boundary_cells(std::shared_ptr<dolfinx::mesh::Mesh<T>> mesh)
+compute_boundary_cells(std::shared_ptr<dolfinx::fem::FunctionSpace<T>> V)
 {
+  auto mesh = V->mesh();
   auto topology = mesh->topology_mutable();
   int tdim = topology->dim();
   int fdim = tdim - 1;
   topology->create_connectivity(fdim, tdim);
 
   int ncells_local = topology->index_map(tdim)->size_local();
-  auto f_to_c = topology->connectivity(fdim, tdim);
-  // Create list of cells needed for matrix-free updates
-  std::vector<std::int32_t> boundary_cells;
-  for (std::int32_t f = 0; f < f_to_c->num_nodes(); ++f)
-  {
-    const auto& cells_f = f_to_c->links(f);
-    for (std::int32_t c : cells_f)
-    {
-      // If facet attached to a ghost cell, add all cells to list
-      // FIXME: should this really be via vertex, not facet?
-      if (c >= ncells_local)
-        boundary_cells.insert(boundary_cells.end(), cells_f.begin(), cells_f.end());
-    }
-  }
-  std::sort(boundary_cells.begin(), boundary_cells.end());
-  boundary_cells.erase(std::unique(boundary_cells.begin(), boundary_cells.end()),
-                       boundary_cells.end());
-  spdlog::info("Got {} boundary cells.", boundary_cells.size());
+  int ncells_ghost = topology->index_map(tdim)->num_ghosts();
+  int ndofs_local = V->dofmap()->index_map->size_local();
 
-  // Compute local cells
-  std::vector<std::int32_t> local_cells(topology->index_map(tdim)->size_local()
-                                        + topology->index_map(tdim)->num_ghosts());
-  std::iota(local_cells.begin(), local_cells.end(), 0);
-  for (std::int32_t c : boundary_cells)
-    local_cells[c] = -1;
-  std::erase(local_cells, -1);
-  spdlog::info("Got {} local cells", local_cells.size());
+  std::vector<std::uint8_t> cell_mark(ncells_local + ncells_ghost, 0);
+  for (int i = 0; i < ncells_local; ++i)
+  {
+    auto cell_dofs = V->dofmap()->cell_dofs(i);
+    for (auto dof : cell_dofs)
+      if (dof >= ndofs_local)
+        cell_mark[i] = 1;
+  }
+  for (int i = ncells_local; i < ncells_local + ncells_ghost; ++i)
+    cell_mark[i] = 1;
+
+  std::vector<int> local_cells;
+  std::vector<int> boundary_cells;
+  for (int i = 0; i < cell_mark.size(); ++i)
+  {
+    if (cell_mark[i])
+      boundary_cells.push_back(i);
+    else
+      local_cells.push_back(i);
+  }
 
   return {std::move(local_cells), std::move(boundary_cells)};
 }
