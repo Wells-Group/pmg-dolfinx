@@ -182,9 +182,9 @@ class MatFreeLaplacian
 public:
   MatFreeLaplacian(int degree, std::span<const int> cell_list, std::span<const T> coefficients,
                    std::span<const std::int32_t> dofmap, std::span<const T> G,
-                   std::span<const std::int8_t> bc_marker)
+                   std::span<const std::int8_t> bc_marker, std::span<const T> bc_vec)
       : degree(degree), cell_list(cell_list), cell_constants(coefficients), cell_dofmap(dofmap),
-        G_entity(G), bc_marker(bc_marker)
+        G_entity(G), bc_marker(bc_marker), bc_vec(bc_vec)
   {
 
     std::map<int, int> Qdegree = {{2, 3}, {3, 4}, {4, 6}, {5, 8}};
@@ -230,6 +230,9 @@ public:
                        dphi.data(), cell_list.data(), cell_list.size(), bc_marker.data());
 
     err_check(hipGetLastError());
+
+    thrust::transform(out.array().begin(), out.array().end(), bc_vec.begin(),
+                      out.mutable_array().begin(), thrust::plus<T>());
   }
 
   template <typename Vector>
@@ -264,6 +267,7 @@ private:
   std::span<const std::int32_t> cell_dofmap;
   std::span<const T> G_entity;
   std::span<const std::int8_t> bc_marker;
+  std::span<const T> bc_vec;
 
   // On device storage for dphi
   thrust::device_vector<T> dphi_d;

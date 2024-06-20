@@ -284,7 +284,7 @@ int main(int argc, char* argv[])
     auto dofmap = V->dofmap();
     auto facets = dolfinx::mesh::exterior_facet_indices(*topology);
     auto bdofs = fem::locate_dofs_topological(*topology, *dofmap, fdim, facets);
-    auto bc = std::make_shared<const fem::DirichletBC<T>>(0.0, bdofs, V);
+    auto bc = std::make_shared<const fem::DirichletBC<T>>(1.0, bdofs, V);
 
     // Copy data to GPU
     // Constants
@@ -338,8 +338,13 @@ int main(int argc, char* argv[])
     thrust::device_vector<std::int8_t> bc_marker_d(bc_marker.begin(), bc_marker.end());
     std::span<const std::int8_t> bc_marker_d_span(thrust::raw_pointer_cast(bc_marker_d.data()),
                                                   bc_marker_d.size());
+    la::Vector<T> bc_vec(map, 1);
+    // TODO Parallel?
+    fem::set_bc<T, T>(bc_vec.mutable_array(), {bc});
+    thrust::device_vector<T> bc_vec_d(bc_vec.array().begin(), bc_vec.array().end());
+    std::span<const T> bc_vec_d_span(thrust::raw_pointer_cast(bc_vec_d.data()), bc_vec_d.size());
     acc::MatFreeLaplacian<T> op(3, cells_local, constants_d_span, dofmap_d_span, geometry_d_span,
-                                bc_marker_d_span);
+                                bc_marker_d_span, bc_vec_d_span);
 
     la::Vector<T> b(map, 1);
     auto barr = b.mutable_array();
