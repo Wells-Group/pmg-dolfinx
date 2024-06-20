@@ -225,9 +225,7 @@ int main(int argc, char* argv[])
                                                   bc_marker_d.size());
     la::Vector<T> bc_vec(map, 1);
     bc_vec.set(0.0);
-    // TODO Parallel?
     fem::set_bc<T, T>(bc_vec.mutable_array(), {bc});
-
     thrust::device_vector<T> bc_vec_d(bc_vec.array().begin(), bc_vec.array().end());
     std::span<const T> bc_vec_d_span(thrust::raw_pointer_cast(bc_vec_d.data()), bc_vec_d.size());
 
