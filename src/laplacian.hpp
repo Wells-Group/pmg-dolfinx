@@ -274,8 +274,8 @@ class MatFreeLaplacian
 {
 public:
   MatFreeLaplacian(int degree, std::span<const int> cell_list, std::span<const T> coefficients,
-                   std::span<const std::int32_t> dofmap, std::span<const T> G,
-                   std::span<const std::int8_t> bc_marker, std::span<const T> bc_vec)
+                   std::span<const std::int32_t> dofmap, std::span<const std::int8_t> bc_marker,
+                   std::span<const T> bc_vec)
       : degree(degree), cell_list(cell_list), cell_constants(coefficients), cell_dofmap(dofmap),
         bc_marker(bc_marker), bc_vec(bc_vec)
   {
