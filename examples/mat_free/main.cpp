@@ -94,8 +94,7 @@ int main(int argc, char* argv[])
     std::shared_ptr<mesh::Mesh<T>> mesh;
     {
       mesh::Mesh<T> base_mesh = mesh::create_box<T>(
-          comm, {{{0, 0, 0}, {1, 1, 1}}},
-          {(std::size_t)nx[0], (std::size_t)nx[1], (std::size_t)nx[2]}, mesh::CellType::hexahedron);
+          comm, {{{0, 0, 0}, {1, 1, 1}}}, {nx[0], nx[1], nx[2]}, mesh::CellType::hexahedron);
       mesh = std::make_shared<mesh::Mesh<T>>(ghost_layer_mesh(base_mesh, coord_element));
     }
 
