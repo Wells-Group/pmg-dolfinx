@@ -94,8 +94,8 @@ int main(int argc, char* argv[])
     {
       const int order = 3;
       double nx_approx = (std::pow(ndofs * size, 1.0 / 3.0) - 1) / order;
-      std::size_t n0 = static_cast<int>(nx_approx);
-      std::array<std::size_t, 3> nx = {n0, n0, n0};
+      std::int64_t n0 = static_cast<std::int64_t>(nx_approx);
+      std::array<std::int64_t, 3> nx = {n0, n0, n0};
 
       // Try to improve fit to ndofs +/- 5 in each direction
       if (n0 > 5)
@@ -103,9 +103,9 @@ int main(int argc, char* argv[])
         std::int64_t best_misfit
             = (n0 * order + 1) * (n0 * order + 1) * (n0 * order + 1) - ndofs * size;
         best_misfit = std::abs(best_misfit);
-        for (std::size_t nx0 = n0 - 5; nx0 < n0 + 6; ++nx0)
-          for (std::size_t ny0 = n0 - 5; ny0 < n0 + 6; ++ny0)
-            for (std::size_t nz0 = n0 - 5; nz0 < n0 + 6; ++nz0)
+        for (std::int64_t nx0 = n0 - 5; nx0 < n0 + 6; ++nx0)
+          for (std::int64_t ny0 = n0 - 5; ny0 < n0 + 6; ++ny0)
+            for (std::int64_t nz0 = n0 - 5; nz0 < n0 + 6; ++nz0)
             {
               std::int64_t misfit
                   = (nx0 * order + 1) * (ny0 * order + 1) * (nz0 * order + 1) - ndofs * size;
@@ -117,7 +117,7 @@ int main(int argc, char* argv[])
             }
       }
       spdlog::warn("Mesh size {}x{}x{}", nx[0], nx[1], nx[2]);
-
+      // TODO TP mesh
       mesh = std::make_shared<mesh::Mesh<T>>(mesh::create_box<T>(
           comm, {{{0, 0, 0}, {1, 1, 1}}}, {nx[0], nx[1], nx[2]}, mesh::CellType::hexahedron));
     }
@@ -135,6 +135,7 @@ int main(int argc, char* argv[])
       peak_mem = mem;
 #endif
 
+    // TODO TP element
     auto element = basix::create_element<T>(
         basix::element::family::P, basix::cell::type::hexahedron, 3,
         basix::element::lagrange_variant::gll_warped, basix::element::dpc_variant::unset, false);
