@@ -154,7 +154,7 @@ int main(int argc, char* argv[])
     auto dofmap = V->dofmap();
     auto facets = dolfinx::mesh::exterior_facet_indices(*topology);
     auto bdofs = fem::locate_dofs_topological(*topology, *dofmap, fdim, facets);
-    auto bc = std::make_shared<const fem::DirichletBC<T>>(1.0, bdofs, V);
+    auto bc = std::make_shared<const fem::DirichletBC<T>>(1.3, bdofs, V);
 
     // Copy data to GPU
     // Constants
@@ -217,8 +217,10 @@ int main(int argc, char* argv[])
     std::span<const std::int8_t> bc_marker_d_span(thrust::raw_pointer_cast(bc_marker_d.data()),
                                                   bc_marker_d.size());
     la::Vector<T> bc_vec(map, 1);
+    bc_vec.set(0.0);
     // TODO Parallel?
     fem::set_bc<T, T>(bc_vec.mutable_array(), {bc});
+
     thrust::device_vector<T> bc_vec_d(bc_vec.array().begin(), bc_vec.array().end());
     std::span<const T> bc_vec_d_span(thrust::raw_pointer_cast(bc_vec_d.data()), bc_vec_d.size());
 
@@ -231,14 +233,10 @@ int main(int argc, char* argv[])
         std::span<const T>(thrust::raw_pointer_cast(Gweights_d.data()), Gweights_d.size()));
 
     la::Vector<T> b(map, 1);
-    auto barr = b.mutable_array();
-
-    std::copy(f->x()->array().begin(), f->x()->array().end(), barr.begin());
-
-    // fem::assemble_vector(b.mutable_array(), *L);
-    // TODO BCs
-    // fem::apply_lifting<T, T>(b.mutable_array(), {a}, {{bc}}, {}, T(1));
-    // b.scatter_rev(std::plus<T>());
+    b.set(0.0);
+    fem::assemble_vector(b.mutable_array(), *L);
+    fem::apply_lifting<T, T>(b.mutable_array(), {a}, {{bc}}, {}, T(1));
+    b.scatter_rev(std::plus<T>());
     fem::set_bc<T, T>(b.mutable_array(), {bc});
     u.copy_from_host(b); // Copy data from host vector to device vector
     u.scatter_fwd_begin();

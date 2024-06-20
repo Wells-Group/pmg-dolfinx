@@ -335,6 +335,7 @@ public:
                        bc_marker.data());
 
     err_check(hipGetLastError());
+    err_check(hipDeviceSynchronize());
 
     thrust::transform(out.array().begin(), out.array().end(), bc_vec.begin(),
                       out.mutable_array().begin(), thrust::plus<T>());
