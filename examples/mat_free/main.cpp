@@ -217,7 +217,6 @@ int main(int argc, char* argv[])
     spdlog::debug("Create MatFreLaplacian");
     acc::MatFreeLaplacian<T> op(3, constants_d_span, dofmap_d_span, xgeom_d_span, xdofmap_d_span,
                                 dphi_d_span, Gweights_d_span, lcells, bcells);
-    op.compute_geometry();
 
     la::Vector<T> b(map, 1);
     auto barr = b.mutable_array();
