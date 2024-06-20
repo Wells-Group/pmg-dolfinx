@@ -184,35 +184,40 @@ int main(int argc, char* argv[])
     DeviceVector y(map, 1);
     y.set(T{0.0});
 
-    // List of local cells (no dofs shared with other processes)
-    thrust::device_vector<int> cell_list_d(lcells.begin(), lcells.end());
-    std::span<const int> cells_local(thrust::raw_pointer_cast(cell_list_d.data()),
-                                     cell_list_d.size());
-    spdlog::info("Send cell list to GPU (size = {})", cell_list_d.size());
-
+    // -----------------------------------------------------------------------------
     // Put geometry information onto device
-    // FIXME: move some/all of this to MatFreeLaplacian
     const fem::CoordinateElement<T>& cmap = mesh->geometry().cmap();
     auto xdofmap = mesh->geometry().dofmap();
+
+    // Geometry dofmap
     thrust::device_vector<std::int32_t> xdofmap_d(xdofmap.data_handle(),
                                                   xdofmap.data_handle() + xdofmap.size());
+    std::span<const std::int32_t> xdofmap_d_span(thrust::raw_pointer_cast(xdofmap_d.data()),
+                                                 xdofmap_d.size());
+    // Geometry points
     thrust::device_vector<T> xgeom_d(mesh->geometry().x().begin(), mesh->geometry().x().end());
+    std::span<const T> xgeom_d_span(thrust::raw_pointer_cast(xgeom_d.data()), xgeom_d.size());
+
+    // dphi tables at quadrature points
     std::array<std::size_t, 4> phi_shape = cmap.tabulate_shape(1, Gweights.size());
     std::vector<T> phi_b(std::reduce(phi_shape.begin(), phi_shape.end(), 1, std::multiplies{}));
     cmap.tabulate(1, Gpoints, {Gweights.size(), 3}, phi_b);
+
     // Copy dphi to device (skipping phi in table)
     thrust::device_vector<T> dphi_d(phi_b.begin() + phi_b.size() / 4, phi_b.end());
+    std::span<const T> dphi_d_span(thrust::raw_pointer_cast(dphi_d.data()), dphi_d.size());
+
     // Copy quadrature weights to device
     thrust::device_vector<T> Gweights_d(Gweights.begin(), Gweights.end());
+    std::span<const T> Gweights_d_span(thrust::raw_pointer_cast(Gweights_d.data()),
+                                       Gweights_d.size());
+    // -----------------------------------------------------------------------------
 
     // Create matrix free operator
     spdlog::debug("Create MatFreLaplacian");
-    acc::MatFreeLaplacian<T> op(3, cells_local, constants_d_span, dofmap_d_span);
-    op.compute_geometry(
-        std::span<const T>(thrust::raw_pointer_cast(xgeom_d.data()), xgeom_d.size()),
-        std::span<const std::int32_t>(thrust::raw_pointer_cast(xdofmap_d.data()), xdofmap_d.size()),
-        std::span<const T>(thrust::raw_pointer_cast(dphi_d.data()), dphi_d.size()),
-        std::span<const T>(thrust::raw_pointer_cast(Gweights_d.data()), Gweights_d.size()));
+    acc::MatFreeLaplacian<T> op(3, constants_d_span, dofmap_d_span, xgeom_d_span, xdofmap_d_span,
+                                dphi_d_span, Gweights_d_span, lcells, bcells);
+    op.compute_geometry();
 
     la::Vector<T> b(map, 1);
     auto barr = b.mutable_array();
@@ -228,24 +233,6 @@ int main(int argc, char* argv[])
     u.scatter_fwd_begin();
 
     // Matrix free
-    spdlog::debug("Call op on lcells {}", cells_local.size());
-    op(u, y);
-
-    // Now change the cells to be the 'boundary cells'
-    cell_list_d.resize(bcells.size());
-    thrust::copy(bcells.begin(), bcells.end(), cell_list_d.begin());
-    std::span<const int> cells_boundary(thrust::raw_pointer_cast(cell_list_d.data()),
-                                        cell_list_d.size());
-    op.set_cell_list(cells_boundary);
-    // Compute geometry for bcells
-    op.compute_geometry(
-        std::span<const T>(thrust::raw_pointer_cast(xgeom_d.data()), xgeom_d.size()),
-        std::span<const std::int32_t>(thrust::raw_pointer_cast(xdofmap_d.data()), xdofmap_d.size()),
-        std::span<const T>(thrust::raw_pointer_cast(dphi_d.data()), dphi_d.size()),
-        std::span<const T>(thrust::raw_pointer_cast(Gweights_d.data()), Gweights_d.size()));
-
-    spdlog::debug("Call op on bcells {}", cells_boundary.size());
-    u.scatter_fwd_end();
     op(u, y);
 
     std::cout << "Norm of u = " << acc::norm(u) << "\n";

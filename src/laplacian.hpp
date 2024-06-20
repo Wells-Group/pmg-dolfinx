@@ -265,11 +265,15 @@ template <typename T>
 class MatFreeLaplacian
 {
 public:
-  MatFreeLaplacian(int degree, std::span<const int> cell_list, std::span<const T> coefficients,
-                   std::span<const std::int32_t> dofmap)
-      : degree(degree), cell_list(cell_list), cell_constants(coefficients), cell_dofmap(dofmap)
+  MatFreeLaplacian(int degree, std::span<const T> coefficients,
+                   std::span<const std::int32_t> dofmap, std::span<const T> xgeom,
+                   std::span<const std::int32_t> geometry_dofmap, std::span<const T> dphi_geometry,
+                   std::span<const T> G_weights, const std::vector<int>& lcells,
+                   const std::vector<int>& bcells)
+      : degree(degree), cell_constants(coefficients), cell_dofmap(dofmap), xgeom(xgeom),
+        geometry_dofmap(geometry_dofmap), dphi_geometry(dphi_geometry), G_weights(G_weights),
+        lcells(lcells), bcells(bcells)
   {
-
     std::map<int, int> Qdegree = {{2, 3}, {3, 4}, {4, 6}, {5, 8}};
 
     // Create 1D element
@@ -292,38 +296,69 @@ public:
   }
 
   // Compute weighted geometry data on GPU
-  void compute_geometry(std::span<const T> xgeom, std::span<const std::int32_t> geometry_dofmap,
-                        std::span<const T> dphi, std::span<const T> weights)
+  void compute_geometry()
   {
-    G_entity.resize(weights.size() * cell_list.size() * 6);
-    dim3 block_size(weights.size());
-    dim3 grid_size(cell_list.size());
+    G_entity.resize(G_weights.size() * cell_list_d.size() * 6);
+    dim3 block_size(G_weights.size());
+    dim3 grid_size(cell_list_d.size());
     std::size_t shm_size = 24 * sizeof(T); // coordinate size (8x3)
     hipLaunchKernelGGL(HIP_KERNEL_NAME(geometry_computation<T, 3>), grid_size, block_size, shm_size,
                        0, xgeom.data(), thrust::raw_pointer_cast(G_entity.data()),
-                       geometry_dofmap.data(), dphi.data(), weights.data(), cell_list.data(),
-                       cell_list.size());
+                       geometry_dofmap.data(), dphi_geometry.data(), G_weights.data(),
+                       thrust::raw_pointer_cast(cell_list_d.data()), cell_list_d.size());
   }
 
   template <int P, typename Vector>
   void impl_operator(Vector& in, Vector& out)
   {
-    if (cell_list.size() == 0)
-      return;
+    in.scatter_fwd_begin();
 
-    dim3 block_size(P + 1, P + 1, P + 1);
-    int p1cubed = (P + 1) * (P + 1) * (P + 1);
-    dim3 grid_size(cell_list.size());
-    std::size_t shm_size = 4 * p1cubed * sizeof(T);
+    if (!lcells.empty())
+    {
+      cell_list_d.resize(lcells.size());
+      thrust::copy(lcells.begin(), lcells.end(), cell_list_d.begin());
 
-    T* x = in.mutable_array().data();
-    T* y = out.mutable_array().data();
-    std::span<const T> dphi(thrust::raw_pointer_cast(dphi_d.data()), dphi_d.size());
-    hipLaunchKernelGGL(HIP_KERNEL_NAME(stiffness_operator<T, P>), grid_size, block_size, shm_size,
-                       0, x, cell_constants.data(), y, thrust::raw_pointer_cast(G_entity.data()),
-                       cell_dofmap.data(), dphi.data(), cell_list.data(), cell_list.size());
+      compute_geometry();
 
-    err_check(hipGetLastError());
+      dim3 block_size(P + 1, P + 1, P + 1);
+      int p1cubed = (P + 1) * (P + 1) * (P + 1);
+      dim3 grid_size(cell_list_d.size());
+      std::size_t shm_size = 4 * p1cubed * sizeof(T);
+
+      T* x = in.mutable_array().data();
+      T* y = out.mutable_array().data();
+      hipLaunchKernelGGL(HIP_KERNEL_NAME(stiffness_operator<T, P>), grid_size, block_size, shm_size,
+                         0, x, cell_constants.data(), y, thrust::raw_pointer_cast(G_entity.data()),
+                         cell_dofmap.data(), thrust::raw_pointer_cast(dphi_d.data()),
+                         thrust::raw_pointer_cast(cell_list_d.data()), cell_list_d.size());
+
+      err_check(hipGetLastError());
+    }
+
+    in.scatter_fwd_end();
+
+    if (!bcells.empty())
+    {
+      cell_list_d.resize(bcells.size());
+      thrust::copy(bcells.begin(), bcells.end(), cell_list_d.begin());
+
+      compute_geometry();
+
+      dim3 block_size(P + 1, P + 1, P + 1);
+      int p1cubed = (P + 1) * (P + 1) * (P + 1);
+      dim3 grid_size(cell_list_d.size());
+      std::size_t shm_size = 4 * p1cubed * sizeof(T);
+
+      T* x = in.mutable_array().data();
+      T* y = out.mutable_array().data();
+
+      hipLaunchKernelGGL(HIP_KERNEL_NAME(stiffness_operator<T, P>), grid_size, block_size, shm_size,
+                         0, x, cell_constants.data(), y, thrust::raw_pointer_cast(G_entity.data()),
+                         cell_dofmap.data(), thrust::raw_pointer_cast(dphi_d.data()),
+                         thrust::raw_pointer_cast(cell_list_d.data()), cell_list_d.size());
+
+      err_check(hipGetLastError());
+    }
   }
 
   template <typename Vector>
@@ -336,9 +371,6 @@ public:
     else if (degree == 3)
       impl_operator<3>(in, out);
   }
-
-  /// Update list of cells to use
-  void set_cell_list(std::span<const int> new_cell_list) { cell_list = new_cell_list; }
 
   template <typename Vector>
   void get_diag_inverse(Vector& diag_inv)
@@ -356,15 +388,26 @@ private:
   int degree;
 
   // Reference to on-device storage for constants, dofmap etc.
-  std::span<const int> cell_list;
   std::span<const T> cell_constants;
   std::span<const std::int32_t> cell_dofmap;
+
+  // Reference to on-device storage of geometry data
+  std::span<const T> xgeom;
+  std::span<const std::int32_t> geometry_dofmap;
+  std::span<const T> dphi_geometry;
+  std::span<const T> G_weights;
 
   // On device storage for geometry data (computed for each batch of cells)
   thrust::device_vector<T> G_entity;
 
   // On device storage for dphi
   thrust::device_vector<T> dphi_d;
+
+  // Lists of cells which are local (lcells) and boundary (bcells)
+  std::vector<int> lcells, bcells;
+
+  // On-device list of cells to execute over
+  thrust::device_vector<int> cell_list_d;
 
   // On device storage for the inverse diagonal, needed for Jacobi
   // preconditioner (to remove in future)
