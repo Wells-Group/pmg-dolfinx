@@ -99,16 +99,15 @@ int main(int argc, char* argv[])
       mesh = std::make_shared<mesh::Mesh<T>>(ghost_layer_mesh(base_mesh, coord_element));
     }
 
-    auto [lcells, bcells] = compute_boundary_cells(mesh);
-
-    spdlog::debug("lcells = {}, bcells = {}", lcells.size(), bcells.size());
-
     // Quadrature points and weights on hex (3D)
     auto [Gpoints, Gweights] = basix::quadrature::make_quadrature<T>(
         basix::quadrature::type::gll, basix::cell::type::hexahedron, basix::polyset::type::standard,
         order + 1);
 
     auto V = std::make_shared<fem::FunctionSpace<T>>(fem::create_functionspace(mesh, *element));
+    auto [lcells, bcells] = compute_boundary_cells(V);
+    spdlog::debug("lcells = {}, bcells = {}", lcells.size(), bcells.size());
+
     auto topology = V->mesh()->topology_mutable();
     int tdim = topology->dim();
     std::size_t ncells = mesh->topology()->index_map(tdim)->size_global();
@@ -227,7 +226,7 @@ int main(int argc, char* argv[])
     // b.scatter_rev(std::plus<T>());
     // fem::set_bc<T, T>(b.mutable_array(), {bc});
     u.copy_from_host(b); // Copy data from host vector to device vector
-    u.scatter_fwd();
+    u.scatter_fwd_begin();
 
     // Matrix free
     spdlog::debug("Call op on lcells {}", cells_local.size());
@@ -247,6 +246,7 @@ int main(int argc, char* argv[])
         std::span<const T>(thrust::raw_pointer_cast(Gweights_d.data()), Gweights_d.size()));
 
     spdlog::debug("Call op on bcells {}", cells_boundary.size());
+    u.scatter_fwd_end();
     op(u, y);
 
     std::cout << "Norm of u = " << acc::norm(u) << "\n";

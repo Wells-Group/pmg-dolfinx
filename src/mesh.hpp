@@ -1,5 +1,6 @@
 
 #include <dolfinx/fem/CoordinateElement.h>
+#include <dolfinx/fem/FunctionSpace.h>
 #include <dolfinx/mesh/Mesh.h>
 #include <dolfinx/mesh/utils.h>
 #include <map>
@@ -201,41 +202,38 @@ dolfinx::mesh::Mesh<T> ghost_layer_mesh(dolfinx::mesh::Mesh<T>& mesh,
 ///
 template <typename T>
 std::pair<std::vector<std::int32_t>, std::vector<std::int32_t>>
-compute_boundary_cells(std::shared_ptr<dolfinx::mesh::Mesh<T>> mesh)
+compute_boundary_cells(std::shared_ptr<dolfinx::fem::FunctionSpace<T>> V)
 {
+  auto mesh = V->mesh();
   auto topology = mesh->topology_mutable();
   int tdim = topology->dim();
   int fdim = tdim - 1;
   topology->create_connectivity(fdim, tdim);
 
   int ncells_local = topology->index_map(tdim)->size_local();
-  auto f_to_c = topology->connectivity(fdim, tdim);
-  // Create list of cells needed for matrix-free updates
-  std::vector<std::int32_t> boundary_cells;
-  for (std::int32_t f = 0; f < f_to_c->num_nodes(); ++f)
-  {
-    const auto& cells_f = f_to_c->links(f);
-    for (std::int32_t c : cells_f)
-    {
-      // If facet attached to a ghost cell, add all cells to list
-      // FIXME: should this really be via vertex, not facet?
-      if (c >= ncells_local)
-        boundary_cells.insert(boundary_cells.end(), cells_f.begin(), cells_f.end());
-    }
-  }
-  std::sort(boundary_cells.begin(), boundary_cells.end());
-  boundary_cells.erase(std::unique(boundary_cells.begin(), boundary_cells.end()),
-                       boundary_cells.end());
-  spdlog::info("Got {} boundary cells.", boundary_cells.size());
+  int ncells_ghost = topology->index_map(tdim)->num_ghosts();
+  int ndofs_local = V->dofmap()->index_map->size_local();
 
-  // Compute local cells
-  std::vector<std::int32_t> local_cells(topology->index_map(tdim)->size_local()
-                                        + topology->index_map(tdim)->num_ghosts());
-  std::iota(local_cells.begin(), local_cells.end(), 0);
-  for (std::int32_t c : boundary_cells)
-    local_cells[c] = -1;
-  std::erase(local_cells, -1);
-  spdlog::info("Got {} local cells", local_cells.size());
+  std::vector<std::uint8_t> cell_mark(ncells_local + ncells_ghost, 0);
+  for (int i = 0; i < ncells_local; ++i)
+  {
+    auto cell_dofs = V->dofmap()->cell_dofs(i);
+    for (auto dof : cell_dofs)
+      if (dof >= ndofs_local)
+        cell_mark[i] = 1;
+  }
+  for (int i = ncells_local; i < ncells_local + ncells_ghost; ++i)
+    cell_mark[i] = 1;
+
+  std::vector<int> local_cells;
+  std::vector<int> boundary_cells;
+  for (int i = 0; i < cell_mark.size(); ++i)
+  {
+    if (cell_mark[i])
+      boundary_cells.push_back(i);
+    else
+      local_cells.push_back(i);
+  }
 
   return {std::move(local_cells), std::move(boundary_cells)};
 }
