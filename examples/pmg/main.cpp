@@ -35,10 +35,8 @@ int main(int argc, char* argv[])
 {
   po::options_description desc("Allowed options");
   desc.add_options()("help,h", "print usage message")(
-      "ndofs", po::value<std::size_t>()->default_value(50000), "number of dofs per rank")(
-      "amg", po::bool_switch()->default_value(false),
-      "Use AMG solver on coarse level")("csr-interpolation", po::bool_switch()->default_value(true),
-                                        "Use CSR matrices to interpolate between levels");
+      "ndofs", po::value<std::size_t>()->default_value(50000),
+      "number of dofs per rank")("amg", po::bool_switch()->default_value(false));
 
   po::variables_map vm;
   po::store(po::command_line_parser(argc, argv).options(desc).allow_unregistered().run(), vm);
@@ -51,7 +49,6 @@ int main(int argc, char* argv[])
   }
   const std::size_t ndofs = vm["ndofs"].as<std::size_t>();
   bool use_amg = vm["amg"].as<bool>();
-  bool use_csr_interpolation = vm["csr-interpolation"].as<bool>();
 
   std::vector<int> order = {1, 3};
   std::vector form_a = {form_poisson_a1, form_poisson_a3};
@@ -117,47 +114,9 @@ int main(int argc, char* argv[])
     int fdim = tdim - 1;
     topology->create_connectivity(fdim, tdim);
 
-    int ncells_local = topology->index_map(tdim)->size_local();
-    auto f_to_c = topology->connectivity(fdim, tdim);
-    // Create list of cells needed for matrix-free updates
-    std::vector<std::int32_t> ip_cells;
-    for (std::int32_t f = 0; f < f_to_c->num_nodes(); ++f)
-    {
-      const auto& cells_f = f_to_c->links(f);
-      for (std::int32_t c : cells_f)
-      {
-        // If facet attached to a ghost cell, add all cells to list
-        // FIXME: should this really be via vertex, not facet?
-        if (c >= ncells_local)
-          ip_cells.insert(ip_cells.end(), cells_f.begin(), cells_f.end());
-      }
-    }
-    std::sort(ip_cells.begin(), ip_cells.end());
-    ip_cells.erase(std::unique(ip_cells.begin(), ip_cells.end()), ip_cells.end());
-    spdlog::info("Got {} boundary cells.", ip_cells.size());
-
-    // Compute local cells
-    std::vector<std::int32_t> local_cells(topology->index_map(tdim)->size_local()
-                                          + topology->index_map(tdim)->num_ghosts());
-    std::iota(local_cells.begin(), local_cells.end(), 0);
-    for (std::int32_t c : ip_cells)
-      local_cells[c] = -1;
-    std::erase(local_cells, -1);
-    spdlog::info("Got {} local cells", local_cells.size());
-
-    // Copy lists of local and boundary cells to device
-    thrust::device_vector<std::int32_t> ipcells_device(ip_cells.size());
-    spdlog::info("Copy IP_cells : {}", ip_cells.size());
-    thrust::copy(ip_cells.begin(), ip_cells.end(), ipcells_device.begin());
-    thrust::device_vector<std::int32_t> lcells_device(local_cells.size());
-    spdlog::info("Copy local_cells :{}", local_cells.size());
-    thrust::copy(local_cells.begin(), local_cells.end(), lcells_device.begin());
-    std::span<std::int32_t> ipcells_span(thrust::raw_pointer_cast(ipcells_device.data()),
-                                         ipcells_device.size());
-    std::span<std::int32_t> lcells_span(thrust::raw_pointer_cast(lcells_device.data()),
-                                        lcells_device.size());
-
     std::vector<std::shared_ptr<fem::FunctionSpace<T>>> V(form_a.size());
+    auto [lcells, bcells] = compute_boundary_cells(V.back());
+
     std::vector<std::shared_ptr<fem::Form<T, T>>> a(V.size());
     std::vector<std::shared_ptr<fem::Form<T, T>>> L(V.size());
     std::vector<std::shared_ptr<const fem::DirichletBC<T, T>>> bcs(V.size());
@@ -293,7 +252,6 @@ int main(int argc, char* argv[])
       std::vector<std::shared_ptr<const fem::DirichletBC<T, T>>> bc_i = {bcs[i]};
 
 #ifdef MATRIX_FREE
-      int degree = i + 1;
       maps[i] = V[i]->dofmap()->index_map;
       int num_cells = mesh->topology()->index_map(tdim)->size_local()
                       + mesh->topology()->index_map(tdim)->num_ghosts();
@@ -303,7 +261,7 @@ int main(int argc, char* argv[])
       spdlog::info("Create operator on V[{}]", i);
       std::span<const std::int8_t> bc_span(thrust::raw_pointer_cast(device_bc_dofs[i].data()),
                                            device_bc_dofs[i].size());
-      operators[i] = std::make_shared<acc::MatFreeLaplacian<T>>(degree, cell_list, device_constants,
+      operators[i] = std::make_shared<acc::MatFreeLaplacian<T>>(degree, device_constants,
                                                                 device_dofmaps[i], device_G[i]);
 
 #else
@@ -337,8 +295,6 @@ int main(int argc, char* argv[])
       DeviceVector x(maps[i], 1);
       x.set(T{0.0});
 
-      //      (*operators[i])(*bs[i], x);
-
       [[maybe_unused]] int its = cg.solve(*operators[i], x, *bs[i], false);
       std::vector<T> eign = cg.compute_eigenvalues();
       std::sort(eign.begin(), eign.end());
@@ -354,38 +310,10 @@ int main(int argc, char* argv[])
     // Create Prolongation operator
     std::vector<std::shared_ptr<acc::MatrixOperator<T>>> prolongation(V.size() - 1);
 
-    // Interpolation and prolongation kernels
-    std::vector<std::shared_ptr<Interpolator<T>>> int_kerns(V.size() - 1);
-    std::vector<std::shared_ptr<Interpolator<T>>> prolong_kerns(V.size() - 1);
-
     // From V1 to V0
-    if (use_csr_interpolation)
-    {
-      spdlog::warn("Creating Prolongation Operators");
-      for (int i = 0; i < V.size() - 1; ++i)
-        prolongation[i] = std::make_shared<acc::MatrixOperator<T>>(*V[i], *V[i + 1]);
-    }
-    else
-    {
-      // These are alternative restriction/prolongation kernels, which should replace the CSR
-      // matrices when fully working
-
-      // auto interpolator_V1_V0 = std::make_shared<Interpolator<T>>(
-      //     V[1]->element()->basix_element(), V[0]->element()->basix_element(),
-      //     device_dofmaps[1], device_dofmaps[0], ipcells_span, lcells_span, false);
-      // auto interpolator_V2_V1 = std::make_shared<Interpolator<T>>(
-      //     V[2]->element()->basix_element(), V[1]->element()->basix_element(),
-      //     device_dofmaps[2], device_dofmaps[1], ipcells_span, lcells_span, false);
-      // auto interpolator_V0_V1 = std::make_shared<Interpolator<T>>(
-      //     V[0]->element()->basix_element(), V[1]->element()->basix_element(),
-      //     device_dofmaps[0], device_dofmaps[1], ipcells_span, lcells_span, false);
-      // auto interpolator_V1_V2 = std::make_shared<Interpolator<T>>(
-      //     V[1]->element()->basix_element(), V[2]->element()->basix_element(),
-      //     device_dofmaps[1], device_dofmaps[2], ipcells_span, lcells_span, false);
-
-      // int_kerns = {interpolator_V1_V0, interpolator_V2_V1};
-      // prolong_kerns = {interpolator_V0_V1, interpolator_V1_V2};
-    }
+    spdlog::warn("Creating Prolongation Operators");
+    for (int i = 0; i < V.size() - 1; ++i)
+      prolongation[i] = std::make_shared<acc::MatrixOperator<T>>(*V[i], *V[i + 1]);
 
 #ifdef MATRIX_FREE
     using OpType = acc::MatFreeLaplacian<T>;
@@ -407,9 +335,6 @@ int main(int argc, char* argv[])
 
     // Sets CSR matrices or matrix-free kernels to do interpolation
     pmg.set_interpolators(prolongation);
-
-    pmg.set_interpolation_kernels(int_kerns);
-    pmg.set_prolongation_kernels(prolong_kerns);
 
     // Create solution vector
     spdlog::info("Create x");
