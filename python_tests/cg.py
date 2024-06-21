@@ -9,7 +9,6 @@ from scipy import linalg
 import numpy as np
 from petsc4py import PETSc
 from tqli import tqli
-import basix
 
 
 class CGSolver:
@@ -74,21 +73,13 @@ class CGSolver:
 
 
 if __name__ == "__main__":
+    # TODO Do the same with PETSc and compare
     np.set_printoptions(linewidth=200)
     comm = MPI.COMM_WORLD
     msh = create_unit_cube(comm, 5, 5, 5, cell_type=mesh.CellType.hexahedron)
     print(f"Num cells = {msh.topology.index_map(msh.topology.dim).size_global}")
 
-    # Tensor product element
-    family = basix.ElementFamily.P
-    variant = basix.LagrangeVariant.gll_warped
-    cell_type = msh.basix_cell()
-    k = 3
-
-    basix_element = basix.create_tp_element(family, cell_type, k, variant)
-    element = basix.ufl._BasixElement(basix_element)  # basix ufl element
-
-    V = fem.functionspace(msh, element)
+    V = fem.functionspace(msh, ("CG", 3))
     print(f"NDOFS = {V.dofmap.index_map.size_global}")
     u, v = TestFunction(V), TrialFunction(V)
     k = 2.0
