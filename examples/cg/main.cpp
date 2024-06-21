@@ -2,6 +2,7 @@
 #include "src/cg.hpp"
 #include "src/chebyshev.hpp"
 #include "src/csr.hpp"
+#include "src/mesh.hpp"
 #include "src/operators.hpp"
 #include "src/vector.hpp"
 
@@ -81,46 +82,31 @@ int main(int argc, char* argv[])
       peak_mem = mem;
 #endif
 
-    std::shared_ptr<mesh::Mesh<T>> mesh;
+    const int order = 3;
+    double nx_approx = (std::pow(ndofs * size, 1.0 / 3.0) - 1) / order;
+    std::int64_t n0 = static_cast<std::int64_t>(nx_approx);
+    std::array<std::int64_t, 3> nx = {n0, n0, n0};
 
-    if (filename.size() > 0)
+    // Try to improve fit to ndofs +/- 5 in each direction
+    if (n0 > 5)
     {
-      dolfinx::fem::CoordinateElement<T> element(mesh::CellType::tetrahedron, 1);
-      dolfinx::io::XDMFFile xdmf(MPI_COMM_WORLD, filename, "r");
-      mesh = std::make_shared<dolfinx::mesh::Mesh<T>>(
-          xdmf.read_mesh(element, mesh::GhostMode::none, "mesh"));
-    }
-    else
-    {
-      const int order = 3;
-      double nx_approx = (std::pow(ndofs * size, 1.0 / 3.0) - 1) / order;
-      std::int64_t n0 = static_cast<std::int64_t>(nx_approx);
-      std::array<std::int64_t, 3> nx = {n0, n0, n0};
-
-      // Try to improve fit to ndofs +/- 5 in each direction
-      if (n0 > 5)
-      {
-        std::int64_t best_misfit
-            = (n0 * order + 1) * (n0 * order + 1) * (n0 * order + 1) - ndofs * size;
-        best_misfit = std::abs(best_misfit);
-        for (std::int64_t nx0 = n0 - 5; nx0 < n0 + 6; ++nx0)
-          for (std::int64_t ny0 = n0 - 5; ny0 < n0 + 6; ++ny0)
-            for (std::int64_t nz0 = n0 - 5; nz0 < n0 + 6; ++nz0)
+      std::int64_t best_misfit
+          = (n0 * order + 1) * (n0 * order + 1) * (n0 * order + 1) - ndofs * size;
+      best_misfit = std::abs(best_misfit);
+      for (std::int64_t nx0 = n0 - 5; nx0 < n0 + 6; ++nx0)
+        for (std::int64_t ny0 = n0 - 5; ny0 < n0 + 6; ++ny0)
+          for (std::int64_t nz0 = n0 - 5; nz0 < n0 + 6; ++nz0)
+          {
+            std::int64_t misfit
+                = (nx0 * order + 1) * (ny0 * order + 1) * (nz0 * order + 1) - ndofs * size;
+            if (std::abs(misfit) < best_misfit)
             {
-              std::int64_t misfit
-                  = (nx0 * order + 1) * (ny0 * order + 1) * (nz0 * order + 1) - ndofs * size;
-              if (std::abs(misfit) < best_misfit)
-              {
-                best_misfit = std::abs(misfit);
-                nx = {nx0, ny0, nz0};
-              }
+              best_misfit = std::abs(misfit);
+              nx = {nx0, ny0, nz0};
             }
-      }
-      spdlog::warn("Mesh size {}x{}x{}", nx[0], nx[1], nx[2]);
-      // TODO TP mesh
-      mesh = std::make_shared<mesh::Mesh<T>>(mesh::create_box<T>(
-          comm, {{{0, 0, 0}, {1, 1, 1}}}, {nx[0], nx[1], nx[2]}, mesh::CellType::hexahedron));
+          }
     }
+    spdlog::warn("Mesh size {}x{}x{}", nx[0], nx[1], nx[2]);
 
 #ifdef ROCM_TRACING
     remove_profiling_annotation("making mesh");
@@ -134,13 +120,25 @@ int main(int argc, char* argv[])
     if (mem > peak_mem)
       peak_mem = mem;
 #endif
+    auto element = std::make_shared<basix::FiniteElement<T>>(basix::create_tp_element<T>(
+        basix::element::family::P, basix::cell::type::hexahedron, order,
+        basix::element::lagrange_variant::gll_warped, basix::element::dpc_variant::unset, false));
 
-    // TODO TP element
-    auto element = basix::create_element<T>(
-        basix::element::family::P, basix::cell::type::hexahedron, 3,
-        basix::element::lagrange_variant::gll_warped, basix::element::dpc_variant::unset, false);
+    // First order coordinate element
+    auto element_1 = std::make_shared<basix::FiniteElement<T>>(basix::create_tp_element<T>(
+        basix::element::family::P, basix::cell::type::hexahedron, 1,
+        basix::element::lagrange_variant::gll_warped, basix::element::dpc_variant::unset, false));
+    dolfinx::fem::CoordinateElement<T> coord_element(element_1);
 
-    auto V = std::make_shared<fem::FunctionSpace<T>>(fem::create_functionspace(mesh, element, {}));
+    // Create mesh with overlap region
+    std::shared_ptr<mesh::Mesh<T>> mesh;
+    {
+      mesh::Mesh<T> base_mesh = mesh::create_box<T>(
+          comm, {{{0, 0, 0}, {1, 1, 1}}}, {nx[0], nx[1], nx[2]}, mesh::CellType::hexahedron);
+      mesh = std::make_shared<mesh::Mesh<T>>(ghost_layer_mesh(base_mesh, coord_element));
+    }
+
+    auto V = std::make_shared<fem::FunctionSpace<T>>(fem::create_functionspace(mesh, *element, {}));
 
 #ifdef ROCM_TRACING
     remove_profiling_annotation("making V");
