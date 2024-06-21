@@ -8,6 +8,7 @@ from ufl import TestFunction, TrialFunction, dx, inner, grad
 from scipy import linalg
 import numpy as np
 from petsc4py import PETSc
+from tqli import tqli
 
 
 class CGSolver:
@@ -60,15 +61,15 @@ class CGSolver:
         n_iters = len(self.alphas)
 
         d = np.zeros(n_iters)
-        e = np.zeros(n_iters - 1)
+        e = np.zeros(n_iters)
         for i in range(n_iters):
             d[i] = 1 / self.alphas[i]
         for i in range(0, n_iters - 1):
             d[i + 1] += self.betas[i] / self.alphas[i]
             e[i] = np.sqrt(self.betas[i]) / self.alphas[i]
 
-        eig_est = sorted(np.real(linalg.eigh_tridiagonal(d, e, eigvals_only=True)))
-        return (eig_est[0], eig_est[-1])
+        tqli(d, e)
+        return (d[0], d[-1])
 
 
 if __name__ == "__main__":
