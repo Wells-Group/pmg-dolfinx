@@ -242,11 +242,10 @@ int main(int argc, char* argv[])
     if (mem > peak_mem)
       peak_mem = mem;
 #endif
-    b.set(T(1.0));
-    // fem::assemble_vector(b.mutable_array(), *L);
-    // fem::apply_lifting<T, T>(b.mutable_array(), {a}, {{bc}}, {}, T(1));
-    // b.scatter_rev(std::plus<T>());
-    // fem::set_bc<T, T>(b.mutable_array(), {bc});
+    fem::assemble_vector(b.mutable_array(), *L);
+    fem::apply_lifting<T, T>(b.mutable_array(), {a}, {{bc}}, {}, T(1));
+    b.scatter_rev(std::plus<T>());
+    fem::set_bc<T, T>(b.mutable_array(), {bc});
 #ifdef ROCM_TRACING
     remove_profiling_annotation("assembling and scattering");
 #endif
@@ -274,7 +273,7 @@ int main(int argc, char* argv[])
       peak_mem = mem;
 #endif
     DeviceVector y(map, 1);
-    y.copy_from_host(b); // Copy data from host vector to device vector
+    y.set(T{1.0});
 #ifdef ROCM_TRACING
     remove_profiling_annotation("setup device y");
 #endif
@@ -374,11 +373,6 @@ int main(int argc, char* argv[])
 #ifdef ROCM_TRACING
     remove_profiling_annotation("chebyshev solve");
 #endif
-
-    T rs = cheb.residual(op, x, y);
-    if (rank == 0)
-      std::cout << "Cheb resid = " << rs << std::endl;
-
 #ifdef ROCM_TRACING
     add_profiling_annotation("chebyshev solve");
 #endif
@@ -388,8 +382,9 @@ int main(int argc, char* argv[])
       peak_mem = mem;
 #endif
 
-    // Reset x to zero
+    // Try non-zero initial guess to make sure that works OK
     x.set(1.0);
+    y.copy_from_host(b); // Copy data from host vector to device vector
     err_check(hipDeviceSynchronize());
     T xnorm = acc::norm(x);
     spdlog::info("Before set bc, x norm = {}", xnorm);
