@@ -242,11 +242,11 @@ int main(int argc, char* argv[])
     if (mem > peak_mem)
       peak_mem = mem;
 #endif
-    b.set(T(0.0));
-    fem::assemble_vector(b.mutable_array(), *L);
-    fem::apply_lifting<T, T>(b.mutable_array(), {a}, {{bc}}, {}, T(1));
-    b.scatter_rev(std::plus<T>());
-    fem::set_bc<T, T>(b.mutable_array(), {bc});
+    b.set(T(1.0));
+    // fem::assemble_vector(b.mutable_array(), *L);
+    // fem::apply_lifting<T, T>(b.mutable_array(), {a}, {{bc}}, {}, T(1));
+    // b.scatter_rev(std::plus<T>());
+    // fem::set_bc<T, T>(b.mutable_array(), {bc});
 #ifdef ROCM_TRACING
     remove_profiling_annotation("assembling and scattering");
 #endif
@@ -288,7 +288,7 @@ int main(int argc, char* argv[])
       peak_mem = mem;
 #endif
     // Create operator
-    op(y, x);
+    // op(y, x);
 
     T norm = acc::norm(x);
     if (rank == 0)
@@ -311,7 +311,7 @@ int main(int argc, char* argv[])
 #endif
     dolfinx::acc::CGSolver<DeviceVector> cg(map, 1);
     cg.set_max_iterations(10);
-    cg.set_tolerance(1e-5);
+    cg.set_tolerance(1e-6);
     cg.store_coefficients(true);
 #ifdef ROCM_TRACING
     remove_profiling_annotation("creating cg solver");
