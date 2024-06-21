@@ -4,7 +4,7 @@ from dolfinx.fem.petsc import (
     assemble_matrix,
 )
 from dolfinx import fem, mesh
-from ufl import TestFunction, TrialFunction, dx, inner, grad
+from ufl import TestFunction, TrialFunction, inner, grad, Measure
 from scipy import linalg
 import numpy as np
 from petsc4py import PETSc
@@ -91,9 +91,10 @@ if __name__ == "__main__":
     V = fem.functionspace(msh, element)
     print(f"NDOFS = {V.dofmap.index_map.size_global}")
     u, v = TestFunction(V), TrialFunction(V)
-    k = 2.0
+    kappa = 2.0
 
-    a = k * inner(grad(u), grad(v)) * dx
+    dx = Measure("dx", metadata={"quadrature_rule": "GLL", "quadrature_degree": 4})
+    a = kappa * inner(grad(u), grad(v)) * dx
     a = fem.form(a)
 
     def f_expr(x):
