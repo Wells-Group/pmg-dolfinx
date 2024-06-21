@@ -58,16 +58,16 @@ class CGSolver:
     def compute_eigs(self):
         # Compute tridiagonal matrix (see Yousef Saad Iterative Methods ch:6.7.3)
         n_iters = len(self.alphas)
-        trmat = np.zeros((n_iters, n_iters))
+
+        d = np.zeros(n_iters)
+        e = np.zeros(n_iters - 1)
         for i in range(n_iters):
-            trmat[i, i] = 1 / self.alphas[i]
+            d[i] = 1 / self.alphas[i]
+        for i in range(0, n_iters - 1):
+            d[i + 1] += self.betas[i] / self.alphas[i]
+            e[i] = np.sqrt(self.betas[i]) / self.alphas[i]
 
-        for i in range(1, n_iters):
-            trmat[i, i] += self.betas[i - 1] / self.alphas[i - 1]
-            trmat[i, i - 1] = np.sqrt(self.betas[i - 1]) / self.alphas[i - 1]
-            trmat[i - 1, i] = np.sqrt(self.betas[i - 1]) / self.alphas[i - 1]
-
-        eig_est = sorted(np.real(linalg.eigvals(trmat)))
+        eig_est = sorted(np.real(linalg.eigh_tridiagonal(d, e, eigvals_only=True)))
         return (eig_est[0], eig_est[-1])
 
 
@@ -75,11 +75,10 @@ if __name__ == "__main__":
     # TODO Do the same with PETSc and compare
     np.set_printoptions(linewidth=200)
     comm = MPI.COMM_WORLD
-    n = 10
-    msh = create_unit_cube(comm, n, n, n, cell_type=mesh.CellType.hexahedron)
+    msh = create_unit_cube(comm, 5, 5, 5, cell_type=mesh.CellType.hexahedron)
     print(f"Num cells = {msh.topology.index_map(msh.topology.dim).size_global}")
 
-    V = fem.functionspace(msh, ("CG", 1))
+    V = fem.functionspace(msh, ("CG", 3))
     print(f"NDOFS = {V.dofmap.index_map.size_global}")
     u, v = TestFunction(V), TrialFunction(V)
     k = 2.0
@@ -128,7 +127,7 @@ if __name__ == "__main__":
     smoother_options = {
         "ksp_type": "cg",
         "pc_type": "jacobi",
-        "ksp_max_it": 40,
+        "ksp_max_it": 10,
         "ksp_rtol": 1e-6,
         "ksp_initial_guess_nonzero": True,
     }
