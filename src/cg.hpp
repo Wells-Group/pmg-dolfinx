@@ -74,7 +74,7 @@ int tqli(T* d, T* e, int n)
     int m;
     while ((m = tqli_m(l)) != l)
     {
-      if (iter++ == 300)
+      if (iter++ == 30)
         return -1;
       tqli_ml(d, e, m, l);
     }
@@ -134,8 +134,39 @@ public:
       e[i] = std::sqrt(_betas[i]) / _alphas[i];
     }
 
-    if (tqli(d.data(), e.data(), ne - 1) == -1)
+    std::cout << "Before TQLI\n";
+    std::cout << "d = \n";
+    for (int i = 0; i < ne; ++i)
+    {
+      std::cout << d[i] << " ";
+    }
+    std::cout << "\n";
+
+    std::cout << "e = \n";
+    for (int i = 0; i < ne; ++i)
+    {
+      std::cout << e[i] << " ";
+    }
+    std::cout << "\n";
+
+    if (tqli(d.data(), e.data(), ne) == -1)
       throw std::runtime_error("Eigenvalue estimate failed");
+
+    std::cout << "After TQLI\n";
+
+    std::cout << "d = \n";
+    for (int i = 0; i < ne; ++i)
+    {
+      std::cout << d[i] << " ";
+    }
+    std::cout << "\n";
+
+    std::cout << "e = \n";
+    for (int i = 0; i < ne; ++i)
+    {
+      std::cout << e[i] << " ";
+    }
+    std::cout << "\n";
 
     return d;
   }
