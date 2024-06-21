@@ -198,6 +198,8 @@ public:
       if (rank == 0 and verbose)
       {
         std::cout << "Iteration " << k << " residual " << std::sqrt(rnorm) << std::endl;
+        std::cout << "alpha = " << alpha << "\n";
+        std::cout << "beta = " << beta << "\n";
       }
 
       if (rnorm / rnorm0 < rtol2)
