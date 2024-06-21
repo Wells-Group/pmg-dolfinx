@@ -1,3 +1,5 @@
+# Implementation of TQLI from "Numerical Recipes in C" by Press et al.
+
 import numpy as np
 from scipy import linalg
 
