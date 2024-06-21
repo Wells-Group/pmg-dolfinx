@@ -350,13 +350,14 @@ int main(int argc, char* argv[])
 #endif
     std::vector<T> eign = cg.compute_eigenvalues();
     std::sort(eign.begin(), eign.end());
+    std::cout << "Computed eigs = (" << eign.front() << ", " << eign.back() << ")\n";
     std::array<T, 2> eig_range = {0.1 * eign.back(), 1.1 * eign.back()};
 #ifdef ROCM_TRACING
     remove_profiling_annotation("get eigenvalues");
 #endif
 
     if (rank == 0)
-      std::cout << "Eigenvalues:" << eig_range[0] << " - " << eig_range[1] << std::endl;
+      std::cout << "Using eig range:" << eig_range[0] << " - " << eig_range[1] << std::endl;
 
 #ifdef ROCM_TRACING
     add_profiling_annotation("chebyshev solve");
