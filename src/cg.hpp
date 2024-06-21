@@ -137,6 +137,7 @@ public:
     if (tqli(d.data(), e.data(), ne) == -1)
       throw std::runtime_error("Eigenvalue estimate failed");
 
+    std::sort(d.begin(), d.end());
     return d;
   }
 
