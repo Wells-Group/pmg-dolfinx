@@ -70,7 +70,7 @@ class CGSolver:
             e[i] = np.sqrt(self.betas[i]) / self.alphas[i]
 
         tqli(d, e)
-        return (d[0], d[-1])
+        return np.sort(d)
 
 
 if __name__ == "__main__":
@@ -119,7 +119,7 @@ if __name__ == "__main__":
     y.set(1.0)
     cg_solver.solve(y, x)
     est_eigs = cg_solver.compute_eigs()
-    print(f"Estimated min/max eigenvalues = {est_eigs}")
+    print(f"Estimated eigenvalues = {est_eigs}")
 
     # Compare eigs to numpy
     # FIXME Do this properly
