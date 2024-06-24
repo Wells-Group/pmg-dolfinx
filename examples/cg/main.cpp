@@ -285,7 +285,6 @@ int main(int argc, char* argv[])
       peak_mem = mem;
 #endif
     // Create operator
-    // op(y, x);
 
     T norm = acc::norm(x);
     if (rank == 0)
