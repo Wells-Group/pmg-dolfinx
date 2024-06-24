@@ -347,59 +347,59 @@ int main(int argc, char* argv[])
     std::vector<T> eign = cg.compute_eigenvalues();
     std::sort(eign.begin(), eign.end());
     std::cout << "Computed eigs = (" << eign.front() << ", " << eign.back() << ")\n";
-    std::array<T, 2> eig_range = {0.1 * eign.back(), 1.1 * eign.back()};
-#ifdef ROCM_TRACING
-    remove_profiling_annotation("get eigenvalues");
-#endif
+//     std::array<T, 2> eig_range = {0.1 * eign.back(), 1.1 * eign.back()};
+// #ifdef ROCM_TRACING
+//     remove_profiling_annotation("get eigenvalues");
+// #endif
 
-    if (rank == 0)
-      std::cout << "Using eig range:" << eig_range[0] << " - " << eig_range[1] << std::endl;
+//     if (rank == 0)
+//       std::cout << "Using eig range:" << eig_range[0] << " - " << eig_range[1] << std::endl;
 
-#ifdef ROCM_TRACING
-    add_profiling_annotation("chebyshev solve");
-#endif
-#ifdef ROCM_SMI
-    mem = print_amd_gpu_memory_percentage_used("chebyshev solve");
-    if (mem > peak_mem)
-      peak_mem = mem;
-#endif
+// #ifdef ROCM_TRACING
+//     add_profiling_annotation("chebyshev solve");
+// #endif
+// #ifdef ROCM_SMI
+//     mem = print_amd_gpu_memory_percentage_used("chebyshev solve");
+//     if (mem > peak_mem)
+//       peak_mem = mem;
+// #endif
 
-    dolfinx::common::Timer tcheb("ZZZ Chebyshev");
-    dolfinx::acc::Chebyshev<DeviceVector> cheb(map, 1, eig_range);
-    cheb.set_max_iterations(30);
-#ifdef ROCM_TRACING
-    remove_profiling_annotation("chebyshev solve");
-#endif
-#ifdef ROCM_TRACING
-    add_profiling_annotation("chebyshev solve");
-#endif
-#ifdef ROCM_SMI
-    mem = print_amd_gpu_memory_percentage_used("before chebyshev solve");
-    if (mem > peak_mem)
-      peak_mem = mem;
-#endif
+//     dolfinx::common::Timer tcheb("ZZZ Chebyshev");
+//     dolfinx::acc::Chebyshev<DeviceVector> cheb(map, 1, eig_range);
+//     cheb.set_max_iterations(30);
+// #ifdef ROCM_TRACING
+//     remove_profiling_annotation("chebyshev solve");
+// #endif
+// #ifdef ROCM_TRACING
+//     add_profiling_annotation("chebyshev solve");
+// #endif
+// #ifdef ROCM_SMI
+//     mem = print_amd_gpu_memory_percentage_used("before chebyshev solve");
+//     if (mem > peak_mem)
+//       peak_mem = mem;
+// #endif
 
-    // Try non-zero initial guess to make sure that works OK
-    x.set(1.0);
-    y.copy_from_host(b); // Copy data from host vector to device vector
-    err_check(hipDeviceSynchronize());
-    T xnorm = acc::norm(x);
-    spdlog::info("Before set bc, x norm = {}", xnorm);
-    fem::set_bc<T, T>(x.mutable_array(), {bc});
-    err_check(hipDeviceSynchronize());
-    xnorm = acc::norm(x);
-    spdlog::info("After set bc, x norm = {}", xnorm);
+//     // Try non-zero initial guess to make sure that works OK
+//     x.set(1.0);
+//     y.copy_from_host(b); // Copy data from host vector to device vector
+//     err_check(hipDeviceSynchronize());
+//     T xnorm = acc::norm(x);
+//     spdlog::info("Before set bc, x norm = {}", xnorm);
+//     fem::set_bc<T, T>(x.mutable_array(), {bc});
+//     err_check(hipDeviceSynchronize());
+//     xnorm = acc::norm(x);
+//     spdlog::info("After set bc, x norm = {}", xnorm);
 
-    cheb.solve(op, x, y, true);
-#ifdef ROCM_SMI
-    mem = print_amd_gpu_memory_percentage_used("afterchebyshev solve");
-    if (mem > peak_mem)
-      peak_mem = mem;
-#endif
-#ifdef ROCM_TRACING
-    remove_profiling_annotation("chebyshev solve");
-#endif
-    tcheb.stop();
+//     cheb.solve(op, x, y, true);
+// #ifdef ROCM_SMI
+//     mem = print_amd_gpu_memory_percentage_used("afterchebyshev solve");
+//     if (mem > peak_mem)
+//       peak_mem = mem;
+// #endif
+// #ifdef ROCM_TRACING
+//     remove_profiling_annotation("chebyshev solve");
+// #endif
+//     tcheb.stop();
 
     // Display timings
     dolfinx::list_timings(MPI_COMM_WORLD, {dolfinx::TimingType::wall});
