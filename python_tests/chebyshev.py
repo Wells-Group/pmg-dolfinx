@@ -59,7 +59,9 @@ class Chebyshev:
             rho = rho_new
 
             if self.verbose:
-                print(f"Iteration {i + 1}, PRECONDITIONED residual norm = {np.linalg.norm(r)}")
+                print(
+                    f"Iteration {i + 1}, PRECONDITIONED residual norm = {np.linalg.norm(r)}"
+                )
 
     def cheb4(self, b, x):
         r = b - self.A @ x
@@ -69,23 +71,29 @@ class Chebyshev:
             print(f"Iteration 0, UNPRECONDITIONED residual norm = {np.linalg.norm(r)}")
             print(f"S.norm = {np.linalg.norm(self.S)}")
         d = self.S * r.copy() * float(4 / (3 * self.eig_range[1]))
-        print(f"Iteration 0, z norm = {np.linalg.norm(d)} fac = {float(4 / (3 * self.eig_range[1]))}")
+        print(
+            f"Iteration 0, z norm = {np.linalg.norm(d)} fac = {float(4 / (3 * self.eig_range[1]))}"
+        )
 
         for i in range(1, self.max_iter + 1):
             x += d
             r = r - self.A @ d
             d *= float((2 * i - 1) / (2 * i + 3))
-            d += self.S * r.copy() * float((8 * i + 4) / (2 * i + 3) / self.eig_range[1])
+            d += (
+                self.S * r.copy() * float((8 * i + 4) / (2 * i + 3) / self.eig_range[1])
+            )
             if self.verbose:
                 print(f"Iteration {i}, x norm = {np.linalg.norm(x)}")
                 print(f"Iteration {i}, z norm = {np.linalg.norm(d)}")
-                print(f"Iteration {i}, UNPRECONDITIONED residual norm = {np.linalg.norm(r)}")
+                print(
+                    f"Iteration {i}, UNPRECONDITIONED residual norm = {np.linalg.norm(r)}"
+                )
 
 
 if __name__ == "__main__":
     np.set_printoptions(linewidth=200)
 
-    n = 10
+    n = 5
     msh = create_unit_cube(MPI.COMM_WORLD, n, n, n, cell_type=mesh.CellType.hexahedron)
     print(f"Num cells = {msh.topology.index_map(msh.topology.dim).size_global}")
 
@@ -121,18 +129,21 @@ if __name__ == "__main__":
 
     cg_solver = CGSolver(A, 10, 1e-6, jacobi=True, verbose=False)
     x = A.createVecRight()
-    cg_solver.solve(b, x)
+    y = A.createVecRight()
+    y.set(1.0)
+    cg_solver.solve(y, x)
     est_eigs = cg_solver.compute_eigs()
     print(f"Estimated min/max eigenvalues = {est_eigs}")
 
-    eigs = [0.8 * est_eigs[0], 1.1 * est_eigs[1]]
+    eigs = [0.1 * est_eigs[1], 1.1 * est_eigs[1]]
 
-    smoother = Chebyshev(A, 50, eigs, 4, jacobi=True, verbose=True)
+    max_cheb_iters = 30
+    smoother = Chebyshev(A, max_cheb_iters, eigs, 4, jacobi=True, verbose=True)
     # Try with non-zero initial guess to check that works OK
     x.set(1.0)
-    print('before set bc x = ', x.norm())
+    print("before set bc x norm = ", x.norm())
     set_bc(x, [bc])
-    print('after set bc x = ', x.norm())
+    print("after set bc x norm = ", x.norm())
     smoother.solve(b, x)
 
     # Compare to PETSc
@@ -142,7 +153,7 @@ if __name__ == "__main__":
     opts = PETSc.Options()
     smoother_options = {
         "ksp_type": "chebyshev",
-        "ksp_max_it": 40,
+        "ksp_max_it": max_cheb_iters,
         "pc_type": "jacobi",
         "ksp_chebyshev_eigenvalues": f"{eigs[0]}, {eigs[1]}",
         "ksp_chebyshev_kind": "fourth",

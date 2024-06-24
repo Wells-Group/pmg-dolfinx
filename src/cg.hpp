@@ -74,7 +74,7 @@ int tqli(T* d, T* e, int n)
     int m;
     while ((m = tqli_m(l)) != l)
     {
-      if (iter++ == 300)
+      if (iter++ == 30)
         return -1;
       tqli_ml(d, e, m, l);
     }
@@ -134,9 +134,10 @@ public:
       e[i] = std::sqrt(_betas[i]) / _alphas[i];
     }
 
-    if (tqli(d.data(), e.data(), ne - 1) == -1)
+    if (tqli(d.data(), e.data(), ne) == -1)
       throw std::runtime_error("Eigenvalue estimate failed");
 
+    std::sort(d.begin(), d.end());
     return d;
   }
 
@@ -198,6 +199,8 @@ public:
       if (rank == 0 and verbose)
       {
         std::cout << "Iteration " << k << " residual " << std::sqrt(rnorm) << std::endl;
+        std::cout << "alpha = " << alpha << "\n";
+        std::cout << "beta = " << beta << "\n";
       }
 
       if (rnorm / rnorm0 < rtol2)
