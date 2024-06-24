@@ -132,7 +132,8 @@ __global__ void geometry_computation(const T* xgeom, T* G_entity,
 template <typename T, int P>
 __global__ void stiffness_operator(const T* x, const T* entity_constants, T* y, const T* G_entity,
                                    const std::int32_t* entity_dofmap, const T* dphi,
-                                   const int* entities, int n_entities)
+                                   const int* entities, int n_entities,
+                                   const std::int8_t* bc_marker)
 {
   constexpr int nd = P + 1; // Number of dofs per direction in 1D
   constexpr int nq = nd;    // Number of quadrature points in 1D (must be the same as nd)
@@ -171,7 +172,10 @@ __global__ void stiffness_operator(const T* x, const T* entity_constants, T* y, 
 
   // Gather x values required in this cell
   // scratch has dimensions (nd, nd, nd)
-  scratch[thread_id] = x[dof];
+  if (bc_marker[dof])
+    scratch[thread_id] = 0.0;
+  else
+    scratch[thread_id] = x[dof];
   __syncthreads();
 
   // Compute val_x, val_y, val_z at quadrature point of this thread
@@ -254,6 +258,10 @@ __global__ void stiffness_operator(const T* x, const T* entity_constants, T* y, 
   // Sum contributions
   T val = val_x + val_y + val_z;
 
+  // FIXME Set correct BC val for y outside kernel (multiple cell may share the dof)
+  if (bc_marker[dof])
+    val = 0.0;
+
   // Atomically add the computed value to the output array `y`
   atomicAdd(&y[dof], val);
 }
@@ -269,10 +277,11 @@ public:
                    std::span<const std::int32_t> dofmap, std::span<const T> xgeom,
                    std::span<const std::int32_t> geometry_dofmap, std::span<const T> dphi_geometry,
                    std::span<const T> G_weights, const std::vector<int>& lcells,
-                   const std::vector<int>& bcells)
+                   const std::vector<int>& bcells, std::span<const std::int8_t> bc_marker,
+                   std::span<const T> bc_vec)
       : degree(degree), cell_constants(coefficients), cell_dofmap(dofmap), xgeom(xgeom),
-        geometry_dofmap(geometry_dofmap), dphi_geometry(dphi_geometry), G_weights(G_weights),
-        lcells(lcells), bcells(bcells)
+        geometry_dofmap(geometry_dofmap),
+        dphi_geometry(dphi_geometry), G_weights(G_weights), bc_marker(bc_marker), bc_vec(bc_vec), lcells(lcells), bcells(bcells)
   {
     std::map<int, int> Qdegree = {{2, 3}, {3, 4}, {4, 6}, {5, 8}};
 
@@ -330,7 +339,8 @@ public:
       hipLaunchKernelGGL(HIP_KERNEL_NAME(stiffness_operator<T, P>), grid_size, block_size, shm_size,
                          0, x, cell_constants.data(), y, thrust::raw_pointer_cast(G_entity.data()),
                          cell_dofmap.data(), thrust::raw_pointer_cast(dphi_d.data()),
-                         thrust::raw_pointer_cast(cell_list_d.data()), cell_list_d.size());
+                         thrust::raw_pointer_cast(cell_list_d.data()), cell_list_d.size(),
+                         bc_marker.data());
 
       err_check(hipGetLastError());
     }
@@ -355,10 +365,15 @@ public:
       hipLaunchKernelGGL(HIP_KERNEL_NAME(stiffness_operator<T, P>), grid_size, block_size, shm_size,
                          0, x, cell_constants.data(), y, thrust::raw_pointer_cast(G_entity.data()),
                          cell_dofmap.data(), thrust::raw_pointer_cast(dphi_d.data()),
-                         thrust::raw_pointer_cast(cell_list_d.data()), cell_list_d.size());
+                         thrust::raw_pointer_cast(cell_list_d.data()), cell_list_d.size(),
+                         bc_marker.data());
 
       err_check(hipGetLastError());
     }
+    err_check(hipDeviceSynchronize());
+
+    thrust::transform(out.array().begin(), out.array().end(), bc_vec.begin(),
+                      out.mutable_array().begin(), thrust::plus<T>());
   }
 
   template <typename Vector>
@@ -396,6 +411,8 @@ private:
   std::span<const std::int32_t> geometry_dofmap;
   std::span<const T> dphi_geometry;
   std::span<const T> G_weights;
+  std::span<const std::int8_t> bc_marker;
+  std::span<const T> bc_vec;
 
   // On device storage for geometry data (computed for each batch of cells)
   thrust::device_vector<T> G_entity;
