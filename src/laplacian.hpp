@@ -280,8 +280,8 @@ public:
                    const std::vector<int>& bcells, std::span<const std::int8_t> bc_marker,
                    std::span<const T> bc_vec)
       : degree(degree), cell_constants(coefficients), cell_dofmap(dofmap), xgeom(xgeom),
-        geometry_dofmap(geometry_dofmap),
-        dphi_geometry(dphi_geometry), G_weights(G_weights), bc_marker(bc_marker), bc_vec(bc_vec), lcells(lcells), bcells(bcells)
+        geometry_dofmap(geometry_dofmap), dphi_geometry(dphi_geometry), G_weights(G_weights),
+        bc_marker(bc_marker), bc_vec(bc_vec), lcells(lcells), bcells(bcells)
   {
     std::map<int, int> Qdegree = {{2, 3}, {3, 4}, {4, 6}, {5, 8}};
 
@@ -396,6 +396,7 @@ public:
   template <typename Vector>
   void set_diag_inverse(const Vector& diag_inv)
   {
+    _diag_inv.resize(diag_inv.array().size(), 0);
     thrust::copy(diag_inv.array().begin(), diag_inv.array().end(), _diag_inv.begin());
   }
 

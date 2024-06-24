@@ -2,12 +2,14 @@
 #include "src/cg.hpp"
 #include "src/chebyshev.hpp"
 #include "src/csr.hpp"
+#include "src/laplacian.hpp"
 #include "src/mesh.hpp"
 #include "src/operators.hpp"
 #include "src/vector.hpp"
 
 #include <array>
 #include <basix/e-lagrange.h>
+#include <basix/quadrature.h>
 #include <boost/program_options.hpp>
 #include <dolfinx.h>
 #include <dolfinx/fem/dolfinx_fem.h>
@@ -139,7 +141,7 @@ int main(int argc, char* argv[])
     }
 
     auto V = std::make_shared<fem::FunctionSpace<T>>(fem::create_functionspace(mesh, *element, {}));
-
+    auto [lcells, bcells] = compute_boundary_cells(V);
 #ifdef ROCM_TRACING
     remove_profiling_annotation("making V");
 #endif
@@ -226,11 +228,83 @@ int main(int argc, char* argv[])
 
     // Define vectors
     using DeviceVector = dolfinx::acc::Vector<T, acc::Device::HIP>;
-    acc::MatrixOperator<T> op(a, {bc});
-    auto map = op.column_index_map();
+
+    // Copy data to GPU
+    // Constants
+    // TODO Pack these properly
+    const int num_cells_all = mesh->topology()->index_map(tdim)->size_local()
+                              + mesh->topology()->index_map(tdim)->num_ghosts();
+    thrust::device_vector<T> constants_d(num_cells_all, kappa->value[0]);
+    std::span<const T> constants_d_span(thrust::raw_pointer_cast(constants_d.data()),
+                                        constants_d.size());
+
+    // V dofmap
+    thrust::device_vector<std::int32_t> dofmap_d(
+        dofmap->map().data_handle(), dofmap->map().data_handle() + dofmap->map().size());
+    std::span<const std::int32_t> dofmap_d_span(thrust::raw_pointer_cast(dofmap_d.data()),
+                                                dofmap_d.size());
+    spdlog::info("Send dofmap to GPU (size = {})", dofmap_d.size());
+
+    auto map = V->dofmap()->index_map;
+
+    // Put geometry information onto device
+    const fem::CoordinateElement<T>& cmap = mesh->geometry().cmap();
+    auto xdofmap = mesh->geometry().dofmap();
+
+    // Geometry dofmap
+    thrust::device_vector<std::int32_t> xdofmap_d(xdofmap.data_handle(),
+                                                  xdofmap.data_handle() + xdofmap.size());
+    std::span<const std::int32_t> xdofmap_d_span(thrust::raw_pointer_cast(xdofmap_d.data()),
+                                                 xdofmap_d.size());
+    // Geometry points
+    thrust::device_vector<T> xgeom_d(mesh->geometry().x().begin(), mesh->geometry().x().end());
+    std::span<const T> xgeom_d_span(thrust::raw_pointer_cast(xgeom_d.data()), xgeom_d.size());
+
+    // dphi tables at quadrature points
+    // Quadrature points and weights on hex (3D)
+    auto [Gpoints, Gweights] = basix::quadrature::make_quadrature<T>(
+        basix::quadrature::type::gll, basix::cell::type::hexahedron, basix::polyset::type::standard,
+        order + 1);
+
+    std::array<std::size_t, 4> phi_shape = cmap.tabulate_shape(1, Gweights.size());
+    std::vector<T> phi_b(std::reduce(phi_shape.begin(), phi_shape.end(), 1, std::multiplies{}));
+    cmap.tabulate(1, Gpoints, {Gweights.size(), 3}, phi_b);
+
+    // Copy dphi to device (skipping phi in table)
+    thrust::device_vector<T> dphi_d(phi_b.begin() + phi_b.size() / 4, phi_b.end());
+    std::span<const T> dphi_d_span(thrust::raw_pointer_cast(dphi_d.data()), dphi_d.size());
+
+    // Copy quadrature weights to device
+    thrust::device_vector<T> Gweights_d(Gweights.begin(), Gweights.end());
+    std::span<const T> Gweights_d_span(thrust::raw_pointer_cast(Gweights_d.data()),
+                                       Gweights_d.size());
+
+    const int num_dofs = map->size_local() + map->num_ghosts();
+    std::vector<std::int8_t> bc_marker(num_dofs, 0);
+    bc->mark_dofs(bc_marker);
+    thrust::device_vector<std::int8_t> bc_marker_d(bc_marker.begin(), bc_marker.end());
+    std::span<const std::int8_t> bc_marker_d_span(thrust::raw_pointer_cast(bc_marker_d.data()),
+                                                  bc_marker_d.size());
+    la::Vector<T> bc_vec(map, 1);
+    bc_vec.set(0.0);
+    fem::set_bc<T, T>(bc_vec.mutable_array(), {bc});
+    thrust::device_vector<T> bc_vec_d(bc_vec.array().begin(), bc_vec.array().end());
+    std::span<const T> bc_vec_d_span(thrust::raw_pointer_cast(bc_vec_d.data()), bc_vec_d.size());
+
+    acc::MatFreeLaplacian<T> op(3, constants_d_span, dofmap_d_span, xgeom_d_span, xdofmap_d_span,
+                                dphi_d_span, Gweights_d_span, lcells, bcells, bc_marker_d_span,
+                                bc_vec_d_span);
+
+    // acc::MatrixOperator<T> op(a, {bc});
+    // auto map = op.column_index_map();
 
     fem::Function<T> u(V);
     la::Vector<T> b(map, 1);
+
+    la::Vector<T> diag(map, 1);
+    diag.set(T{1.0});
+
+    op.set_diag_inverse(diag);
 
 #ifdef ROCM_TRACING
     add_profiling_annotation("assembling and scattering");
@@ -347,59 +421,59 @@ int main(int argc, char* argv[])
     std::vector<T> eign = cg.compute_eigenvalues();
     std::sort(eign.begin(), eign.end());
     std::cout << "Computed eigs = (" << eign.front() << ", " << eign.back() << ")\n";
-//     std::array<T, 2> eig_range = {0.1 * eign.back(), 1.1 * eign.back()};
-// #ifdef ROCM_TRACING
-//     remove_profiling_annotation("get eigenvalues");
-// #endif
+    //     std::array<T, 2> eig_range = {0.1 * eign.back(), 1.1 * eign.back()};
+    // #ifdef ROCM_TRACING
+    //     remove_profiling_annotation("get eigenvalues");
+    // #endif
 
-//     if (rank == 0)
-//       std::cout << "Using eig range:" << eig_range[0] << " - " << eig_range[1] << std::endl;
+    //     if (rank == 0)
+    //       std::cout << "Using eig range:" << eig_range[0] << " - " << eig_range[1] << std::endl;
 
-// #ifdef ROCM_TRACING
-//     add_profiling_annotation("chebyshev solve");
-// #endif
-// #ifdef ROCM_SMI
-//     mem = print_amd_gpu_memory_percentage_used("chebyshev solve");
-//     if (mem > peak_mem)
-//       peak_mem = mem;
-// #endif
+    // #ifdef ROCM_TRACING
+    //     add_profiling_annotation("chebyshev solve");
+    // #endif
+    // #ifdef ROCM_SMI
+    //     mem = print_amd_gpu_memory_percentage_used("chebyshev solve");
+    //     if (mem > peak_mem)
+    //       peak_mem = mem;
+    // #endif
 
-//     dolfinx::common::Timer tcheb("ZZZ Chebyshev");
-//     dolfinx::acc::Chebyshev<DeviceVector> cheb(map, 1, eig_range);
-//     cheb.set_max_iterations(30);
-// #ifdef ROCM_TRACING
-//     remove_profiling_annotation("chebyshev solve");
-// #endif
-// #ifdef ROCM_TRACING
-//     add_profiling_annotation("chebyshev solve");
-// #endif
-// #ifdef ROCM_SMI
-//     mem = print_amd_gpu_memory_percentage_used("before chebyshev solve");
-//     if (mem > peak_mem)
-//       peak_mem = mem;
-// #endif
+    //     dolfinx::common::Timer tcheb("ZZZ Chebyshev");
+    //     dolfinx::acc::Chebyshev<DeviceVector> cheb(map, 1, eig_range);
+    //     cheb.set_max_iterations(30);
+    // #ifdef ROCM_TRACING
+    //     remove_profiling_annotation("chebyshev solve");
+    // #endif
+    // #ifdef ROCM_TRACING
+    //     add_profiling_annotation("chebyshev solve");
+    // #endif
+    // #ifdef ROCM_SMI
+    //     mem = print_amd_gpu_memory_percentage_used("before chebyshev solve");
+    //     if (mem > peak_mem)
+    //       peak_mem = mem;
+    // #endif
 
-//     // Try non-zero initial guess to make sure that works OK
-//     x.set(1.0);
-//     y.copy_from_host(b); // Copy data from host vector to device vector
-//     err_check(hipDeviceSynchronize());
-//     T xnorm = acc::norm(x);
-//     spdlog::info("Before set bc, x norm = {}", xnorm);
-//     fem::set_bc<T, T>(x.mutable_array(), {bc});
-//     err_check(hipDeviceSynchronize());
-//     xnorm = acc::norm(x);
-//     spdlog::info("After set bc, x norm = {}", xnorm);
+    //     // Try non-zero initial guess to make sure that works OK
+    //     x.set(1.0);
+    //     y.copy_from_host(b); // Copy data from host vector to device vector
+    //     err_check(hipDeviceSynchronize());
+    //     T xnorm = acc::norm(x);
+    //     spdlog::info("Before set bc, x norm = {}", xnorm);
+    //     fem::set_bc<T, T>(x.mutable_array(), {bc});
+    //     err_check(hipDeviceSynchronize());
+    //     xnorm = acc::norm(x);
+    //     spdlog::info("After set bc, x norm = {}", xnorm);
 
-//     cheb.solve(op, x, y, true);
-// #ifdef ROCM_SMI
-//     mem = print_amd_gpu_memory_percentage_used("afterchebyshev solve");
-//     if (mem > peak_mem)
-//       peak_mem = mem;
-// #endif
-// #ifdef ROCM_TRACING
-//     remove_profiling_annotation("chebyshev solve");
-// #endif
-//     tcheb.stop();
+    //     cheb.solve(op, x, y, true);
+    // #ifdef ROCM_SMI
+    //     mem = print_amd_gpu_memory_percentage_used("afterchebyshev solve");
+    //     if (mem > peak_mem)
+    //       peak_mem = mem;
+    // #endif
+    // #ifdef ROCM_TRACING
+    //     remove_profiling_annotation("chebyshev solve");
+    // #endif
+    //     tcheb.stop();
 
     // Display timings
     dolfinx::list_timings(MPI_COMM_WORLD, {dolfinx::TimingType::wall});
