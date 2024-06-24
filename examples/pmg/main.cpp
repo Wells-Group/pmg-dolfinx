@@ -53,12 +53,14 @@ void solve(std::shared_ptr<mesh::Mesh<double>> mesh, bool use_amg)
 
   std::vector<std::shared_ptr<fem::FunctionSpace<T>>> V(form_a.size());
 
+  // Compute local and boundary cells (needed for MatFreeLaplacian)
   auto [lcells, bcells] = compute_boundary_cells(V.back());
 
   std::vector<std::shared_ptr<fem::Form<T, T>>> a(V.size());
   std::vector<std::shared_ptr<fem::Form<T, T>>> L(V.size());
   std::vector<std::shared_ptr<const fem::DirichletBC<T, T>>> bcs(V.size());
 
+  // List of LHS operators (CSR or MatrixFree), one for each level.
   std::vector<std::shared_ptr<FineOperator>> operators(V.size());
 
   std::vector<std::shared_ptr<const common::IndexMap>> maps(V.size());
@@ -111,8 +113,8 @@ void solve(std::shared_ptr<mesh::Mesh<double>> mesh, bool use_amg)
     bcs[i] = std::make_shared<const fem::DirichletBC<T, T>>(0.0, bdofs, V[i]);
   }
 
+  // If not using AMG coarse_solver will be a nullptr, and operators[0] will be applied
   std::shared_ptr<CoarseSolverType<T>> coarse_solver;
-
   if (use_amg)
     coarse_solver = std::make_shared<CoarseSolverType<T>>(a[0], bcs[0]);
 
@@ -136,7 +138,7 @@ void solve(std::shared_ptr<mesh::Mesh<double>> mesh, bool use_amg)
     std::cout << std::flush;
   }
 
-  // Copy dofmaps to device
+  // Copy dofmaps to device (only for MatFreeLaplacian)
   std::vector<thrust::device_vector<std::int32_t>> dofmapV(order.size());
   std::vector<std::span<std::int32_t>> device_dofmaps;
   for (std::size_t i = 0; i < V.size(); ++i)
@@ -150,7 +152,7 @@ void solve(std::shared_ptr<mesh::Mesh<double>> mesh, bool use_amg)
         std::span<std::int32_t>(thrust::raw_pointer_cast(dofmapV[i].data()), dofmapV[i].size()));
   }
 
-  // Copy geometry to device
+  // Copy geometry to device (only for MatFreeLaplacian)
   thrust::device_vector<T> geomx_device(mesh->geometry().x().size());
   spdlog::info("Copy geometry to device :{}", geomx_device.size());
   thrust::copy(mesh->geometry().x().begin(), mesh->geometry().x().end(), geomx_device.begin());
