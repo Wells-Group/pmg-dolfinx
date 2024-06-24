@@ -273,6 +273,8 @@ template <typename T>
 class MatFreeLaplacian
 {
 public:
+  using value_type = T;
+
   MatFreeLaplacian(int degree, std::span<const T> coefficients,
                    std::span<const std::int32_t> dofmap, std::span<const T> xgeom,
                    std::span<const std::int32_t> geometry_dofmap, std::span<const T> dphi_geometry,
@@ -280,8 +282,8 @@ public:
                    const std::vector<int>& bcells, std::span<const std::int8_t> bc_marker,
                    std::span<const T> bc_vec)
       : degree(degree), cell_constants(coefficients), cell_dofmap(dofmap), xgeom(xgeom),
-        geometry_dofmap(geometry_dofmap),
-        dphi_geometry(dphi_geometry), G_weights(G_weights), bc_marker(bc_marker), bc_vec(bc_vec), lcells(lcells), bcells(bcells)
+        geometry_dofmap(geometry_dofmap), dphi_geometry(dphi_geometry), G_weights(G_weights),
+        bc_marker(bc_marker), bc_vec(bc_vec), lcells(lcells), bcells(bcells)
   {
     std::map<int, int> Qdegree = {{2, 3}, {3, 4}, {4, 6}, {5, 8}};
 
