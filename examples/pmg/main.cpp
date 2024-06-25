@@ -138,49 +138,102 @@ void solve(std::shared_ptr<mesh::Mesh<double>> mesh, bool use_amg)
     std::cout << std::flush;
   }
 
-  // Copy dofmaps to device (only for MatFreeLaplacian)
-  std::vector<thrust::device_vector<std::int32_t>> dofmapV(order.size());
+  // Data for required quantities for MatFreeLaplacian:
+
+  // Dofmaps for each level
+  std::vector<thrust::device_vector<std::int32_t>> dofmapV(V.size());
   std::vector<std::span<std::int32_t>> device_dofmaps;
-  for (std::size_t i = 0; i < V.size(); ++i)
-  {
-    dofmapV[i].resize(V[i]->dofmap()->map().size());
-    spdlog::info("Copy dofmap (V{}) : {}", i, dofmapV[i].size());
-    thrust::copy(V[i]->dofmap()->map().data_handle(),
-                 V[i]->dofmap()->map().data_handle() + V[i]->dofmap()->map().size(),
-                 dofmapV[i].begin());
-    device_dofmaps.push_back(
-        std::span<std::int32_t>(thrust::raw_pointer_cast(dofmapV[i].data()), dofmapV[i].size()));
-  }
 
-  // Copy geometry to device (only for MatFreeLaplacian)
-  thrust::device_vector<T> geomx_device(mesh->geometry().x().size());
-  spdlog::info("Copy geometry to device :{}", geomx_device.size());
-  thrust::copy(mesh->geometry().x().begin(), mesh->geometry().x().end(), geomx_device.begin());
-  std::span<T> geom_x(thrust::raw_pointer_cast(geomx_device.data()), geomx_device.size());
+  // Geometry
+  thrust::device_vector<T> geomx_device;
+  std::span<T> geom_x;
+  thrust::device_vector<std::int32_t> geomx_dofmap_device;
+  std::span<std::int32_t> geom_x_dofmap;
+  std::vector<thrust::device_vector<T>> geometry_dphi_d(V.size());
+  std::vector<std::span<const T>> geometry_dphi_d_span;
+  std::vector<thrust::device_vector<T>> Gweights_d(V.size());
+  std::vector<std::span<const T>> Gweights_d_span;
 
-  thrust::device_vector<std::int32_t> geomx_dofmap_device(mesh->geometry().dofmap().size());
-  spdlog::info("Copy geometry to device :{}", geomx_dofmap_device.size());
-  thrust::copy(mesh->geometry().dofmap().data_handle(),
-               mesh->geometry().dofmap().data_handle() + mesh->geometry().dofmap().size(),
-               geomx_dofmap_device.begin());
-  std::span<std::int32_t> geom_x_dofmap(thrust::raw_pointer_cast(geomx_dofmap_device.data()),
-                                        geomx_dofmap_device.size());
+  // BCs
+  std::vector<thrust::device_vector<std::int8_t>> bc_marker_d(V.size());
+  std::vector<std::span<const std::int8_t>> bc_marker_d_span;
+  std::vector<thrust::device_vector<T>> bc_vec_d(V.size());
+  std::vector<std::span<const T>> bc_vec_d_span;
 
   // Copy constants to device
+  // FIXME - need to expand to one value per cell.
   thrust::device_vector<T> constants(kappa->value.begin(), kappa->value.end());
   std::span<T> device_constants(thrust::raw_pointer_cast(constants.data()), constants.size());
 
-  // Copy bc_dofs to device (list of all dofs, with BCs marked with 0)
-  std::vector<thrust::device_vector<std::int8_t>> device_bc_dofs(V.size());
-  for (std::size_t i = 0; i < V.size(); ++i)
+  if constexpr (std::is_same_v<FineOperator, acc::MatFreeLaplacian<T>>)
   {
-    auto [dofs, pos] = bcs[i]->dof_indices();
-    std::vector<std::int8_t> active_bc_dofs(
-        V[i]->dofmap()->index_map->size_local() + V[i]->dofmap()->index_map->num_ghosts(), 1);
-    for (std::int32_t index : dofs)
-      active_bc_dofs[index] = 0;
-    device_bc_dofs[i]
-        = thrust::device_vector<std::int8_t>(active_bc_dofs.begin(), active_bc_dofs.end());
+    // Copy dofmaps to device (only for MatFreeLaplacian)
+    std::vector<thrust::device_vector<std::int32_t>> dofmapV(order.size());
+
+    for (std::size_t i = 0; i < V.size(); ++i)
+    {
+      dofmapV[i].resize(V[i]->dofmap()->map().size());
+      spdlog::debug("Copy dofmap (V{}) : {}", i, dofmapV[i].size());
+      thrust::copy(V[i]->dofmap()->map().data_handle(),
+                   V[i]->dofmap()->map().data_handle() + V[i]->dofmap()->map().size(),
+                   dofmapV[i].begin());
+      device_dofmaps.push_back(
+          std::span<std::int32_t>(thrust::raw_pointer_cast(dofmapV[i].data()), dofmapV[i].size()));
+    }
+
+    for (std::size_t i = 0; i < V.size(); ++i)
+    {
+      spdlog::debug("Copy geometry quadrature tables to device [{}]", i);
+      // Quadrature points and weights on hex (3D)
+      auto [Gpoints, Gweights] = basix::quadrature::make_quadrature<T>(
+          basix::quadrature::type::gll, basix::cell::type::hexahedron,
+          basix::polyset::type::standard, order[i]);
+      // Tables at quadrature points [phi, dphix, dphiy, dphiz]
+      const fem::CoordinateElement<T>& cmap = mesh->geometry().cmap();
+      std::array<std::size_t, 4> phi_shape = cmap.tabulate_shape(1, Gweights.size());
+      std::vector<T> phi_b(std::reduce(phi_shape.begin(), phi_shape.end(), 1, std::multiplies{}));
+      cmap.tabulate(1, Gpoints, {Gweights.size(), 3}, phi_b);
+
+      // Copy dphi to device (skipping phi in table)
+      geometry_dphi_d[i].resize(phi_b.size() * 3 / 4);
+      thrust::copy(phi_b.begin() + phi_b.size() / 4, phi_b.end(), geometry_dphi_d[i].begin());
+      geometry_dphi_d_span.push_back(std::span(thrust::raw_pointer_cast(geometry_dphi_d[i].data()),
+                                               geometry_dphi_d[i].size()));
+
+      // Copy quadrature weights to device
+      Gweights_d[i].resize(Gweights.size());
+      thrust::copy(Gweights.begin(), Gweights.end(), Gweights_d[i].begin());
+      Gweights_d_span.push_back(
+          std::span(thrust::raw_pointer_cast(Gweights_d[i].data()), Gweights_d[i].size()));
+    }
+
+    spdlog::debug("Copy geometry data to device");
+    geomx_device.resize(mesh->geometry().x().size());
+    spdlog::info("Copy geometry to device :{}", geomx_device.size());
+    thrust::copy(mesh->geometry().x().begin(), mesh->geometry().x().end(), geomx_device.begin());
+    geom_x = std::span<T>(thrust::raw_pointer_cast(geomx_device.data()), geomx_device.size());
+
+    geomx_dofmap_device.resize(mesh->geometry().dofmap().size());
+    thrust::copy(mesh->geometry().dofmap().data_handle(),
+                 mesh->geometry().dofmap().data_handle() + mesh->geometry().dofmap().size(),
+                 geomx_dofmap_device.begin());
+    geom_x_dofmap = std::span<std::int32_t>(thrust::raw_pointer_cast(geomx_dofmap_device.data()),
+                                            geomx_dofmap_device.size());
+
+    // Copy bc_dofs to device (list of all dofs, with BCs marked with 0)
+    for (std::size_t i = 0; i < V.size(); ++i)
+    {
+      spdlog::debug("Copy BCs[{}] to device", i);
+      auto [dofs, pos] = bcs[i]->dof_indices();
+      std::vector<std::int8_t> active_bc_dofs(
+          V[i]->dofmap()->index_map->size_local() + V[i]->dofmap()->index_map->num_ghosts(), 0);
+      for (std::int32_t index : dofs)
+        active_bc_dofs[index] = 1;
+      bc_marker_d[i]
+          = thrust::device_vector<std::int8_t>(active_bc_dofs.begin(), active_bc_dofs.end());
+      bc_marker_d_span.push_back(
+          std::span(thrust::raw_pointer_cast(bc_marker_d[i].data()), bc_marker_d[i].size()));
+    }
   }
 
   std::vector<std::shared_ptr<DeviceVector>> bs(V.size());
@@ -194,11 +247,10 @@ void solve(std::shared_ptr<mesh::Mesh<double>> mesh, bool use_amg)
       maps[i] = V[i]->dofmap()->index_map;
 
       spdlog::info("Create operator on V[{}]", i);
-      std::span<const std::int8_t> bc_span(thrust::raw_pointer_cast(device_bc_dofs[i].data()),
-                                           device_bc_dofs[i].size());
-      //      operators[i] = std::make_shared<acc::MatFreeLaplacian<T>>(degree, device_constants,
-      //                                                                device_dofmaps[i],
-      //                                                                device_G[i]);
+      operators[i] = std::make_shared<acc::MatFreeLaplacian<T>>(
+          order[i], device_constants, device_dofmaps[i], geom_x, geom_x_dofmap,
+          geometry_dphi_d_span[i], Gweights_d_span[i], lcells, bcells, bc_marker_d_span[i],
+          bc_vec_d_span[i]);
     }
     else
     {
