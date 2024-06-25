@@ -54,7 +54,6 @@ void solve(std::shared_ptr<mesh::Mesh<double>> mesh, bool use_amg)
   topology->create_connectivity(fdim, tdim);
 
   std::vector<std::shared_ptr<fem::FunctionSpace<T>>> V(form_a.size());
-
   std::vector<std::shared_ptr<fem::Form<T, T>>> a(V.size());
   std::vector<std::shared_ptr<fem::Form<T, T>>> L(V.size());
   std::vector<std::shared_ptr<const fem::DirichletBC<T, T>>> bcs(V.size());
@@ -64,9 +63,8 @@ void solve(std::shared_ptr<mesh::Mesh<double>> mesh, bool use_amg)
 
   std::vector<std::shared_ptr<const common::IndexMap>> maps(V.size());
 
-  spdlog::debug("Get exterior facets");
   auto facets = dolfinx::mesh::exterior_facet_indices(*topology);
-  spdlog::debug("Get exterior facets - OK");
+
   std::vector<std::size_t> ndofs(V.size());
 
   // Prepare and set Constants for the bilinear form
@@ -162,6 +160,8 @@ void solve(std::shared_ptr<mesh::Mesh<double>> mesh, bool use_amg)
   // BCs
   std::vector<thrust::device_vector<std::int8_t>> bc_marker_d(V.size());
   std::vector<std::span<const std::int8_t>> bc_marker_d_span;
+
+  // FIXME - fill values
   std::vector<thrust::device_vector<T>> bc_vec_d(V.size());
   std::vector<std::span<const T>> bc_vec_d_span;
 
@@ -256,10 +256,16 @@ void solve(std::shared_ptr<mesh::Mesh<double>> mesh, bool use_amg)
           order[i], device_constants, device_dofmaps[i], geom_x, geom_x_dofmap,
           geometry_dphi_d_span[i], Gweights_d_span[i], lcells, bcells, bc_marker_d_span[i],
           bc_vec_d_span[i]);
+
+      // FIXME: do this better
+      // Compute CSR matrix, to get diagonal for MatFree
+      acc::MatrixOperator<T> A(a_i, bc_i);
+      DeviceVector diag_inv(maps[i], 1);
+      A.get_diag_inverse(diag_inv);
+      operators[i]->set_diag_inverse(diag_inv);
     }
     else
     {
-
       operators[i] = std::make_shared<acc::MatrixOperator<T>>(a_i, bc_i);
       maps[i] = operators[i]->column_index_map();
     }
@@ -299,6 +305,7 @@ void solve(std::shared_ptr<mesh::Mesh<double>> mesh, bool use_amg)
     spdlog::info("Eigenvalues level {}: {} - {}", i, eign.front(), eign.back());
   }
 
+  // FIXME
   smoothers[0]->set_max_iterations(10);
   smoothers[1]->set_max_iterations(5);
 
