@@ -257,6 +257,11 @@ int main(int argc, char* argv[])
     std::cout << "Norm of u = " << acc::norm(u) << "\n";
     std::cout << "Norm of z = " << acc::norm(z) << "\n";
 
+    // Compute error
+    DeviceVector e(map, 1);
+    acc::axpy(e, T{-1.0}, y, z);
+    std::cout << "Norm of error = " << acc::norm(e) << "\n";
+
     // Display timings
     dolfinx::list_timings(MPI_COMM_WORLD, {dolfinx::TimingType::wall});
   }
