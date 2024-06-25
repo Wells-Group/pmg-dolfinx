@@ -165,9 +165,10 @@ void solve(std::shared_ptr<mesh::Mesh<double>> mesh, bool use_amg)
   std::vector<thrust::device_vector<T>> bc_vec_d(V.size());
   std::vector<std::span<const T>> bc_vec_d_span;
 
-  // Copy constants to device
-  // FIXME - need to expand to one value per cell.
-  thrust::device_vector<T> constants(kappa->value.begin(), kappa->value.end());
+  // Copy constants to device (all same, one per cell, scalar)
+  thrust::device_vector<T> constants(mesh->topology()->index_map(tdim)->size_local()
+                                         + mesh->topology()->index_map(tdim)->num_ghosts(),
+                                     kappa->value[0]);
   std::span<T> device_constants(thrust::raw_pointer_cast(constants.data()), constants.size());
 
   if constexpr (std::is_same_v<FineOperator, acc::MatFreeLaplacian<T>>)

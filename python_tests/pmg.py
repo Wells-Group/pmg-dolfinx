@@ -53,7 +53,7 @@ def u_i(x):
 
 
 def level_print(string, level):
-    print(f"{(len(ks) - level) * "    "}{string}")
+    print(f"{(len(ks) - level) * '    '}{string}")
 
 
 n = 10
