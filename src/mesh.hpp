@@ -236,5 +236,7 @@ compute_boundary_cells(std::shared_ptr<dolfinx::fem::FunctionSpace<T>> V)
       local_cells.push_back(i);
   }
 
+  spdlog::debug("lcells:{}, bcells:{}", local_cells.size(), boundary_cells.size());
+
   return {std::move(local_cells), std::move(boundary_cells)};
 }

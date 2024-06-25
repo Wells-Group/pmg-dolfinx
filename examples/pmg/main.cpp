@@ -50,11 +50,10 @@ void solve(std::shared_ptr<mesh::Mesh<double>> mesh, bool use_amg)
   auto topology = mesh->topology_mutable();
   int tdim = topology->dim();
   int fdim = tdim - 1;
+  spdlog::debug("Create facets");
+  topology->create_entities(fdim);
 
   std::vector<std::shared_ptr<fem::FunctionSpace<T>>> V(form_a.size());
-
-  // Compute local and boundary cells (needed for MatFreeLaplacian)
-  auto [lcells, bcells] = compute_boundary_cells(V.back());
 
   std::vector<std::shared_ptr<fem::Form<T, T>>> a(V.size());
   std::vector<std::shared_ptr<fem::Form<T, T>>> L(V.size());
@@ -65,7 +64,9 @@ void solve(std::shared_ptr<mesh::Mesh<double>> mesh, bool use_amg)
 
   std::vector<std::shared_ptr<const common::IndexMap>> maps(V.size());
 
+  spdlog::debug("Get exterior facets");
   auto facets = dolfinx::mesh::exterior_facet_indices(*topology);
+  spdlog::debug("Get exterior facets - OK");
   std::vector<std::size_t> ndofs(V.size());
 
   // Prepare and set Constants for the bilinear form
@@ -83,6 +84,10 @@ void solve(std::shared_ptr<mesh::Mesh<double>> mesh, bool use_amg)
     a[i] = std::make_shared<fem::Form<T>>(
         fem::create_form<T>(*form_a[i], {V[i], V[i]}, {}, {{"c0", kappa}}, {}));
   }
+
+  spdlog::info("Compute boundary cells");
+  // Compute local and boundary cells (needed for MatFreeLaplacian)
+  auto [lcells, bcells] = compute_boundary_cells(V.back());
 
   // assemble RHS for each level
   for (std::size_t i = 0; i < V.size(); i++)
@@ -356,13 +361,8 @@ int main(int argc, char* argv[])
   PetscInitialize(&argc, &argv, nullptr, nullptr);
   {
     MPI_Comm comm{MPI_COMM_WORLD};
-    int rank = 0, size = 0;
-    MPI_Comm_rank(comm, &rank);
+    int size = 0;
     MPI_Comm_size(comm, &size);
-
-    std::string thread_name = "RANK: " + std::to_string(rank);
-    if (rank == 0)
-      spdlog::set_level(spdlog::level::info);
 
     int max_order = 3; // FIXME
 
