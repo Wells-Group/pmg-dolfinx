@@ -260,10 +260,10 @@ __global__ void stiffness_operator(const T* x, const T* entity_constants, T* y, 
 
   // FIXME Set correct BC val for y outside kernel (multiple cell may share the dof)
   if (bc_marker[dof])
-    val = 0.0;
-
-  // Atomically add the computed value to the output array `y`
-  atomicAdd(&y[dof], val);
+    y[dof] = x[dof];
+  else
+    // Atomically add the computed value to the output array `y`
+    atomicAdd(&y[dof], val);
 }
 
 namespace dolfinx::acc
@@ -371,9 +371,6 @@ public:
       err_check(hipGetLastError());
     }
     err_check(hipDeviceSynchronize());
-
-    thrust::transform(out.array().begin(), out.array().end(), bc_vec.begin(),
-                      out.mutable_array().begin(), thrust::plus<T>());
   }
 
   template <typename Vector>

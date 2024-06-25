@@ -298,25 +298,16 @@ int main(int argc, char* argv[])
     // acc::MatrixOperator<T> op(a, {bc});
     // auto map = op.column_index_map();
 
-    fem::Function<T> u(V);
-    la::Vector<T> b(map, 1);
-
     la::Vector<T> diag(map, 1);
     diag.set(T{1.0});
 
     op.set_diag_inverse(diag);
 
-#ifdef ROCM_TRACING
-    add_profiling_annotation("assembling and scattering");
-#endif
-#ifdef ROCM_SMI
-    mem = print_amd_gpu_memory_percentage_used("assembling and scattering");
-    if (mem > peak_mem)
-      peak_mem = mem;
-#endif
-    fem::assemble_vector(b.mutable_array(), *L);
-    fem::apply_lifting<T, T>(b.mutable_array(), {a}, {{bc}}, {}, T(1));
-    b.scatter_rev(std::plus<T>());
+    la::Vector<T> b(map, 1);
+    b.set(1.0);
+    // fem::assemble_vector(b.mutable_array(), *L);
+    // fem::apply_lifting<T, T>(b.mutable_array(), {a}, {{bc}}, {}, T(1));
+    // b.scatter_rev(std::plus<T>());
     fem::set_bc<T, T>(b.mutable_array(), {bc});
 #ifdef ROCM_TRACING
     remove_profiling_annotation("assembling and scattering");
@@ -330,8 +321,9 @@ int main(int argc, char* argv[])
     if (mem > peak_mem)
       peak_mem = mem;
 #endif
-    DeviceVector x(map, 1);
-    x.set(T{0.0});
+    DeviceVector u(map, 1);
+    u.copy_from_host(b);
+    u.scatter_fwd();
 #ifdef ROCM_TRACING
     remove_profiling_annotation("setup device x");
 #endif
@@ -345,7 +337,7 @@ int main(int argc, char* argv[])
       peak_mem = mem;
 #endif
     DeviceVector y(map, 1);
-    y.set(T{1.0});
+    y.set(T{0.0});
 #ifdef ROCM_TRACING
     remove_profiling_annotation("setup device y");
 #endif
@@ -358,14 +350,7 @@ int main(int argc, char* argv[])
     if (mem > peak_mem)
       peak_mem = mem;
 #endif
-    // Create operator
-
-    T norm = acc::norm(x);
-    if (rank == 0)
-    {
-      std::cout << "Norm x vector initial " << norm << std::endl;
-      std::cout << std::flush;
-    }
+      // Create operator
 #ifdef ROCM_TRACING
     remove_profiling_annotation("matrix operator");
 #endif
@@ -379,6 +364,15 @@ int main(int argc, char* argv[])
     if (mem > peak_mem)
       peak_mem = mem;
 #endif
+
+    std::cout << "Norm of u = " << acc::norm(u) << "\n";
+    std::cout << "Norm of y = " << acc::norm(y) << "\n";
+
+    op(u, y);
+
+    std::cout << "Norm of u = " << acc::norm(u) << "\n";
+    std::cout << "Norm of y = " << acc::norm(y) << "\n";
+
     dolfinx::acc::CGSolver<DeviceVector> cg(map, 1);
     cg.set_max_iterations(10);
     cg.set_tolerance(1e-6);
@@ -398,7 +392,7 @@ int main(int argc, char* argv[])
 #endif
 
     dolfinx::common::Timer tcg("ZZZ CG");
-    int its = cg.solve(op, x, y, true);
+    int its = cg.solve(op, y, u, true);
     tcg.stop();
 
 #ifdef ROCM_TRACING
