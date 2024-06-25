@@ -51,7 +51,7 @@ void solve(std::shared_ptr<mesh::Mesh<double>> mesh, bool use_amg)
   int tdim = topology->dim();
   int fdim = tdim - 1;
   spdlog::debug("Create facets");
-  topology->create_entities(fdim);
+  topology->create_connectivity(fdim, tdim);
 
   std::vector<std::shared_ptr<fem::FunctionSpace<T>>> V(form_a.size());
 
