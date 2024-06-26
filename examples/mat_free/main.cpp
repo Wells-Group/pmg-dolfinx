@@ -223,15 +223,9 @@ int main(int argc, char* argv[])
     thrust::device_vector<std::int8_t> bc_marker_d(bc_marker.begin(), bc_marker.end());
     std::span<const std::int8_t> bc_marker_d_span(thrust::raw_pointer_cast(bc_marker_d.data()),
                                                   bc_marker_d.size());
-    la::Vector<T> bc_vec(map, 1);
-    bc_vec.set(0.0);
-    fem::set_bc<T, T>(bc_vec.mutable_array(), {bc});
-    thrust::device_vector<T> bc_vec_d(bc_vec.array().begin(), bc_vec.array().end());
-    std::span<const T> bc_vec_d_span(thrust::raw_pointer_cast(bc_vec_d.data()), bc_vec_d.size());
 
     acc::MatFreeLaplacian<T> op(3, constants_d_span, dofmap_d_span, xgeom_d_span, xdofmap_d_span,
-                                dphi_d_span, Gweights_d_span, lcells, bcells, bc_marker_d_span,
-                                bc_vec_d_span);
+                                dphi_d_span, Gweights_d_span, lcells, bcells, bc_marker_d_span);
 
     la::Vector<T> b(map, 1);
     b.set(0.0);
@@ -256,6 +250,11 @@ int main(int argc, char* argv[])
     mat_op(u, z);
     std::cout << "Norm of u = " << acc::norm(u) << "\n";
     std::cout << "Norm of z = " << acc::norm(z) << "\n";
+
+    // Compute error
+    DeviceVector e(map, 1);
+    acc::axpy(e, T{-1.0}, y, z);
+    std::cout << "Norm of error = " << acc::norm(e) << "\n";
 
     // Display timings
     dolfinx::list_timings(MPI_COMM_WORLD, {dolfinx::TimingType::wall});

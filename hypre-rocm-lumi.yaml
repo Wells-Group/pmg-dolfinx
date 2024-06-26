@@ -29,9 +29,6 @@ spack:
         prepend_path: # Similar for append|remove_path
           LD_LIBRARY_PATH: /opt/cray/libfabric/1.15.2.0/lib64
       extra_rpaths: []
-  specs:
-  - py-fenics-ffcx@main%gcc@12.2.0
-  - fenics-dolfinx@main%gcc@12.2.0 ^cray-mpich
   view: true
   concretizer:
     unify: true
@@ -79,10 +76,30 @@ spack:
             c: /opt/rocm/llvm/bin/clang++
             cxx: /opt/rocm/llvm/bin/clang++
       buildable: false
+    hipblas:
+      externals:
+      - spec: hipblas@5.2.3
+        prefix: /opt/rocm/hipblas
+      buildable: false
+    hipsolver:
+      externals:
+      - spec: hipsolver@5.2.3
+        prefix: /opt/rocm/hipsolver
+      buildable: false
+    hipsparse:
+      externals:
+      - spec: hipsparse@5.2.3
+        prefix: /opt/rocm/hipsparse
+      buildable: false
     rocprim:
       externals:
       - spec: rocprim@5.2.3
         prefix: /opt/rocm/rocprim
+      buildable: false
+    rocblas:
+      externals:
+      - spec: rocblas@5.2.3
+        prefix: /opt/rocm/rocblas
       buildable: false
     rocsparse:
       externals:
@@ -98,6 +115,11 @@ spack:
       externals:
       - spec: rocthrust@5.2.3
         prefix: /opt/rocm/rocthrust
+      buildable: false
+    rocsolver:
+      externals:
+      - spec: rocsolver@5.2.3
+        prefix: /opt/rocm/rocsolver
       buildable: false
     openssh:
       externals:
@@ -115,7 +137,7 @@ spack:
         prefix: /usr
       buildable: false
     petsc:
-      variants: +hypre
+      variants: +hypre+rocm amdgpu_target=gfx90a
     slepc:
       variants: ~arpack
     metis:
@@ -140,3 +162,7 @@ spack:
         - cray-libsci
         lapack:
         - cray-libsci
+  specs:
+  - py-fenics-ffcx@main%gcc@12.2.0
+  - fenics-dolfinx@main%gcc@12.2.0 ^cray-mpich
+  - petsc+hypre+rocm amdgpu_target=gfx90a ^hypre +rocm amdgpu_target=gfx90a

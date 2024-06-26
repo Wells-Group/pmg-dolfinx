@@ -260,10 +260,10 @@ __global__ void stiffness_operator(const T* x, const T* entity_constants, T* y, 
 
   // FIXME Set correct BC val for y outside kernel (multiple cell may share the dof)
   if (bc_marker[dof])
-    val = 0.0;
-
-  // Atomically add the computed value to the output array `y`
-  atomicAdd(&y[dof], val);
+    y[dof] = x[dof];
+  else
+    // Atomically add the computed value to the output array `y`
+    atomicAdd(&y[dof], val);
 }
 
 namespace dolfinx::acc
@@ -279,11 +279,10 @@ public:
                    std::span<const std::int32_t> dofmap, std::span<const T> xgeom,
                    std::span<const std::int32_t> geometry_dofmap, std::span<const T> dphi_geometry,
                    std::span<const T> G_weights, const std::vector<int>& lcells,
-                   const std::vector<int>& bcells, std::span<const std::int8_t> bc_marker,
-                   std::span<const T> bc_vec)
+                   const std::vector<int>& bcells, std::span<const std::int8_t> bc_marker)
       : degree(degree), cell_constants(coefficients), cell_dofmap(dofmap), xgeom(xgeom),
         geometry_dofmap(geometry_dofmap), dphi_geometry(dphi_geometry), G_weights(G_weights),
-        bc_marker(bc_marker), bc_vec(bc_vec), lcells(lcells), bcells(bcells)
+        bc_marker(bc_marker), lcells(lcells), bcells(bcells)
   {
     std::map<int, int> Qdegree = {{2, 3}, {3, 4}, {4, 6}, {5, 8}};
 
@@ -373,9 +372,6 @@ public:
       err_check(hipGetLastError());
     }
     err_check(hipDeviceSynchronize());
-
-    thrust::transform(out.array().begin(), out.array().end(), bc_vec.begin(),
-                      out.mutable_array().begin(), thrust::plus<T>());
   }
 
   template <typename Vector>
@@ -398,6 +394,7 @@ public:
   template <typename Vector>
   void set_diag_inverse(const Vector& diag_inv)
   {
+    _diag_inv.resize(diag_inv.array().size(), 0);
     thrust::copy(diag_inv.array().begin(), diag_inv.array().end(), _diag_inv.begin());
   }
 
@@ -414,7 +411,6 @@ private:
   std::span<const T> dphi_geometry;
   std::span<const T> G_weights;
   std::span<const std::int8_t> bc_marker;
-  std::span<const T> bc_vec;
 
   // On device storage for geometry data (computed for each batch of cells)
   thrust::device_vector<T> G_entity;
