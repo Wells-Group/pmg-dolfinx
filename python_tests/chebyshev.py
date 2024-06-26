@@ -157,7 +157,7 @@ if __name__ == "__main__":
     max_cheb_iters = 30
     smoother = Chebyshev(A, max_cheb_iters, eigs, 4, jacobi=True, verbose=True)
     # Try with non-zero initial guess to check that works OK
-    y.set(0.0)
+    y.set(1.0)
     set_bc(y, [bc])
     smoother.solve(b, y)
 
@@ -185,6 +185,6 @@ if __name__ == "__main__":
     solver.setNormType(solver.NormType.NORM_UNPRECONDITIONED)
     solver.setFromOptions()
     solver.view()
-    y.set(0.0)
+    y.set(1.0)
     set_bc(y, [bc])
     solver.solve(b, y)
