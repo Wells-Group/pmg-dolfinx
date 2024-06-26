@@ -1,4 +1,5 @@
 
+#include <basix/finite-element.h>
 #include <dolfinx/fem/CoordinateElement.h>
 #include <dolfinx/fem/FunctionSpace.h>
 #include <dolfinx/mesh/Mesh.h>
@@ -177,15 +178,13 @@ dolfinx::mesh::Mesh<T> ghost_layer_mesh(dolfinx::mesh::Mesh<T>& mesh,
   std::array<std::size_t, 2> xshape = {num_vertices, gdim};
   std::span<const T> x(mesh.geometry().x().data(), xshape[0] * xshape[1]);
 
-  // Convert topology to global indexing, and restrict to non-ghost cells
-  std::vector<std::int32_t> topo = mesh.topology()->connectivity(tdim, 0)->array();
-  topo.resize(ncells * num_cell_vertices);
-  spdlog::info("topo.size = {}", topo.size());
-
   auto dofmap = mesh.geometry().dofmap();
   auto imap = mesh.geometry().index_map();
   std::vector<std::int32_t> permuted_dofmap;
-  std::vector<int> perm{0, 4, 2, 6, 1, 5, 3, 7};
+
+  std::vector<int> perm = basix::tp_dof_ordering(
+      basix::element::family::P, mesh::cell_type_to_basix_type(coord_element.cell_shape()),
+      coord_element.degree(), coord_element.variant(), basix::element::dpc_variant::unset, false);
   for (std::size_t c = 0; c < dofmap.extent(0); ++c)
   {
     auto cell_dofs_span = std::submdspan(dofmap, c, std::full_extent);
