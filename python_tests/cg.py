@@ -115,10 +115,11 @@ if __name__ == "__main__":
     A.assemble()
 
     cg_solver = CGSolver(A, 10, 1e-6, jacobi=True, verbose=True)
-    x = A.createVecRight()
     y = A.createVecRight()
-    y.set(1.0)
-    cg_solver.solve(y, x)
+    y.set(0.0)
+    u = A.createVecRight()
+    u.set(1.0)
+    cg_solver.solve(u, y)
     est_eigs = cg_solver.compute_eigs()
     print(f"Estimated eigenvalues = {est_eigs}")
 
@@ -156,6 +157,6 @@ if __name__ == "__main__":
     solver.setOperators(A)
     solver.setFromOptions()
 
-    x.set(0.0)
-    solver.solve(y, x)
+    y.set(0.0)
+    solver.solve(u, y)
     print(f"PETSc eigs = {solver.computeEigenvalues()}")
