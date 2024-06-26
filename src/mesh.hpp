@@ -182,11 +182,24 @@ dolfinx::mesh::Mesh<T> ghost_layer_mesh(dolfinx::mesh::Mesh<T>& mesh,
   topo.resize(ncells * num_cell_vertices);
   spdlog::info("topo.size = {}", topo.size());
 
-  std::vector<std::int64_t> topo_global(topo.size());
-  mesh.topology()->index_map(0)->local_to_global(topo, topo_global);
+  auto dofmap = mesh.geometry().dofmap();
+  auto imap = mesh.geometry().index_map();
+  std::vector<std::int32_t> permuted_dofmap;
+  std::vector<int> perm{0, 4, 2, 6, 1, 5, 3, 7};
+  for (std::size_t c = 0; c < dofmap.extent(0); ++c)
+  {
+    auto cell_dofs_span = std::submdspan(dofmap, c, std::full_extent);
+    for (int i = 0; i < dofmap.extent(1); ++i)
+    {
+      permuted_dofmap.push_back(cell_dofs_span(perm[i]));
+    }
+  }
+  std::vector<std::int64_t> permuted_dofmap_global(permuted_dofmap.size());
+  imap->local_to_global(permuted_dofmap, permuted_dofmap_global);
 
-  auto new_mesh = dolfinx::mesh::create_mesh(mesh.comm(), mesh.comm(), std::span(topo_global),
-                                             coord_element, mesh.comm(), x, xshape, partitioner);
+  auto new_mesh
+      = dolfinx::mesh::create_mesh(mesh.comm(), mesh.comm(), std::span(permuted_dofmap_global),
+                                   coord_element, mesh.comm(), x, xshape, partitioner);
 
   spdlog::info("** NEW MESH num_ghosts_cells = {}",
                new_mesh.topology()->index_map(tdim)->num_ghosts());
