@@ -134,7 +134,7 @@ if __name__ == "__main__":
     msh.topology.create_connectivity(msh.topology.dim - 1, msh.topology.dim)
     facets = exterior_facet_indices(msh.topology)
     dofs = fem.locate_dofs_topological(V, msh.topology.dim - 1, facets)
-    bc = fem.dirichletbc(0.0, dofs, V)
+    bc = fem.dirichletbc(1.3, dofs, V)
 
     A = assemble_matrix(a, bcs=[bc])
     A.assemble()
@@ -148,7 +148,7 @@ if __name__ == "__main__":
     y.set(0.0)
     u = A.createVecRight()
     u.set(1.0)
-    cg_solver.solve(b, y)
+    cg_solver.solve(u, y)
     est_eigs = cg_solver.compute_eigs()
     print(f"Estimated min/max eigenvalues = {est_eigs}")
 
