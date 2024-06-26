@@ -53,7 +53,7 @@ def u_i(x):
 
 
 def level_print(string, level):
-    print(f"{(len(ks) - level) * "    "}{string}")
+    print(f'{(len(ks) - level) * "    "}{string}')
 
 
 n = 10
@@ -145,11 +145,12 @@ for i in range(1, len(ks)):
         y.set(1.0)
         cg_solver.solve(y, x)
         est_eigs = cg_solver.compute_eigs()
+
         solvers.append(
             Chebyshev(
                 As[i],
                 2,
-                (0.8 * est_eigs[0], 1.2 * est_eigs[1]),
+                (0.1 * est_eigs[-1], 1.1 * est_eigs[-1]),
                 4,
                 jacobi=True,
                 verbose=False,
