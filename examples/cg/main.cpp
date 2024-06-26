@@ -229,18 +229,17 @@ int main(int argc, char* argv[])
 
     // Assemble RHS
     la::Vector<T> b(map, 1);
-    // b.set(1.0);
     fem::assemble_vector(b.mutable_array(), *L);
     fem::apply_lifting<T, T>(b.mutable_array(), {a}, {{bc}}, {}, T(1));
     b.scatter_rev(std::plus<T>());
     fem::set_bc<T, T>(b.mutable_array(), {bc});
 
-    DeviceVector u(map, 1);
-    u.set(T{1.0});
-    u.scatter_fwd();
+    DeviceVector b_d(map, 1);
+    b_d.set(T{1.0});
+    b_d.scatter_fwd();
 
-    DeviceVector y(map, 1);
-    y.set(T{0.0});
+    DeviceVector x(map, 1);
+    x.set(T{0.0});
 
     // Create distributed CG solver
     dolfinx::acc::CGSolver<DeviceVector> cg(map, 1);
@@ -250,7 +249,7 @@ int main(int argc, char* argv[])
 
     // Solve
     dolfinx::common::Timer tcg("ZZZ CG");
-    int its = cg.solve(op, y, u, true);
+    int its = cg.solve(op, x, b_d, true);
     tcg.stop();
 
     if (rank == 0)
@@ -272,13 +271,13 @@ int main(int argc, char* argv[])
     cheb.set_max_iterations(30);
 
     // Try non-zero initial guess to make sure that works OK
-    y.set(1.0);
-    u.copy_from_host(b); // Copy data from host vector to device vector
+    x.set(1.0);
+    b_d.copy_from_host(b); // Copy data from host vector to device vector
                          //     err_check(hipDeviceSynchronize());
-    fem::set_bc<T, T>(y.mutable_array(), {bc});
+    fem::set_bc<T, T>(x.mutable_array(), {bc});
     err_check(hipDeviceSynchronize());
 
-    cheb.solve(op, y, u, true);
+    cheb.solve(op, x, b_d, true);
 
     // Display timings
     dolfinx::list_timings(MPI_COMM_WORLD, {dolfinx::TimingType::wall});
