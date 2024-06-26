@@ -128,7 +128,6 @@ dolfinx::mesh::Mesh<T> ghost_layer_mesh(dolfinx::mesh::Mesh<T>& mesh,
   constexpr int gdim = 3;
   std::size_t ncells = mesh.topology()->index_map(tdim)->size_local();
   std::size_t num_vertices = mesh.topology()->index_map(0)->size_local();
-  std::size_t num_cell_vertices = dolfinx::mesh::num_cell_vertices(mesh.topology()->cell_type());
 
   // Find which local vertices are ghosted elsewhere
   auto vertex_destinations = mesh.topology()->index_map(0)->index_to_dest_ranks();
@@ -181,17 +180,14 @@ dolfinx::mesh::Mesh<T> ghost_layer_mesh(dolfinx::mesh::Mesh<T>& mesh,
   auto dofmap = mesh.geometry().dofmap();
   auto imap = mesh.geometry().index_map();
   std::vector<std::int32_t> permuted_dofmap;
-
   std::vector<int> perm = basix::tp_dof_ordering(
       basix::element::family::P, mesh::cell_type_to_basix_type(coord_element.cell_shape()),
       coord_element.degree(), coord_element.variant(), basix::element::dpc_variant::unset, false);
   for (std::size_t c = 0; c < dofmap.extent(0); ++c)
   {
-    auto cell_dofs_span = std::submdspan(dofmap, c, std::full_extent);
+    auto cell_dofs = std::submdspan(dofmap, c, std::full_extent);
     for (int i = 0; i < dofmap.extent(1); ++i)
-    {
-      permuted_dofmap.push_back(cell_dofs_span(perm[i]));
-    }
+      permuted_dofmap.push_back(cell_dofs(perm[i]));
   }
   std::vector<std::int64_t> permuted_dofmap_global(permuted_dofmap.size());
   imap->local_to_global(permuted_dofmap, permuted_dofmap_global);
