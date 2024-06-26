@@ -160,10 +160,6 @@ void solve(std::shared_ptr<mesh::Mesh<double>> mesh, bool use_amg)
   std::vector<thrust::device_vector<std::int8_t>> bc_marker_d(V.size());
   std::vector<std::span<const std::int8_t>> bc_marker_d_span;
 
-  // FIXME - fill values
-  std::vector<thrust::device_vector<T>> bc_vec_d(V.size());
-  std::vector<std::span<const T>> bc_vec_d_span;
-
   // Copy constants to device (all same, one per cell, scalar)
   thrust::device_vector<T> constants(mesh->topology()->index_map(tdim)->size_local()
                                          + mesh->topology()->index_map(tdim)->num_ghosts(),
@@ -254,8 +250,7 @@ void solve(std::shared_ptr<mesh::Mesh<double>> mesh, bool use_amg)
       spdlog::info("Create operator on V[{}]", i);
       operators[i] = std::make_shared<acc::MatFreeLaplacian<T>>(
           order[i], device_constants, device_dofmaps[i], geom_x, geom_x_dofmap,
-          geometry_dphi_d_span[i], Gweights_d_span[i], lcells, bcells, bc_marker_d_span[i],
-          bc_vec_d_span[i]);
+          geometry_dphi_d_span[i], Gweights_d_span[i], lcells, bcells, bc_marker_d_span[i]);
 
       // FIXME: do this better
       // Compute CSR matrix, to get diagonal for MatFree
