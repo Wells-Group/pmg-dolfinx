@@ -50,8 +50,8 @@ class CGSolver:
             p = p * self.betas[-1] + self.S * r
 
             if self.verbose:
-                print(f"Iteration {i + 1}: residual {np.sqrt(rnorm)}")
-                # print(f"Iteration {i + 1}: residual {(self.S * r).norm()}")
+                # print(f"Iteration {i + 1}: residual {np.sqrt(rnorm)}")
+                print(f"Iteration {i + 1}: residual {(self.S * r).norm()}")
                 print(f"alpha = {self.alphas[-1]}")
                 print(f"beta = {self.betas[-1]}")
 
@@ -80,21 +80,27 @@ if __name__ == "__main__":
     msh = create_unit_cube(comm, 5, 5, 5, cell_type=mesh.CellType.hexahedron)
     print(f"Num cells = {msh.topology.index_map(msh.topology.dim).size_global}")
 
+    tensor_prod = True
+
     # Tensor product element
     family = basix.ElementFamily.P
     variant = basix.LagrangeVariant.gll_warped
     cell_type = msh.basix_cell()
     k = 3
 
-    basix_element = basix.create_tp_element(family, cell_type, k, variant)
-    element = basix.ufl._BasixElement(basix_element)  # basix ufl element
+    if tensor_prod:
+        basix_element = basix.create_tp_element(family, cell_type, k, variant)
+        element = basix.ufl._BasixElement(basix_element)  # basix ufl element
+        dx = Measure("dx", metadata={"quadrature_rule": "GLL", "quadrature_degree": 4})
+    else:
+        element = basix.ufl.element(family, cell_type, k, variant)
+        dx = Measure("dx")
 
     V = fem.functionspace(msh, element)
     print(f"NDOFS = {V.dofmap.index_map.size_global}")
     u, v = TestFunction(V), TrialFunction(V)
     kappa = 2.0
 
-    dx = Measure("dx", metadata={"quadrature_rule": "GLL", "quadrature_degree": 4})
     a = kappa * inner(grad(u), grad(v)) * dx
     a = fem.form(a)
 
@@ -124,12 +130,12 @@ if __name__ == "__main__":
     est_eigs = cg_solver.compute_eigs()
     print(f"Estimated eigenvalues = {est_eigs}")
 
-    # Compare eigs to numpy
-    # FIXME Do this properly
-    A_np = A[:, :]
-    SA_np = 1 / A_np.diagonal()[:, np.newaxis] * A_np
-    vals = np.sort(np.real(linalg.eigvals(SA_np)))
-    print("Min/max eigenvalues = ", vals[0], vals[-1])
+    # # Compare eigs to numpy
+    # # FIXME Do this properly
+    # A_np = A[:, :]
+    # SA_np = 1 / A_np.diagonal()[:, np.newaxis] * A_np
+    # vals = np.sort(np.real(linalg.eigvals(SA_np)))
+    # print("Min/max eigenvalues = ", vals[0], vals[-1])
 
     # Compare to PETSc
     print("\n\nPETSc:")
