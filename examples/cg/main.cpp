@@ -154,7 +154,7 @@ int main(int argc, char* argv[])
     auto dofmap = V->dofmap();
     auto facets = dolfinx::mesh::exterior_facet_indices(*topology);
     auto bdofs = fem::locate_dofs_topological(*topology, *dofmap, fdim, facets);
-    auto bc = std::make_shared<const fem::DirichletBC<T>>(0.0, bdofs, V);
+    auto bc = std::make_shared<const fem::DirichletBC<T>>(1.3, bdofs, V);
 
     // Define vectors
     using DeviceVector = dolfinx::acc::Vector<T, acc::Device::HIP>;
@@ -252,29 +252,33 @@ int main(int argc, char* argv[])
     int its = cg.solve(op, x, b_d, true);
     tcg.stop();
 
-    if (rank == 0)
-    {
-      std::cout << "Number of iterations " << its << std::endl;
-      std::cout << std::flush;
-    }
-
     std::vector<T> eign = cg.compute_eigenvalues();
     std::sort(eign.begin(), eign.end());
-    std::cout << "Computed eigs = (" << eign.front() << ", " << eign.back() << ")\n";
     std::array<T, 2> eig_range = {0.1 * eign.back(), 1.1 * eign.back()};
 
     if (rank == 0)
+    {
+      std::cout << "Number of iterations " << its << std::endl;
+      std::cout << "Computed eigs = (" << eign.front() << ", " << eign.back() << ")\n";
       std::cout << "Using eig range:" << eig_range[0] << " - " << eig_range[1] << std::endl;
+      std::cout << std::flush;
+    }
 
     dolfinx::common::Timer tcheb("ZZZ Chebyshev");
     dolfinx::acc::Chebyshev<DeviceVector> cheb(map, 1, eig_range);
     cheb.set_max_iterations(30);
 
-    // Try non-zero initial guess to make sure that works OK
-    x.set(1.0);
     b_d.copy_from_host(b); // Copy data from host vector to device vector
-                         //     err_check(hipDeviceSynchronize());
-    fem::set_bc<T, T>(x.mutable_array(), {bc});
+                           //     err_check(hipDeviceSynchronize());
+
+    // Set bcs on solution vector and copy do device
+    la::Vector<T> sol(map, 1);
+    // Try non-zero initial guess to make sure that works OK
+    sol.set(T{1.0});
+    sol.scatter_fwd();
+    fem::set_bc<T, T>(sol.mutable_array(), {bc});
+    x.copy_from_host(sol);
+
     err_check(hipDeviceSynchronize());
 
     cheb.solve(op, x, b_d, true);
