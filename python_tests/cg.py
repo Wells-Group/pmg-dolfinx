@@ -50,7 +50,8 @@ class CGSolver:
             p = p * self.betas[-1] + self.S * r
 
             if self.verbose:
-                print(f"Iteration {i + 1}: residual {(self.S * r).norm()}")
+                print(f"Iteration {i + 1}: residual {np.sqrt(rnorm)}")
+                # print(f"Iteration {i + 1}: residual {(self.S * r).norm()}")
                 print(f"alpha = {self.alphas[-1]}")
                 print(f"beta = {self.betas[-1]}")
 
@@ -115,11 +116,11 @@ if __name__ == "__main__":
     A.assemble()
 
     cg_solver = CGSolver(A, 10, 1e-6, jacobi=True, verbose=True)
-    y = A.createVecRight()
-    y.set(0.0)
-    u = A.createVecRight()
-    u.set(1.0)
-    cg_solver.solve(u, y)
+    x = A.createVecRight()
+    x.set(0.0)
+    b = A.createVecRight()
+    b.set(1.0)
+    cg_solver.solve(b, x)
     est_eigs = cg_solver.compute_eigs()
     print(f"Estimated eigenvalues = {est_eigs}")
 
@@ -157,6 +158,6 @@ if __name__ == "__main__":
     solver.setOperators(A)
     solver.setFromOptions()
 
-    y.set(0.0)
-    solver.solve(u, y)
+    x.set(0.0)
+    solver.solve(b, x)
     print(f"PETSc eigs = {solver.computeEigenvalues()}")
