@@ -130,12 +130,12 @@ if __name__ == "__main__":
     est_eigs = cg_solver.compute_eigs()
     print(f"Estimated eigenvalues = {est_eigs}")
 
-    # # Compare eigs to numpy
-    # # FIXME Do this properly
-    # A_np = A[:, :]
-    # SA_np = 1 / A_np.diagonal()[:, np.newaxis] * A_np
-    # vals = np.sort(np.real(linalg.eigvals(SA_np)))
-    # print("Min/max eigenvalues = ", vals[0], vals[-1])
+    # Compare eigs to numpy
+    # FIXME Do this properly
+    A_np = A[:, :]
+    SA_np = 1 / A_np.diagonal()[:, np.newaxis] * A_np
+    vals = np.sort(np.real(linalg.eigvals(SA_np)))
+    print("Min/max eigenvalues = ", vals[0], vals[-1])
 
     # Compare to PETSc
     print("\n\nPETSc:")
