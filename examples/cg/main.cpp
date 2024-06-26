@@ -289,13 +289,11 @@ int main(int argc, char* argv[])
     acc::MatFreeLaplacian<T> op(3, constants_d_span, dofmap_d_span, xgeom_d_span, xdofmap_d_span,
                                 dphi_d_span, Gweights_d_span, lcells, bcells, bc_marker_d_span);
 
-    // acc::MatrixOperator<T> op(a, {bc});
-    // auto map = op.column_index_map();
+    acc::MatrixOperator<T> op_mat(a, {bc});
 
-    la::Vector<T> diag(map, 1);
-    diag.set(T{1.0});
-
-    op.set_diag_inverse(diag);
+    DeviceVector diag_inv(map, 1);
+    op_mat.get_diag_inverse(diag_inv);
+    op.set_diag_inverse(diag_inv);
 
     la::Vector<T> b(map, 1);
     b.set(1.0);
