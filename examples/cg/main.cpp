@@ -296,11 +296,11 @@ int main(int argc, char* argv[])
     op.set_diag_inverse(diag_inv);
 
     la::Vector<T> b(map, 1);
-    b.set(1.0);
-    // fem::assemble_vector(b.mutable_array(), *L);
-    // fem::apply_lifting<T, T>(b.mutable_array(), {a}, {{bc}}, {}, T(1));
-    // b.scatter_rev(std::plus<T>());
-    // fem::set_bc<T, T>(b.mutable_array(), {bc});
+    // b.set(1.0);
+    fem::assemble_vector(b.mutable_array(), *L);
+    fem::apply_lifting<T, T>(b.mutable_array(), {a}, {{bc}}, {}, T(1));
+    b.scatter_rev(std::plus<T>());
+    fem::set_bc<T, T>(b.mutable_array(), {bc});
 #ifdef ROCM_TRACING
     remove_profiling_annotation("assembling and scattering");
 #endif
@@ -314,7 +314,7 @@ int main(int argc, char* argv[])
       peak_mem = mem;
 #endif
     DeviceVector u(map, 1);
-    u.copy_from_host(b);
+    u.set(T{1.0});
     u.scatter_fwd();
 #ifdef ROCM_TRACING
     remove_profiling_annotation("setup device x");
@@ -358,7 +358,7 @@ int main(int argc, char* argv[])
 #endif
 
     dolfinx::acc::CGSolver<DeviceVector> cg(map, 1);
-    cg.set_max_iterations(10);
+    cg.set_max_iterations(20);
     cg.set_tolerance(1e-6);
     cg.store_coefficients(true);
 #ifdef ROCM_TRACING
@@ -399,13 +399,13 @@ int main(int argc, char* argv[])
     std::vector<T> eign = cg.compute_eigenvalues();
     std::sort(eign.begin(), eign.end());
     std::cout << "Computed eigs = (" << eign.front() << ", " << eign.back() << ")\n";
-    //     std::array<T, 2> eig_range = {0.1 * eign.back(), 1.1 * eign.back()};
+    std::array<T, 2> eig_range = {0.1 * eign.back(), 1.1 * eign.back()};
     // #ifdef ROCM_TRACING
     //     remove_profiling_annotation("get eigenvalues");
     // #endif
 
-    //     if (rank == 0)
-    //       std::cout << "Using eig range:" << eig_range[0] << " - " << eig_range[1] << std::endl;
+    if (rank == 0)
+      std::cout << "Using eig range:" << eig_range[0] << " - " << eig_range[1] << std::endl;
 
     // #ifdef ROCM_TRACING
     //     add_profiling_annotation("chebyshev solve");
@@ -416,9 +416,9 @@ int main(int argc, char* argv[])
     //       peak_mem = mem;
     // #endif
 
-    //     dolfinx::common::Timer tcheb("ZZZ Chebyshev");
-    //     dolfinx::acc::Chebyshev<DeviceVector> cheb(map, 1, eig_range);
-    //     cheb.set_max_iterations(30);
+    dolfinx::common::Timer tcheb("ZZZ Chebyshev");
+    dolfinx::acc::Chebyshev<DeviceVector> cheb(map, 1, eig_range);
+    cheb.set_max_iterations(30);
     // #ifdef ROCM_TRACING
     //     remove_profiling_annotation("chebyshev solve");
     // #endif
@@ -432,17 +432,17 @@ int main(int argc, char* argv[])
     // #endif
 
     //     // Try non-zero initial guess to make sure that works OK
-    //     x.set(1.0);
-    //     y.copy_from_host(b); // Copy data from host vector to device vector
-    //     err_check(hipDeviceSynchronize());
-    //     T xnorm = acc::norm(x);
+    y.set(1.0);
+    u.copy_from_host(b); // Copy data from host vector to device vector
+                         //     err_check(hipDeviceSynchronize());
+    // T xnorm = acc::norm(x);
     //     spdlog::info("Before set bc, x norm = {}", xnorm);
-    //     fem::set_bc<T, T>(x.mutable_array(), {bc});
-    //     err_check(hipDeviceSynchronize());
+    fem::set_bc<T, T>(y.mutable_array(), {bc});
+    err_check(hipDeviceSynchronize());
     //     xnorm = acc::norm(x);
     //     spdlog::info("After set bc, x norm = {}", xnorm);
 
-    //     cheb.solve(op, x, y, true);
+    cheb.solve(op, y, u, true);
     // #ifdef ROCM_SMI
     //     mem = print_amd_gpu_memory_percentage_used("afterchebyshev solve");
     //     if (mem > peak_mem)
