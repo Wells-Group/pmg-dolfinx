@@ -1,5 +1,5 @@
 from ufl import (Coefficient, Constant, FunctionSpace, Mesh, Measure,
-                 TestFunction, TrialFunction, dx, grad, inner)
+                 TestFunction, TrialFunction, dx, div, grad, inner, SpatialCoordinate, sin, pi)
 import basix
 from basix.ufl import blocked_element, wrap_element
 
@@ -21,8 +21,9 @@ for degree in range(1, 4):
 
     u = TrialFunction(V)
     v = TestFunction(V)
-    f = Coefficient(V)
+    x = SpatialCoordinate(mesh)
     kappa = Constant(mesh)
+    f = -kappa * div(grad(sin(pi*x[0]) * sin(pi*x[1]) * sin(pi*x[2])))
 
     aname = 'a' + str(degree)
     Lname = 'L' + str(degree)

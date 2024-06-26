@@ -92,24 +92,23 @@ void solve(std::shared_ptr<mesh::Mesh<double>> mesh, bool use_amg)
   {
     spdlog::info("Build RHS for order {}", order[i]);
 
-    auto f = std::make_shared<fem::Function<T>>(V[i]);
-    f->interpolate(
-        [](auto x) -> std::pair<std::vector<T>, std::vector<std::size_t>>
-        {
-          std::vector<T> out;
-          for (std::size_t p = 0; p < x.extent(1); ++p)
-          {
-            auto dx = (x(0, p) - 0.5) * (x(0, p) - 0.5);
-            auto dy = (x(1, p) - 0.5) * (x(1, p) - 0.5);
-            out.push_back(1000 * std::exp(-(dx + dy) / 0.02));
-          }
+    // auto f = std::make_shared<fem::Function<T>>(V[i]);
+    // f->interpolate(
+    //     [](auto x) -> std::pair<std::vector<T>, std::vector<std::size_t>>
+    //     {
+    //       std::vector<T> out;
+    //       for (std::size_t p = 0; p < x.extent(1); ++p)
+    //       {
+    //         auto dx = (x(0, p) - 0.5) * (x(0, p) - 0.5);
+    //         auto dy = (x(1, p) - 0.5) * (x(1, p) - 0.5);
+    //         out.push_back(1000 * std::exp(-(dx + dy) / 0.02));
+    //       }
 
-          return {out, {out.size()}};
-        });
+    //       return {out, {out.size()}};
+    //     });
 
-    auto Li = std::make_shared<fem::Form<T, T>>(
-        fem::create_form<T>(*form_L[i], {V[i]}, {{"w0", f}}, {}, {}));
-    L[i] = Li;
+    L[i] = std::make_shared<fem::Form<T, T>>(
+        fem::create_form<T>(*form_L[i], {V[i]}, {}, {{"c0", kappa}}, {}));
 
     auto dofmap = V[i]->dofmap();
     auto bdofs = fem::locate_dofs_topological(*topology, *dofmap, fdim, facets);
@@ -279,6 +278,8 @@ void solve(std::shared_ptr<mesh::Mesh<double>> mesh, bool use_amg)
     b.scatter_rev(std::plus<T>());
     fem::set_bc<T, T>(b.mutable_array(), {bcs[i]});
 
+    spdlog::info("b[{}].norm = {}", i, dolfinx::la::norm(b));
+
     bs[i] = std::make_shared<DeviceVector>(maps[i], 1);
     bs[i]->copy_from_host(b);
   }
@@ -295,9 +296,9 @@ void solve(std::shared_ptr<mesh::Mesh<double>> mesh, bool use_amg)
     cg.store_coefficients(true);
 
     DeviceVector x(maps[i], 1);
-    x.set(T{0.0});
+    x.set(T{1.0});
 
-    [[maybe_unused]] int its = cg.solve(*operators[i], x, *bs[i], false);
+    [[maybe_unused]] int its = cg.solve(*operators[i], x, *bs[i], true);
     std::vector<T> eign = cg.compute_eigenvalues();
     std::sort(eign.begin(), eign.end());
     std::array<T, 2> eig_range = {0.1 * eign.back(), 1.1 * eign.back()};
