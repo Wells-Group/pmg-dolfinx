@@ -113,7 +113,7 @@ if __name__ == "__main__":
         element = basix.ufl.element(family, cell_type, k, variant)
         dx = Measure("dx")
 
-    V = fem.functionspace(msh, ("CG", 3))
+    V = fem.functionspace(msh, element)
 
     print(f"NDOFS = {V.dofmap.index_map.size_global}")
     u, v = TestFunction(V), TrialFunction(V)
