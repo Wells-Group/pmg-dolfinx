@@ -139,16 +139,12 @@ if __name__ == "__main__":
     A = assemble_matrix(a, bcs=[bc])
     A.assemble()
 
-    b = assemble_vector(L)
-    apply_lifting(b, [a], [[bc]])
-    set_bc(b, [bc])
-
     cg_solver = CGSolver(A, 20, 1e-6, jacobi=True, verbose=False)
-    y = A.createVecRight()
-    y.set(0.0)
-    u = A.createVecRight()
-    u.set(1.0)
-    cg_solver.solve(u, y)
+    x = A.createVecRight()
+    x.set(0.0)
+    b = A.createVecRight()
+    b.set(1.0)
+    cg_solver.solve(b, x)
     est_eigs = cg_solver.compute_eigs()
     print(f"Estimated min/max eigenvalues = {est_eigs}")
 
@@ -157,9 +153,14 @@ if __name__ == "__main__":
     max_cheb_iters = 30
     smoother = Chebyshev(A, max_cheb_iters, eigs, 4, jacobi=True, verbose=True)
     # Try with non-zero initial guess to check that works OK
-    y.set(1.0)
-    set_bc(y, [bc])
-    smoother.solve(b, y)
+    x.set(1.0)
+    set_bc(x, [bc])
+
+    b = assemble_vector(L)
+    apply_lifting(b, [a], [[bc]])
+    set_bc(b, [bc])
+
+    smoother.solve(b, x)
 
     # Compare to PETSc
     solver = PETSc.KSP().create(MPI.COMM_WORLD)
@@ -185,6 +186,6 @@ if __name__ == "__main__":
     solver.setNormType(solver.NormType.NORM_UNPRECONDITIONED)
     solver.setFromOptions()
     solver.view()
-    y.set(1.0)
-    set_bc(y, [bc])
-    solver.solve(b, y)
+    x.set(1.0)
+    set_bc(x, [bc])
+    solver.solve(b, x)
