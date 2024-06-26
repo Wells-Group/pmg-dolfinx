@@ -285,15 +285,9 @@ int main(int argc, char* argv[])
     thrust::device_vector<std::int8_t> bc_marker_d(bc_marker.begin(), bc_marker.end());
     std::span<const std::int8_t> bc_marker_d_span(thrust::raw_pointer_cast(bc_marker_d.data()),
                                                   bc_marker_d.size());
-    la::Vector<T> bc_vec(map, 1);
-    bc_vec.set(0.0);
-    fem::set_bc<T, T>(bc_vec.mutable_array(), {bc});
-    thrust::device_vector<T> bc_vec_d(bc_vec.array().begin(), bc_vec.array().end());
-    std::span<const T> bc_vec_d_span(thrust::raw_pointer_cast(bc_vec_d.data()), bc_vec_d.size());
 
     acc::MatFreeLaplacian<T> op(3, constants_d_span, dofmap_d_span, xgeom_d_span, xdofmap_d_span,
-                                dphi_d_span, Gweights_d_span, lcells, bcells, bc_marker_d_span,
-                                bc_vec_d_span);
+                                dphi_d_span, Gweights_d_span, lcells, bcells, bc_marker_d_span);
 
     // acc::MatrixOperator<T> op(a, {bc});
     // auto map = op.column_index_map();
@@ -308,7 +302,7 @@ int main(int argc, char* argv[])
     // fem::assemble_vector(b.mutable_array(), *L);
     // fem::apply_lifting<T, T>(b.mutable_array(), {a}, {{bc}}, {}, T(1));
     // b.scatter_rev(std::plus<T>());
-    fem::set_bc<T, T>(b.mutable_array(), {bc});
+    // fem::set_bc<T, T>(b.mutable_array(), {bc});
 #ifdef ROCM_TRACING
     remove_profiling_annotation("assembling and scattering");
 #endif
@@ -364,14 +358,6 @@ int main(int argc, char* argv[])
     if (mem > peak_mem)
       peak_mem = mem;
 #endif
-
-    std::cout << "Norm of u = " << acc::norm(u) << "\n";
-    std::cout << "Norm of y = " << acc::norm(y) << "\n";
-
-    op(u, y);
-
-    std::cout << "Norm of u = " << acc::norm(u) << "\n";
-    std::cout << "Norm of y = " << acc::norm(y) << "\n";
 
     dolfinx::acc::CGSolver<DeviceVector> cg(map, 1);
     cg.set_max_iterations(10);
