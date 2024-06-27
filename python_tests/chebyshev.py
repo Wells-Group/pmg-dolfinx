@@ -7,10 +7,11 @@ from dolfinx.fem.petsc import (
     set_bc,
 )
 from dolfinx import fem, mesh
-from ufl import TestFunction, TrialFunction, dx, inner, grad
+from ufl import TestFunction, TrialFunction, inner, grad, Measure
 import numpy as np
 from cg import CGSolver
 from petsc4py import PETSc
+import basix
 
 
 class Chebyshev:
@@ -94,15 +95,31 @@ if __name__ == "__main__":
     np.set_printoptions(linewidth=200)
 
     n = 5
+    k = 3
+    tensor_prod = True
     msh = create_unit_cube(MPI.COMM_WORLD, n, n, n, cell_type=mesh.CellType.hexahedron)
     print(f"Num cells = {msh.topology.index_map(msh.topology.dim).size_global}")
 
-    V = fem.functionspace(msh, ("CG", 3))
+    family = basix.ElementFamily.P
+    variant = basix.LagrangeVariant.gll_warped
+    cell_type = msh.basix_cell()
+
+    if tensor_prod:
+        # Tensor product element
+        basix_element = basix.create_tp_element(family, cell_type, k, variant)
+        element = basix.ufl._BasixElement(basix_element)  # basix ufl element
+        dx = Measure("dx", metadata={"quadrature_rule": "GLL", "quadrature_degree": 4})
+    else:
+        element = basix.ufl.element(family, cell_type, k, variant)
+        dx = Measure("dx")
+
+    V = fem.functionspace(msh, element)
+
     print(f"NDOFS = {V.dofmap.index_map.size_global}")
     u, v = TestFunction(V), TrialFunction(V)
-    k = 2.0
+    kappa = 2.0
 
-    a = k * inner(grad(u), grad(v)) * dx
+    a = kappa * inner(grad(u), grad(v)) * dx
     a = fem.form(a)
 
     def f_expr(x):
@@ -117,33 +134,32 @@ if __name__ == "__main__":
     msh.topology.create_connectivity(msh.topology.dim - 1, msh.topology.dim)
     facets = exterior_facet_indices(msh.topology)
     dofs = fem.locate_dofs_topological(V, msh.topology.dim - 1, facets)
-    bc = fem.dirichletbc(0.0, dofs, V)
+    bc = fem.dirichletbc(1.3, dofs, V)
 
     A = assemble_matrix(a, bcs=[bc])
     A.assemble()
-    print(A.norm())
 
-    b = assemble_vector(L)
-    apply_lifting(b, [a], [[bc]])
-    set_bc(b, [bc])
-
-    cg_solver = CGSolver(A, 10, 1e-6, jacobi=True, verbose=False)
+    cg_solver = CGSolver(A, 20, 1e-6, jacobi=True, verbose=False)
     x = A.createVecRight()
-    y = A.createVecRight()
-    y.set(1.0)
-    cg_solver.solve(y, x)
+    x.set(0.0)
+    b = A.createVecRight()
+    b.set(1.0)
+    cg_solver.solve(b, x)
     est_eigs = cg_solver.compute_eigs()
     print(f"Estimated min/max eigenvalues = {est_eigs}")
 
-    eigs = [0.1 * est_eigs[1], 1.1 * est_eigs[1]]
+    eigs = [0.1 * est_eigs[-1], 1.1 * est_eigs[-1]]
 
     max_cheb_iters = 30
     smoother = Chebyshev(A, max_cheb_iters, eigs, 4, jacobi=True, verbose=True)
     # Try with non-zero initial guess to check that works OK
     x.set(1.0)
-    print("before set bc x norm = ", x.norm())
     set_bc(x, [bc])
-    print("after set bc x norm = ", x.norm())
+
+    b = assemble_vector(L)
+    apply_lifting(b, [a], [[bc]])
+    set_bc(b, [bc])
+
     smoother.solve(b, x)
 
     # Compare to PETSc

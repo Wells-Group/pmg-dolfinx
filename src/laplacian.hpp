@@ -377,6 +377,8 @@ public:
   template <typename Vector>
   void operator()(Vector& in, Vector& out)
   {
+    out.set(T{0.0});
+
     if (degree == 1)
       impl_operator<1>(in, out);
     else if (degree == 2)

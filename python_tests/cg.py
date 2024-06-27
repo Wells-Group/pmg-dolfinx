@@ -4,11 +4,12 @@ from dolfinx.fem.petsc import (
     assemble_matrix,
 )
 from dolfinx import fem, mesh
-from ufl import TestFunction, TrialFunction, dx, inner, grad
+from ufl import TestFunction, TrialFunction, inner, grad, Measure
 from scipy import linalg
 import numpy as np
 from petsc4py import PETSc
 from tqli import tqli
+import basix
 
 
 class CGSolver:
@@ -49,6 +50,7 @@ class CGSolver:
             p = p * self.betas[-1] + self.S * r
 
             if self.verbose:
+                # print(f"Iteration {i + 1}: residual {np.sqrt(rnorm)}")
                 print(f"Iteration {i + 1}: residual {(self.S * r).norm()}")
                 print(f"alpha = {self.alphas[-1]}")
                 print(f"beta = {self.betas[-1]}")
@@ -73,18 +75,33 @@ class CGSolver:
 
 
 if __name__ == "__main__":
-    # TODO Do the same with PETSc and compare
     np.set_printoptions(linewidth=200)
     comm = MPI.COMM_WORLD
     msh = create_unit_cube(comm, 5, 5, 5, cell_type=mesh.CellType.hexahedron)
     print(f"Num cells = {msh.topology.index_map(msh.topology.dim).size_global}")
 
-    V = fem.functionspace(msh, ("CG", 3))
+    tensor_prod = True
+
+    # Tensor product element
+    family = basix.ElementFamily.P
+    variant = basix.LagrangeVariant.gll_warped
+    cell_type = msh.basix_cell()
+    k = 3
+
+    if tensor_prod:
+        basix_element = basix.create_tp_element(family, cell_type, k, variant)
+        element = basix.ufl._BasixElement(basix_element)  # basix ufl element
+        dx = Measure("dx", metadata={"quadrature_rule": "GLL", "quadrature_degree": 4})
+    else:
+        element = basix.ufl.element(family, cell_type, k, variant)
+        dx = Measure("dx")
+
+    V = fem.functionspace(msh, element)
     print(f"NDOFS = {V.dofmap.index_map.size_global}")
     u, v = TestFunction(V), TrialFunction(V)
-    k = 2.0
+    kappa = 2.0
 
-    a = k * inner(grad(u), grad(v)) * dx
+    a = kappa * inner(grad(u), grad(v)) * dx
     a = fem.form(a)
 
     def f_expr(x):
@@ -106,9 +123,10 @@ if __name__ == "__main__":
 
     cg_solver = CGSolver(A, 10, 1e-6, jacobi=True, verbose=True)
     x = A.createVecRight()
-    y = A.createVecRight()
-    y.set(1.0)
-    cg_solver.solve(y, x)
+    x.set(0.0)
+    b = A.createVecRight()
+    b.set(1.0)
+    cg_solver.solve(b, x)
     est_eigs = cg_solver.compute_eigs()
     print(f"Estimated eigenvalues = {est_eigs}")
 
@@ -147,5 +165,5 @@ if __name__ == "__main__":
     solver.setFromOptions()
 
     x.set(0.0)
-    solver.solve(y, x)
+    solver.solve(b, x)
     print(f"PETSc eigs = {solver.computeEigenvalues()}")
