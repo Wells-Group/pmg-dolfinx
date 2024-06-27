@@ -295,18 +295,14 @@ void solve(std::shared_ptr<mesh::Mesh<double>> mesh, bool use_amg)
     DeviceVector y(maps[i], 1);
     y.set(T{1.0});
 
-    [[maybe_unused]] int its = cg.solve(*operators[i], x, y, true);
+    [[maybe_unused]] int its = cg.solve(*operators[i], x, y, false);
     std::vector<T> eign = cg.compute_eigenvalues();
     std::sort(eign.begin(), eign.end());
+    spdlog::info("Eigenvalues level {}: {} - {}", i, eign.front(), eign.back());
     std::array<T, 2> eig_range = {0.1 * eign.back(), 1.1 * eign.back()};
     smoothers[i] = std::make_shared<acc::Chebyshev<DeviceVector>>(maps[i], 1, eig_range);
-
-    spdlog::info("Eigenvalues level {}: {} - {}", i, eign.front(), eign.back());
+    smoothers[i]->set_max_iterations(2);
   }
-
-  // FIXME
-  smoothers[0]->set_max_iterations(10);
-  smoothers[1]->set_max_iterations(5);
 
   // Create Prolongation operator
   std::vector<std::shared_ptr<acc::MatrixOperator<T>>> prolongation(V.size() - 1);
