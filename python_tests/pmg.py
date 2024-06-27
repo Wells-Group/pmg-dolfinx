@@ -57,7 +57,7 @@ def level_print(string, level):
     print(f'{(len(ks) - level) * "    "}{string}')
 
 
-n = 5
+n = 10
 ks = [1, 3]
 num_iters = 10
 kappa = 2.0
@@ -165,11 +165,10 @@ for i in range(1, len(ks)):
         solver.setFromOptions()
         solvers.append(solver)
     else:
-        cg_solver = CGSolver(As[i], 20, 1e-6, jacobi=True, verbose=True)
+        cg_solver = CGSolver(As[i], 10, 1e-6, jacobi=True, verbose=False)
         x = As[i].createVecRight()
         y = As[i].createVecRight()
         y.set(1.0)
-        print(f"norm of y = {y.norm()}")
         cg_solver.solve(y, x)
         est_eigs = cg_solver.compute_eigs()
 
