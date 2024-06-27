@@ -69,7 +69,7 @@ msh = mesh.create_unit_cube(MPI.COMM_WORLD, n, n, n, cell_type=mesh.CellType.hex
 x = ufl.SpatialCoordinate(msh)
 u_e = ufl.sin(ufl.pi * x[0]) * ufl.sin(ufl.pi * x[1]) * ufl.sin(ufl.pi * x[2])
 
-tensor_prod = False
+tensor_prod = True
 family = basix.ElementFamily.P
 variant = basix.LagrangeVariant.gll_warped
 cell_type = msh.basix_cell()
@@ -136,10 +136,19 @@ solver = PETSc.KSP().create(MPI.COMM_WORLD)
 solver_prefix = "solver_0_"
 solver.setOptionsPrefix(solver_prefix)
 solver.setOperators(As[0])
-solver.setType(PETSc.KSP.Type.PREONLY)
-solver.pc.setType(PETSc.PC.Type.LU)
-# opts = PETSc.Options()
+# solver.setType(PETSc.KSP.Type.PREONLY)
+# solver.pc.setType(PETSc.PC.Type.LU)
+opts = PETSc.Options()
 # opts["help"] = None
+solver_options = {
+    "ksp_type": "cg",
+    "ksp_rtol": 1.0e-8,
+    "ksp_max_it": 60,
+    "pc_type": "hypre",
+    "pc_hypre_type": "boomeramg",
+}
+for key, val in solver_options.items():
+    opts[f"{solver_prefix}{key}"] = val
 solver.setFromOptions()
 solvers.append(solver)
 
@@ -165,7 +174,7 @@ for i in range(1, len(ks)):
         solver.setFromOptions()
         solvers.append(solver)
     else:
-        cg_solver = CGSolver(As[i], 10, 1e-6, jacobi=True, verbose=False)
+        cg_solver = CGSolver(As[i], 20, 1e-6, jacobi=True, verbose=False)
         x = As[i].createVecRight()
         y = As[i].createVecRight()
         y.set(1.0)
