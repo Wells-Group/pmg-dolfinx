@@ -83,7 +83,6 @@ rs = []
 dus = []
 # Right-hand sides
 bs = []
-
 # Operators
 As = []
 # Boundary conditions
@@ -102,25 +101,26 @@ for i, k in enumerate(ks):
         dx = Measure("dx")
 
     V = fem.functionspace(msh, element)
-    Vs.append(V)
+
+    bc = boundary_condition(V)
 
     a = create_a(V, kappa, dx)
-    bc = boundary_condition(V)
-    bcs.append(bc)
     A = petsc.assemble_matrix(a, bcs=[bc])
     A.assemble()
-    As.append(A)
 
     # Assemble RHS
     L = create_L(V, kappa, u_e, dx)
     b = petsc.assemble_vector(L)
     petsc.apply_lifting(b, [a], bcs=[[bc]])
     petsc.set_bc(b, bcs=[bc])
-    bs.append(b)
 
+    Vs.append(V)
     us.append(fem.Function(V))
     rs.append(fem.Function(V))
     dus.append(fem.Function(V))
+    bs.append(b)
+    As.append(A)
+    bcs.append(bc)
 
 
 # Create interpolation operators (needed to restrict the residual)
