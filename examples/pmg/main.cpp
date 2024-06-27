@@ -287,13 +287,15 @@ void solve(std::shared_ptr<mesh::Mesh<double>> mesh, bool use_amg)
   {
     dolfinx::acc::CGSolver<DeviceVector> cg(maps[i], 1);
     cg.set_max_iterations(20);
-    cg.set_tolerance(1e-5);
+    cg.set_tolerance(1e-6);
     cg.store_coefficients(true);
 
     DeviceVector x(maps[i], 1);
-    x.set(T{1.0});
+    x.set(T{0.0});
+    DeviceVector y(maps[i], 1);
+    y.set(T{1.0});
 
-    [[maybe_unused]] int its = cg.solve(*operators[i], x, *bs[i], true);
+    [[maybe_unused]] int its = cg.solve(*operators[i], x, y, true);
     std::vector<T> eign = cg.compute_eigenvalues();
     std::sort(eign.begin(), eign.end());
     std::array<T, 2> eig_range = {0.1 * eign.back(), 1.1 * eign.back()};
