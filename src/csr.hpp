@@ -193,6 +193,11 @@ public:
     spdlog::warn("Operator dm1 size {}", V1.dofmap()->index_map->size_global());
     spdlog::warn("Max column = {}", *std::max_element(_A->cols().begin(), _A->cols().end()));
 
+    T norm = 0.0;
+    for (T v : _A->values())
+      norm += v * v;
+    spdlog::info("A interp norm = {}", std::sqrt(norm));
+
     _row_ptr = thrust::device_vector<std::int32_t>(num_rows + 1);
     _off_diag_offset = thrust::device_vector<std::int32_t>(num_rows);
     _cols = thrust::device_vector<std::int32_t>(nnz);

@@ -69,12 +69,15 @@ public:
 
     for (int i = num_levels - 1; i > 0; i--)
     {
+      spdlog::info("Level {}", i);
+
       // r = b[i] - A[i] * u[i]
       spdlog::debug("Operator {} on u -> r", i);
       (*_operators[i])(*_u[i], *_r[i]);
 
       spdlog::debug("axpy");
       axpy(*_r[i], T(-1), *_r[i], *_b[i]);
+      spdlog::info("Inital: rnorm = {}", acc::norm(*_r[i]));
 
       // u[i] = M^-1 b[i]
       _solvers[i]->solve(*_operators[i], *_u[i], *_b[i], false);
@@ -83,10 +86,13 @@ public:
       (*_operators[i])(*_u[i], *_r[i]);
       axpy(*_r[i], T(-1), *_r[i], *_b[i]);
 
+      spdlog::info("After initial smooth: rnorm = {}", acc::norm(*_r[i]));
+
       // Restrict residual from level i to level (i - 1)
       (*_interpolation[i - 1])(*_r[i], *_b[i - 1], true);
     }
 
+    spdlog::info("Level 0");
     // r = b[i] - A[i] * u[i]
     (*_operators[0])(*_u[0], *_r[0]);
     axpy(*_r[0], T(-1), *_r[0], *_b[0]);
@@ -101,10 +107,17 @@ public:
     (*_operators[0])(*_u[0], *_r[0]);
     axpy(*_r[0], T(-1), *_r[0], *_b[0]);
 
+    spdlog::info("After coarse solve: rnorm = {}", acc::norm(*_r[0]));
+
     for (int i = 0; i < num_levels - 1; i++)
     {
+      spdlog::info("Level {}", i + 1);
+
       // [coarse->fine] Prolong correction
       (*_interpolation[i])(*_u[i], *_du[i + 1], false);
+
+      spdlog::info("norm(_u[{}]) = {}", i, acc::norm(*_u[i]));
+      spdlog::info("norm(_du[{}]) = {}", i + 1, acc::norm(*_du[i + 1]));
 
       // update U
       axpy(*_u[i + 1], T(1), *_u[i + 1], *_du[i + 1]);
@@ -113,6 +126,8 @@ public:
       (*_operators[i + 1])(*_u[i + 1], *_r[i + 1]);
       axpy(*_r[i + 1], T(-1), *_r[i + 1], *_b[i + 1]);
 
+      spdlog::info("After correction: rnorm = {}", acc::norm(*_r[i + 1]));
+
       // [fine] Post-smooth
       _solvers[i + 1]->solve(*_operators[i + 1], *_u[i + 1], *_b[i + 1], false);
 
@@ -120,7 +135,7 @@ public:
       (*_operators[i + 1])(*_u[i + 1], *_r[i + 1]);
       axpy(*_r[i + 1], T(-1), *_r[i + 1], *_b[i + 1]);
       double rn = acc::norm(*_r[i + 1]);
-      spdlog::debug("Residual norm after post-smoothing ({}) = {}", i + 1, rn);
+      spdlog::info("Residual norm after post-smoothing ({}) = {}", i + 1, rn);
     }
 
     if (verbose == true)
