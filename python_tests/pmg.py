@@ -139,7 +139,7 @@ solver.setOperators(As[0])
 # solver.setType(PETSc.KSP.Type.PREONLY)
 # solver.pc.setType(PETSc.PC.Type.LU)
 opts = PETSc.Options()
-opts["help"] = None
+# opts["help"] = None
 solver_options = {
     "ksp_type": "cg",
     "ksp_rtol": 1.0e-8,
