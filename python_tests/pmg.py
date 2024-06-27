@@ -150,6 +150,8 @@ solver_options = {
 for key, val in solver_options.items():
     opts[f"{solver_prefix}{key}"] = val
 solver.setFromOptions()
+solver.setUp()
+# solver.view()
 solvers.append(solver)
 
 # Fine
@@ -240,17 +242,22 @@ for iter in range(num_iters):
     u_files[0].write(iter)
     level_print("Level 0:", 0)
     level_print(f"    residual norm = {(residual(bs[0], As[0], us[0])).norm()}", 0)
+    level_print(f"    correction norm = {(us[0].vector).norm()}", 0)
 
     # Sweep up the levels
     for i in range(len(ks) - 1):
+        level_print(f"Level {i + 1}:", i + 1)
         # Interpolate error to next level
         dus[i + 1].interpolate(us[i])
+
+        level_print(f"    norm(us[{i}]) = {us[i].vector.norm()}", i + 1)
+        level_print(f"    norm(dus[{i + 1}]) = {dus[i + 1].vector.norm()}", i + 1)
+
         du_files[i + 1].write(iter)
 
         # Add error to solution u_i += e_i
         us[i + 1].vector.array[:] += dus[i + 1].vector.array
 
-        level_print(f"Level {i + 1}:", i + 1)
         level_print(
             f"    After correction:     residual norm = {(residual(bs[i + 1], As[i + 1], us[i + 1])).norm()}",
             i + 1,
