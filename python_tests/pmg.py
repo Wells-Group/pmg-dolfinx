@@ -2,11 +2,12 @@ from mpi4py import MPI
 from dolfinx import mesh, fem, io
 from dolfinx.fem import petsc
 import ufl
-from ufl import TestFunction, TrialFunction, dx, inner, grad, div
+from ufl import TestFunction, TrialFunction, inner, grad, div, Measure
 import numpy as np
 from petsc4py import PETSc
 from cg import CGSolver
 from chebyshev import Chebyshev
+import basix
 
 
 def boundary_condition(V):
@@ -17,13 +18,13 @@ def boundary_condition(V):
     return fem.dirichletbc(0.0, dofs, V)
 
 
-def create_a(V, kappa):
+def create_a(V, kappa, dx):
     u, v = TrialFunction(V), TestFunction(V)
     a = kappa * inner(grad(u), grad(v)) * dx
     return fem.form(a)
 
 
-def create_L(V, kappa, u_e):
+def create_L(V, kappa, u_e, dx):
     v = TestFunction(V)
     f = -kappa * div(grad(u_e))
     L = inner(f, v) * dx
@@ -33,7 +34,7 @@ def create_L(V, kappa, u_e):
 def residual(b, A, u):
     r = A.createVecRight()
     A.mult(u.vector, r)
-    r.axpby(1, -1, b.vector)
+    r.axpby(1, -1, b)
     return r
 
 
@@ -56,7 +57,7 @@ def level_print(string, level):
     print(f'{(len(ks) - level) * "    "}{string}')
 
 
-n = 10
+n = 5
 ks = [1, 3]
 num_iters = 10
 kappa = 2.0
@@ -68,23 +69,42 @@ msh = mesh.create_unit_cube(MPI.COMM_WORLD, n, n, n, cell_type=mesh.CellType.hex
 x = ufl.SpatialCoordinate(msh)
 u_e = ufl.sin(ufl.pi * x[0]) * ufl.sin(ufl.pi * x[1]) * ufl.sin(ufl.pi * x[2])
 
+tensor_prod = False
+family = basix.ElementFamily.P
+variant = basix.LagrangeVariant.gll_warped
+cell_type = msh.basix_cell()
 # Function spaces
-Vs = [fem.functionspace(msh, ("Lagrange", k)) for k in ks]
+Vs = []
 # Solutions
-us = [fem.Function(V) for V in Vs]
+us = []
 # Residuals
-rs = [fem.Function(V) for V in Vs]
+rs = []
 # Corrections
-dus = [fem.Function(V) for V in Vs]
+dus = []
 # Right-hand sides
-bs = [fem.Function(V) for V in Vs]
+bs = []
 
 # Operators
 As = []
 # Boundary conditions
 bcs = []
-for i, V in enumerate(Vs):
-    a = create_a(V, kappa)
+for i, k in enumerate(ks):
+    if tensor_prod:
+        basix_element = basix.create_tp_element(family, cell_type, k, variant)
+        element = basix.ufl._BasixElement(basix_element)  # basix ufl element
+        k_to_quad_deg = {1: 1, 2: 3, 3: 4}
+        dx = Measure(
+            "dx",
+            metadata={"quadrature_rule": "GLL", "quadrature_degree": k_to_quad_deg[k]},
+        )
+    else:
+        element = basix.ufl.element(family, cell_type, k, variant)
+        dx = Measure("dx")
+
+    V = fem.functionspace(msh, element)
+    Vs.append(V)
+
+    a = create_a(V, kappa, dx)
     bc = boundary_condition(V)
     bcs.append(bc)
     A = petsc.assemble_matrix(a, bcs=[bc])
@@ -92,10 +112,16 @@ for i, V in enumerate(Vs):
     As.append(A)
 
     # Assemble RHS
-    L = create_L(V, kappa, u_e)
-    petsc.assemble_vector(bs[i].vector, L)
-    petsc.apply_lifting(bs[i].vector, [a], bcs=[[bc]])
-    petsc.set_bc(bs[i].vector, bcs=[bc])
+    L = create_L(V, kappa, u_e, dx)
+    b = petsc.assemble_vector(L)
+    petsc.apply_lifting(b, [a], bcs=[[bc]])
+    petsc.set_bc(b, bcs=[bc])
+    bs.append(b)
+
+    us.append(fem.Function(V))
+    rs.append(fem.Function(V))
+    dus.append(fem.Function(V))
+
 
 # Create interpolation operators (needed to restrict the residual)
 interp_ops = [petsc.interpolation_matrix(Vs[i], Vs[i + 1]) for i in range(len(Vs) - 1)]
@@ -139,10 +165,11 @@ for i in range(1, len(ks)):
         solver.setFromOptions()
         solvers.append(solver)
     else:
-        cg_solver = CGSolver(As[i], 10, 1e-6, jacobi=True, verbose=False)
+        cg_solver = CGSolver(As[i], 20, 1e-6, jacobi=True, verbose=True)
         x = As[i].createVecRight()
         y = As[i].createVecRight()
         y.set(1.0)
+        print(f"norm of y = {y.norm()}")
         cg_solver.solve(y, x)
         est_eigs = cg_solver.compute_eigs()
 
@@ -187,7 +214,7 @@ for iter in range(num_iters):
             i,
         )
         # Smooth A_i u_i = b_i on fine level
-        solvers[i].solve(bs[i].vector, us[i].vector)
+        solvers[i].solve(bs[i], us[i].vector)
 
         # Compute residual r_i = b_i - A_i u_i
         rs[i].vector.array[:] = residual(bs[i], As[i], us[i])
@@ -197,11 +224,11 @@ for iter in range(num_iters):
         r_files[i].write(iter)
 
         # Interpolate residual to next level
-        interp_ops[i - 1].multTranspose(rs[i].vector, bs[i - 1].vector)
+        interp_ops[i - 1].multTranspose(rs[i].vector, bs[i - 1])
 
     # Solve A_0 u_0 = r_0 on coarse level
-    petsc.set_bc(bs[0].vector, bcs=[bcs[0]])
-    solvers[0].solve(bs[0].vector, us[0].vector)
+    petsc.set_bc(bs[0], bcs=[bcs[0]])
+    solvers[0].solve(bs[0], us[0].vector)
     u_files[0].write(iter)
     level_print("Level 0:", 0)
     level_print(f"    residual norm = {(residual(bs[0], As[0], us[0])).norm()}", 0)
@@ -222,7 +249,7 @@ for iter in range(num_iters):
         )
 
         # Smooth on fine level A_i u_i = b_i
-        solvers[i + 1].solve(bs[i + 1].vector, us[i + 1].vector)
+        solvers[i + 1].solve(bs[i + 1], us[i + 1].vector)
 
         level_print(
             f"    After final smooth:   residual norm = {(residual(bs[i + 1], As[i + 1], us[i + 1])).norm()}",
