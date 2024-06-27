@@ -59,7 +59,7 @@ def level_print(string, level):
 n = 10
 ks = [1, 3]
 num_iters = 10
-kappa = 1.0
+kappa = 2.0
 use_petsc = False
 comm = MPI.COMM_WORLD
 msh = mesh.create_unit_cube(MPI.COMM_WORLD, n, n, n, cell_type=mesh.CellType.hexahedron)
