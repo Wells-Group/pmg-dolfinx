@@ -88,6 +88,8 @@ add_custom_command(
 find_package(hip REQUIRED)
 find_package(rocprim REQUIRED CONFIG)
 find_package(rocthrust REQUIRED CONFIG)
+find_package(hipsparse REQUIRED CONFIG)
+
 if(profiling)
 	find_library(ROCTRACER_LIBRARY NAMES roctracer64)
 	find_library(ROCTX64_LIBRARY NAMES roctx64)
