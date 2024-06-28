@@ -296,7 +296,7 @@ void solve(std::shared_ptr<mesh::Mesh<double>> mesh, bool use_amg)
 
   // Create chebyshev smoother for each level
   std::vector<std::shared_ptr<acc::Chebyshev<DeviceVector>>> smoothers(V.size());
-  for (std::size_t i = 1; i < V.size(); i++)
+  for (std::size_t i = 0; i < V.size(); i++)
   {
     dolfinx::acc::CGSolver<DeviceVector> cg(maps[i], 1);
     cg.set_max_iterations(20);
@@ -350,7 +350,7 @@ void solve(std::shared_ptr<mesh::Mesh<double>> mesh, bool use_amg)
   DeviceVector x(maps.back(), 1);
   x.set(T{0.0});
 
-  int niter = 1;
+  int niter = 10;
   for (int i = 0; i < niter; i++)
   {
     pmg.apply(*bs.back(), x, true);

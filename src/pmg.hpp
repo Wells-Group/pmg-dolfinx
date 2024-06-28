@@ -109,11 +109,13 @@ public:
     else
       _solvers[0]->solve(*_operators[0], *_u[0], *_b[0], false);
 
+    spdlog::info("After coarse solve: unorm = {}", acc::norm(*_u[0]));
+
     // r = b[i] - A[i] * u[i]
     (*_operators[0])(*_u[0], *_r[0]);
+    spdlog::info("After coarse solve: A.u = {}", acc::norm(*_r[0]));
     axpy(*_r[0], T(-1), *_r[0], *_b[0]);
-
-    spdlog::info("After coarse solve: rnorm = {}", acc::norm(*_r[0]));
+    spdlog::info("After coarse solve: A.u-b = {}", acc::norm(*_r[0]));
 
     for (int i = 0; i < num_levels - 1; i++)
     {

@@ -45,15 +45,25 @@ __global__ void geometry_computation(const T* xgeom, T* G_entity,
   // coord_dofs has shape [ncdofs, gdim]
   T* _coord_dofs = shared_mem;
 
-  // One quadrature point per thread
   // First collect geometry into shared memory
   int iq = threadIdx.x;
-  int i = iq / gdim;
-  int j = iq % gdim;
-  if (i < ncdofs)
-    _coord_dofs[iq] = xgeom[3 * geometry_dofmap[cell * ncdofs + i] + j];
+  if constexpr (P == 1)
+  {
+    // Only 8 threads when P == 1
+    assert(iq < 8);
+    for (int j = 0; j < 3; ++j)
+      _coord_dofs[iq * 3 + j] = xgeom[3 * geometry_dofmap[cell * ncdofs + iq] + j];
+  }
+  else
+  {
+    int i = iq / gdim;
+    int j = iq % gdim;
+    if (i < ncdofs)
+      _coord_dofs[iq] = xgeom[3 * geometry_dofmap[cell * ncdofs + i] + j];
+  }
 
   __syncthreads();
+  // One quadrature point per thread
 
   if (iq >= nq)
     return;
