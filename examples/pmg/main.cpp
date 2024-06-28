@@ -85,6 +85,7 @@ void solve(std::shared_ptr<mesh::Mesh<double>> mesh, bool use_amg)
 
   spdlog::info("Compute boundary cells");
   // Compute local and boundary cells (needed for MatFreeLaplacian)
+  // FIXME: Generalise to more levels
   auto [lcells, bcells] = compute_boundary_cells(V.back());
 
   // assemble RHS for each level
@@ -186,7 +187,6 @@ void solve(std::shared_ptr<mesh::Mesh<double>> mesh, bool use_amg)
   if constexpr (std::is_same_v<FineOperator, acc::MatFreeLaplacian<T>>)
   {
     // Copy dofmaps to device (only for MatFreeLaplacian)
-    std::vector<thrust::device_vector<std::int32_t>> dofmapV(order.size());
 
     for (std::size_t i = 0; i < V.size(); ++i)
     {
@@ -205,7 +205,7 @@ void solve(std::shared_ptr<mesh::Mesh<double>> mesh, bool use_amg)
     {
       spdlog::debug("Copy geometry quadrature tables to device [{}]", i);
       // Quadrature points and weights on hex (3D)
-      std::vector<int> k_to_q {1, 3, 4};
+      std::vector<int> k_to_q{1, 3, 4};
       auto [Gpoints, Gweights] = basix::quadrature::make_quadrature<T>(
           basix::quadrature::type::gll, basix::cell::type::hexahedron,
           basix::polyset::type::standard, k_to_q.at(order[i] - 1));
@@ -270,8 +270,7 @@ void solve(std::shared_ptr<mesh::Mesh<double>> mesh, bool use_amg)
       A.get_diag_inverse(diag_inv);
       operators[i]->set_diag_inverse(diag_inv);
 
-    err_check(hipDeviceSynchronize());
-
+      err_check(hipDeviceSynchronize());
     }
     else
     {

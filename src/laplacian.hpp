@@ -340,6 +340,7 @@ public:
       thrust::copy(lcells.begin(), lcells.end(), cell_list_d.begin());
 
       compute_geometry<P>();
+      err_check(hipDeviceSynchronize());
 
       dim3 block_size(P + 1, P + 1, P + 1);
       int p1cubed = (P + 1) * (P + 1) * (P + 1);
@@ -379,7 +380,7 @@ public:
       thrust::copy(bcells.begin(), bcells.end(), cell_list_d.begin());
 
       compute_geometry<P>();
-
+      err_check(hipDeviceSynchronize());
       dim3 block_size(P + 1, P + 1, P + 1);
       int p1cubed = (P + 1) * (P + 1) * (P + 1);
       dim3 grid_size(cell_list_d.size());
