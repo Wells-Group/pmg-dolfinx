@@ -306,13 +306,22 @@ public:
   }
 
   // Compute weighted geometry data on GPU
+  template <int P>
   void compute_geometry()
   {
     G_entity.resize(G_weights.size() * cell_list_d.size() * 6);
     dim3 block_size(G_weights.size());
     dim3 grid_size(cell_list_d.size());
+
+    spdlog::debug("xgeom size {}", xgeom.size());
+    spdlog::debug("G_entity size {}", G_entity.size());
+    spdlog::debug("geometry_dofmap size {}", geometry_dofmap.size());
+    spdlog::debug("dphi_geometry size {}", dphi_geometry.size());
+    spdlog::debug("G_weights size {}", G_weights.size());
+    spdlog::debug("cell_list_d size {}", cell_list_d.size());
+
     std::size_t shm_size = 24 * sizeof(T); // coordinate size (8x3)
-    hipLaunchKernelGGL(HIP_KERNEL_NAME(geometry_computation<T, 3>), grid_size, block_size, shm_size,
+    hipLaunchKernelGGL(HIP_KERNEL_NAME(geometry_computation<T, P>), grid_size, block_size, shm_size,
                        0, xgeom.data(), thrust::raw_pointer_cast(G_entity.data()),
                        geometry_dofmap.data(), dphi_geometry.data(), G_weights.data(),
                        thrust::raw_pointer_cast(cell_list_d.data()), cell_list_d.size());
@@ -321,6 +330,8 @@ public:
   template <int P, typename Vector>
   void impl_operator(Vector& in, Vector& out)
   {
+    spdlog::debug("impl_operator operator start");
+
     in.scatter_fwd_begin();
 
     if (!lcells.empty())
@@ -328,7 +339,7 @@ public:
       cell_list_d.resize(lcells.size());
       thrust::copy(lcells.begin(), lcells.end(), cell_list_d.begin());
 
-      compute_geometry();
+      compute_geometry<P>();
 
       dim3 block_size(P + 1, P + 1, P + 1);
       int p1cubed = (P + 1) * (P + 1) * (P + 1);
@@ -345,15 +356,29 @@ public:
 
       err_check(hipGetLastError());
     }
+
+    spdlog::debug("impl_operator done lcells");
+
+    spdlog::debug("cell_constants size {}", cell_constants.size());
+    spdlog::debug("in size {}", in.array().size());
+    spdlog::debug("out size {}", out.array().size());
+    spdlog::debug("G_entity size {}", G_entity.size());
+    spdlog::debug("cell_dofmap size {}", cell_dofmap.size());
+    spdlog::debug("dphi_d size {}", dphi_d.size());
+    spdlog::debug("cell_list_d size {}", cell_list_d.size());
+    spdlog::debug("bc_marker size {}", bc_marker.size());
 
     in.scatter_fwd_end();
 
+    spdlog::debug("impl_operator after scatter");
+
     if (!bcells.empty())
     {
+      spdlog::debug("impl_operator doing bcells. bcells size = {}", bcells.size());
       cell_list_d.resize(bcells.size());
       thrust::copy(bcells.begin(), bcells.end(), cell_list_d.begin());
 
-      compute_geometry();
+      compute_geometry<P>();
 
       dim3 block_size(P + 1, P + 1, P + 1);
       int p1cubed = (P + 1) * (P + 1) * (P + 1);
@@ -371,12 +396,15 @@ public:
 
       err_check(hipGetLastError());
     }
+
     err_check(hipDeviceSynchronize());
+    spdlog::debug("impl_operator done bcells");
   }
 
   template <typename Vector>
   void operator()(Vector& in, Vector& out)
   {
+    spdlog::debug("Mat free operator start");
     out.set(T{0.0});
 
     if (degree == 1)
@@ -385,6 +413,7 @@ public:
       impl_operator<2>(in, out);
     else if (degree == 3)
       impl_operator<3>(in, out);
+    spdlog::debug("Mat free operator end");
   }
 
   template <typename Vector>

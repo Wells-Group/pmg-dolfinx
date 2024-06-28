@@ -175,6 +175,8 @@ void solve(std::shared_ptr<mesh::Mesh<double>> mesh, bool use_amg)
         std::span(thrust::raw_pointer_cast(bc_marker_d[i].data()), bc_marker_d[i].size()));
   }
 
+  err_check(hipDeviceSynchronize());
+
   // Copy constants to device (all same, one per cell, scalar)
   thrust::device_vector<T> constants(mesh->topology()->index_map(tdim)->size_local()
                                          + mesh->topology()->index_map(tdim)->num_ghosts(),
@@ -197,13 +199,18 @@ void solve(std::shared_ptr<mesh::Mesh<double>> mesh, bool use_amg)
           std::span<std::int32_t>(thrust::raw_pointer_cast(dofmapV[i].data()), dofmapV[i].size()));
     }
 
+    err_check(hipDeviceSynchronize());
+
     for (std::size_t i = 0; i < V.size(); ++i)
     {
       spdlog::debug("Copy geometry quadrature tables to device [{}]", i);
       // Quadrature points and weights on hex (3D)
+      std::vector<int> k_to_q {1, 3, 4};
       auto [Gpoints, Gweights] = basix::quadrature::make_quadrature<T>(
           basix::quadrature::type::gll, basix::cell::type::hexahedron,
-          basix::polyset::type::standard, order[i]);
+          basix::polyset::type::standard, k_to_q.at(order[i] - 1));
+
+      spdlog::debug("i = {}, order[i] = {}, Gweights.size() = {}", i, order[i], Gweights.size());
       // Tables at quadrature points [phi, dphix, dphiy, dphiz]
       const fem::CoordinateElement<T>& cmap = mesh->geometry().cmap();
       std::array<std::size_t, 4> phi_shape = cmap.tabulate_shape(1, Gweights.size());
@@ -223,6 +230,8 @@ void solve(std::shared_ptr<mesh::Mesh<double>> mesh, bool use_amg)
           std::span(thrust::raw_pointer_cast(Gweights_d[i].data()), Gweights_d[i].size()));
     }
 
+    err_check(hipDeviceSynchronize());
+
     spdlog::debug("Copy geometry data to device");
     geomx_device.resize(mesh->geometry().x().size());
     spdlog::info("Copy geometry to device :{}", geomx_device.size());
@@ -235,6 +244,8 @@ void solve(std::shared_ptr<mesh::Mesh<double>> mesh, bool use_amg)
                  geomx_dofmap_device.begin());
     geom_x_dofmap = std::span<std::int32_t>(thrust::raw_pointer_cast(geomx_dofmap_device.data()),
                                             geomx_dofmap_device.size());
+
+    err_check(hipDeviceSynchronize());
   }
 
   std::vector<std::shared_ptr<DeviceVector>> bs(V.size());
@@ -258,6 +269,9 @@ void solve(std::shared_ptr<mesh::Mesh<double>> mesh, bool use_amg)
       DeviceVector diag_inv(maps[i], 1);
       A.get_diag_inverse(diag_inv);
       operators[i]->set_diag_inverse(diag_inv);
+
+    err_check(hipDeviceSynchronize());
+
     }
     else
     {
@@ -283,7 +297,7 @@ void solve(std::shared_ptr<mesh::Mesh<double>> mesh, bool use_amg)
 
   // Create chebyshev smoother for each level
   std::vector<std::shared_ptr<acc::Chebyshev<DeviceVector>>> smoothers(V.size());
-  for (std::size_t i = 0; i < V.size(); i++)
+  for (std::size_t i = 1; i < V.size(); i++)
   {
     dolfinx::acc::CGSolver<DeviceVector> cg(maps[i], 1);
     cg.set_max_iterations(20);
@@ -291,6 +305,10 @@ void solve(std::shared_ptr<mesh::Mesh<double>> mesh, bool use_amg)
     cg.store_coefficients(true);
 
     DeviceVector x(maps[i], 1);
+
+    spdlog::debug("map local size = {}, ghost size = {}", maps[i]->size_local(),
+                  maps[i]->num_ghosts());
+
     x.set(T{0.0});
     DeviceVector y(maps[i], 1);
     y.set(T{1.0});
@@ -411,10 +429,10 @@ int main(int argc, char* argv[])
     }
 
     // Solve using Matrix-free operators
-    // solve<acc::MatFreeLaplacian<T>>(mesh, use_amg);
+    solve<acc::MatFreeLaplacian<T>>(mesh, use_amg);
 
     // Solve using CSR matrices
-    solve<acc::MatrixOperator<T>>(mesh, use_amg);
+    // solve<acc::MatrixOperator<T>>(mesh, use_amg);
 
     // Display timings
     dolfinx::list_timings(MPI_COMM_WORLD, {dolfinx::TimingType::wall});

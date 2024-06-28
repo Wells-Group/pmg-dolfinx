@@ -261,22 +261,34 @@ public:
 
   void scatter_fwd_end(int block_size = 512)
   {
+    spdlog::debug("scatter_fwd_end start");
     // TODO: which block_size to use??
     const std::int32_t local_size = _bs * _map->size_local();
     const std::int32_t num_ghosts = _bs * _map->num_ghosts();
     _scatterer->scatter_fwd_end(std::span<MPI_Request>(_request));
+
+    spdlog::debug("scatter_fwd_end step 1");
+
+    spdlog::debug("scatter_fwd_end local buf size = {}, remote buf size {}", _buffer_local.size(),
+                  _buffer_remote.size());
 
     const int num_blocks = (_remote_indices.size() + block_size - 1) / block_size;
     dim3 dim_block(block_size);
     dim3 dim_grid(num_blocks);
     std::span<T> x_remote(this->mutable_array().data() + local_size, num_ghosts);
 
-    const std::int32_t* indices = thrust::raw_pointer_cast(_remote_indices.data());
-    const T* in = thrust::raw_pointer_cast(_buffer_remote.data());
-    T* out = x_remote.data();
-    hipLaunchKernelGGL(unpack<T>, dim_grid, dim_block, 0, 0, _remote_indices.size(), indices, in,
-                       out);
-    err_check(hipDeviceSynchronize());
+    spdlog::debug("scatter_fwd_end step 2");
+
+    if (!_remote_indices.empty())
+    {
+      const std::int32_t* indices = thrust::raw_pointer_cast(_remote_indices.data());
+      const T* in = thrust::raw_pointer_cast(_buffer_remote.data());
+      T* out = x_remote.data();
+      hipLaunchKernelGGL(unpack<T>, dim_grid, dim_block, 0, 0, _remote_indices.size(), indices, in,
+                         out);
+      err_check(hipDeviceSynchronize());
+    }
+    spdlog::debug("scatter_fwd_end end");
   }
 
   /// Scatter local data to ghost positions on other ranks
@@ -441,11 +453,14 @@ auto norm(const Vector& a, dolfinx::la::Norm type = dolfinx::la::Norm::l2)
 template <typename Vector, typename S>
 void axpy(Vector& r, S alpha, const Vector& x, const Vector& y)
 {
+  spdlog::debug("AXPY start");
   using T = typename Vector::value_type;
   thrust::transform(thrust::device, x.array().begin(), x.array().begin() + x.map()->size_local(),
                     y.array().begin(), r.mutable_array().begin(),
                     [alpha] __host__ __device__(const T& vx, const T& vy)
                     { return vx * alpha + vy; });
+  spdlog::debug("AXPY end");
+  
 }
 
 /// Scale vector by alpha
@@ -479,10 +494,13 @@ void copy(Vector& a, const Vector& b)
 template <typename Vector>
 void pointwise_mult(Vector& w, const Vector& x, const Vector& y)
 {
+  spdlog::debug("pointwise_mult start");
+
   using T = typename Vector::value_type;
   thrust::transform(thrust::device, x.array().begin(), x.array().begin() + x.map()->size_local(),
                     y.array().begin(), w.mutable_array().begin(),
                     [] __host__ __device__(const T& xi, const T& yi) { return xi * yi; });
+  spdlog::debug("pointwise_mult end");
 }
 
 template <typename Vector, typename UnaryFunction>
