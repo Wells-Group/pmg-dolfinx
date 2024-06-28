@@ -171,9 +171,7 @@ public:
     spdlog::info("HipPlaceArray");
 
     int ierr = VecHIPPlaceArray(_x_petsc, x.array().data());
-    spdlog::info("x:{}, {}", ierr, x.array().data());
     ierr = VecHIPPlaceArray(_y_petsc, y.array().data());
-    spdlog::info("y:{}, {}", ierr, y.array().data());
 
     int nx, ny;
     MatGetLocalSize(_hip_mat, &nx, &ny);

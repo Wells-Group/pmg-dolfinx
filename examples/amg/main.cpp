@@ -49,8 +49,8 @@ int main(int argc, char* argv[])
 
     const int order = 1;
     double nx_approx = (std::pow(ndofs * size, 1.0 / 3.0) - 1) / order;
-    std::size_t n0 = static_cast<int>(nx_approx);
-    std::array<std::size_t, 3> nx = {n0, n0, n0};
+    std::int64_t n0 = static_cast<int>(nx_approx);
+    std::array<std::int64_t, 3> nx = {n0, n0, n0};
 
     // Try to improve fit to ndofs +/- 5 in each direction
     if (n0 > 5)
@@ -58,9 +58,9 @@ int main(int argc, char* argv[])
       std::int64_t best_misfit
           = (n0 * order + 1) * (n0 * order + 1) * (n0 * order + 1) - ndofs * size;
       best_misfit = std::abs(best_misfit);
-      for (std::size_t nx0 = n0 - 5; nx0 < n0 + 6; ++nx0)
-        for (std::size_t ny0 = n0 - 5; ny0 < n0 + 6; ++ny0)
-          for (std::size_t nz0 = n0 - 5; nz0 < n0 + 6; ++nz0)
+      for (std::int64_t nx0 = n0 - 5; nx0 < n0 + 6; ++nx0)
+        for (std::int64_t ny0 = n0 - 5; ny0 < n0 + 6; ++ny0)
+          for (std::int64_t nz0 = n0 - 5; nz0 < n0 + 6; ++nz0)
           {
             std::int64_t misfit
                 = (nx0 * order + 1) * (ny0 * order + 1) * (nz0 * order + 1) - ndofs * size;
@@ -76,8 +76,10 @@ int main(int argc, char* argv[])
     auto mesh = std::make_shared<mesh::Mesh<T>>(mesh::create_box<T>(
         comm, {{{0, 0, 0}, {1, 1, 1}}}, {nx[0], nx[1], nx[2]}, mesh::CellType::hexahedron));
 
-    auto V = std::make_shared<fem::FunctionSpace<T>>(
-        fem::create_functionspace(functionspace_form_poisson_a, "u", mesh));
+    auto element = basix::create_element<T>(
+        basix::element::family::P, basix::cell::type::hexahedron, 1,
+        basix::element::lagrange_variant::gll_warped, basix::element::dpc_variant::unset, false);
+    auto V = std::make_shared<fem::FunctionSpace<T>>(fem::create_functionspace(mesh, element, {}));
 
     std::size_t ncells = mesh->topology()->index_map(3)->size_global();
     std::size_t ndofs = V->dofmap()->index_map->size_global();
@@ -93,8 +95,6 @@ int main(int argc, char* argv[])
       std::cout << std::flush;
     }
 
-    loguru::g_stderr_verbosity = loguru::Verbosity_INFO;
-
     // Prepare and set Constants for the bilinear form
     auto kappa = std::make_shared<fem::Constant<T>>(2.0);
     auto f = std::make_shared<fem::Function<T>>(V);
@@ -105,7 +105,7 @@ int main(int argc, char* argv[])
     auto L = std::make_shared<fem::Form<T>>(
         fem::create_form<T>(*form_poisson_L, {V}, {{"f", f}}, {}, {}));
 
-    LOG(INFO) << "Interpolate";
+    spdlog::info("Interpolate");
 
     f->interpolate(
         [](auto x) -> std::pair<std::vector<T>, std::vector<std::size_t>>
@@ -120,14 +120,14 @@ int main(int argc, char* argv[])
           return {out, {out.size()}};
         });
 
-    LOG(INFO) << "Topology";
+    spdlog::info("Topology");
 
     auto topology = V->mesh()->topology_mutable();
     int tdim = topology->dim();
     int fdim = tdim - 1;
     topology->create_connectivity(fdim, tdim);
 
-    LOG(INFO) << "DirichletBC";
+    spdlog::info("DirichletBC");
 
     auto dofmap = V->dofmap();
     auto facets = dolfinx::mesh::exterior_facet_indices(*topology);
@@ -137,7 +137,7 @@ int main(int argc, char* argv[])
     fem::Function<T> u(V);
     la::Vector<T> b(V->dofmap()->index_map, V->dofmap()->index_map_bs());
 
-    LOG(INFO) << "Assemble Vector";
+    spdlog::info("Assemble Vector");
     b.set(T(0.0));
     fem::assemble_vector(b.mutable_array(), *L);
     fem::apply_lifting<T, T>(b.mutable_array(), {a}, {{bc}}, {}, T(1));
@@ -148,17 +148,15 @@ int main(int argc, char* argv[])
     using DeviceVector = dolfinx::acc::Vector<T, acc::Device::HIP>;
     using HostVector = dolfinx::acc::Vector<T, acc::Device::CPP>;
 
-    LOG(INFO) << "Create Petsc Operator";
+    spdlog::info("Create Petsc Operator");
 
     // Create petsc operator
     PETScOperator op(a, {bc});
 
     auto im_op = op.index_map();
-    LOG(INFO) << "OP:" << im_op->size_global() << "/" << im_op->size_local() << "/"
-              << im_op->num_ghosts();
+    spdlog::info("OP:{} {} {}", im_op->size_global(), im_op->size_local(), im_op->num_ghosts());
     auto im_V = V->dofmap()->index_map;
-    LOG(INFO) << "V:" << im_V->size_global() << "/" << im_V->size_local() << "/"
-              << im_V->num_ghosts();
+    spdlog::info("V:{} {} {}", im_V->size_global(), im_V->size_local(), im_V->num_ghosts());
 
     DeviceVector x(V->dofmap()->index_map, 1);
     x.set(T{0.0});
@@ -166,33 +164,33 @@ int main(int argc, char* argv[])
     DeviceVector y(op.index_map(), 1);
     y.copy_from_host(b); // Copy data from host vector to device vector
 
-    LOG(INFO) << "Apply operator";
+    spdlog::info("Apply operator");
 
     // x = A.y
     op(y, x);
 
-    LOG(INFO) << "get device matrix";
+    spdlog::info("get device matrix");
     Mat A = op.device_matrix();
 
-    LOG(INFO) << "Create Petsc KSP";
+    spdlog::info("Create Petsc KSP");
     // Create PETSc KSP object
     KSP solver;
     PC prec;
     KSPCreate(comm, &solver);
-    LOG(INFO) << "Set KSP Type";
+    spdlog::info("Set KSP Type");
     KSPSetType(solver, KSPCG);
-    LOG(INFO) << "Set Operators";
+    spdlog::info("Set Operators");
     KSPSetOperators(solver, A, A);
-    LOG(INFO) << "Set PC Type";
+    spdlog::info("Set PC Type");
     KSPGetPC(solver, &prec);
     PCSetType(prec, PCHYPRE);
-    //    LOG(INFO) << "Set AMG Type";
+    //    spdlog::info( "Set AMG Type";
     //    PCGAMGSetType(prec, PCGAMGAGG);
     KSPSetFromOptions(solver);
-    LOG(INFO) << "KSP Setup";
+    spdlog::info("KSP Setup");
     KSPSetUp(solver);
 
-    LOG(INFO) << "Create Petsc HIP arrays";
+    spdlog::info("Create Petsc HIP arrays");
     // SET OPTIONS????
     const PetscInt local_size = V->dofmap()->index_map->size_local();
     const PetscInt global_size = V->dofmap()->index_map->size_global();
@@ -214,16 +212,24 @@ int main(int argc, char* argv[])
     PetscInt num_iterations = 0;
     int ierr = KSPGetIterationNumber(solver, &num_iterations);
     if (ierr != 0)
-      LOG(ERROR) << "KSPGetIterationNumber Error:" << ierr;
+      spdlog::error("KSPGetIterationNumber Error: {}", ierr);
 
     if (rank == 0)
     {
-      std::cout << "Converged reason: " << reason;
-      std::cout << "Num iterations: " << num_iterations;
+      std::cout << "Converged reason: " << reason << "\n";
+      std::cout << "Num iterations: " << num_iterations << "\n";
     }
 
     VecHIPResetArray(_b);
     VecHIPResetArray(_x);
+
+    spdlog::info("x.norm = {}", acc::norm(x));
+    spdlog::info("[0] y.norm = {}", acc::norm(y));
+
+    // y = A.x
+    op(x, y);
+
+    spdlog::info("[1] y.norm = {}", acc::norm(y));
 
     // Display timings
     dolfinx::list_timings(MPI_COMM_WORLD, {dolfinx::TimingType::wall});

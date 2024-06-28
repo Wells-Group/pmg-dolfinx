@@ -350,7 +350,8 @@ void solve(std::shared_ptr<mesh::Mesh<double>> mesh, bool use_amg)
   DeviceVector x(maps.back(), 1);
   x.set(T{0.0});
 
-  for (int i = 0; i < 10; i++)
+  int niter = 1;
+  for (int i = 0; i < niter; i++)
   {
     pmg.apply(*bs.back(), x, true);
     // spdlog::info("------ end of iteration ------");
