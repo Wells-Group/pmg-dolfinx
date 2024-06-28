@@ -20,8 +20,9 @@ class MultigridPreconditioner
   using T = typename Vector::value_type;
 
 public:
-  MultigridPreconditioner(std::vector<std::shared_ptr<const common::IndexMap>> maps, int bs)
-      : _maps{maps}, _bs{bs}
+  MultigridPreconditioner(std::vector<std::shared_ptr<const common::IndexMap>> maps, int bs,
+                          std::span<const std::int8_t> bc_marker)
+      : _maps{maps}, _bs{bs}, _bc_marker(bc_marker)
   {
     int num_levels = _maps.size();
 
@@ -94,8 +95,13 @@ public:
 
     spdlog::info("Level 0");
     // r = b[i] - A[i] * u[i]
-    (*_operators[0])(*_u[0], *_r[0]);
-    axpy(*_r[0], T(-1), *_r[0], *_b[0]);
+    // (*_operators[0])(*_u[0], *_r[0]);
+    // axpy(*_r[0], T(-1), *_r[0], *_b[0]);
+
+    thrust::transform(thrust::device, (*_b[0]).array().begin(),
+                      (*_b[0]).array().begin() + (*_b[0]).map()->size_local(), _bc_marker.begin(),
+                      (*_b[0]).mutable_array().begin(),
+                      [] __host__ __device__(const T& xi, const T& yi) { return xi * (1 - yi); });
 
     // Solve coarse problem
     if (_coarse_solver)
@@ -160,6 +166,9 @@ private:
   std::vector<std::unique_ptr<Vector>> _u;
   std::vector<std::unique_ptr<Vector>> _r;
   std::vector<std::unique_ptr<Vector>> _b;
+
+  // Marker for bc
+  std::span<const std::int8_t> _bc_marker;
 
   // Prologation and restriction operatos
   // Size should be nlevels - 1

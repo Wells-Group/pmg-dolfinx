@@ -160,6 +160,21 @@ void solve(std::shared_ptr<mesh::Mesh<double>> mesh, bool use_amg)
   std::vector<thrust::device_vector<std::int8_t>> bc_marker_d(V.size());
   std::vector<std::span<const std::int8_t>> bc_marker_d_span;
 
+  // Copy bc_dofs to device (list of all dofs, with BCs marked with 0)
+  for (std::size_t i = 0; i < V.size(); ++i)
+  {
+    spdlog::debug("Copy BCs[{}] to device", i);
+    auto [dofs, pos] = bcs[i]->dof_indices();
+    std::vector<std::int8_t> active_bc_dofs(
+        V[i]->dofmap()->index_map->size_local() + V[i]->dofmap()->index_map->num_ghosts(), 0);
+    for (std::int32_t index : dofs)
+      active_bc_dofs[index] = 1;
+    bc_marker_d[i]
+        = thrust::device_vector<std::int8_t>(active_bc_dofs.begin(), active_bc_dofs.end());
+    bc_marker_d_span.push_back(
+        std::span(thrust::raw_pointer_cast(bc_marker_d[i].data()), bc_marker_d[i].size()));
+  }
+
   // Copy constants to device (all same, one per cell, scalar)
   thrust::device_vector<T> constants(mesh->topology()->index_map(tdim)->size_local()
                                          + mesh->topology()->index_map(tdim)->num_ghosts(),
@@ -220,21 +235,6 @@ void solve(std::shared_ptr<mesh::Mesh<double>> mesh, bool use_amg)
                  geomx_dofmap_device.begin());
     geom_x_dofmap = std::span<std::int32_t>(thrust::raw_pointer_cast(geomx_dofmap_device.data()),
                                             geomx_dofmap_device.size());
-
-    // Copy bc_dofs to device (list of all dofs, with BCs marked with 0)
-    for (std::size_t i = 0; i < V.size(); ++i)
-    {
-      spdlog::debug("Copy BCs[{}] to device", i);
-      auto [dofs, pos] = bcs[i]->dof_indices();
-      std::vector<std::int8_t> active_bc_dofs(
-          V[i]->dofmap()->index_map->size_local() + V[i]->dofmap()->index_map->num_ghosts(), 0);
-      for (std::int32_t index : dofs)
-        active_bc_dofs[index] = 1;
-      bc_marker_d[i]
-          = thrust::device_vector<std::int8_t>(active_bc_dofs.begin(), active_bc_dofs.end());
-      bc_marker_d_span.push_back(
-          std::span(thrust::raw_pointer_cast(bc_marker_d[i].data()), bc_marker_d[i].size()));
-    }
   }
 
   std::vector<std::shared_ptr<DeviceVector>> bs(V.size());
@@ -319,7 +319,7 @@ void solve(std::shared_ptr<mesh::Mesh<double>> mesh, bool use_amg)
                                            CoarseSolverType<T>>;
 
   spdlog::info("Create PMG");
-  PMG pmg(maps, 1);
+  PMG pmg(maps, 1, bc_marker_d_span[0]);
   pmg.set_solvers(smoothers);
   pmg.set_operators(operators);
   spdlog::info("Set Coarse Solver");
@@ -333,7 +333,7 @@ void solve(std::shared_ptr<mesh::Mesh<double>> mesh, bool use_amg)
   DeviceVector x(maps.back(), 1);
   x.set(T{0.0});
 
-  for (int i = 0; i < 10; i++)
+  for (int i = 0; i < 1; i++)
   {
     pmg.apply(*bs.back(), x, true);
     // spdlog::info("------ end of iteration ------");
