@@ -59,7 +59,7 @@ def level_print(string, level):
 
 n = 10
 ks = [1, 3]
-num_iters = 1
+num_iters = 10
 kappa = 2.0
 use_petsc = False
 comm = MPI.COMM_WORLD
@@ -69,6 +69,7 @@ msh = mesh.create_unit_cube(MPI.COMM_WORLD, n, n, n, cell_type=mesh.CellType.hex
 x = ufl.SpatialCoordinate(msh)
 u_e = ufl.sin(ufl.pi * x[0]) * ufl.sin(ufl.pi * x[1]) * ufl.sin(ufl.pi * x[2])
 
+# FIXME Why does TP converge slower?
 tensor_prod = True
 family = basix.ElementFamily.P
 variant = basix.LagrangeVariant.gll_warped
@@ -136,24 +137,24 @@ solver = PETSc.KSP().create(MPI.COMM_WORLD)
 solver_prefix = "solver_0_"
 solver.setOptionsPrefix(solver_prefix)
 solver.setOperators(As[0])
-# solver.setType(PETSc.KSP.Type.PREONLY)
-# solver.pc.setType(PETSc.PC.Type.LU)
+solver.setType(PETSc.KSP.Type.PREONLY)
+solver.pc.setType(PETSc.PC.Type.LU)
 # FIXME Find best solver settings
 opts = PETSc.Options()
 # opts["help"] = None
-solver_options = {
-    "ksp_type": "cg",
-    "ksp_rtol": 1.0e-14,
-    "ksp_max_it": 60,
-    "pc_type": "hypre",
-    "pc_hypre_type": "boomeramg",
-    "pc_hypre_boomeramg_relax_type_down": "l1scaled-Jacobi",
-    "pc_hypre_boomeramg_relax_type_up": "l1scaled-Jacobi",
-    "pc_hypre_boomeramg_coarsen_type": "PMIS",
-    "pc_hypre_boomeramg_interp_type": "ext+i",
-}
-for key, val in solver_options.items():
-    opts[f"{solver_prefix}{key}"] = val
+# solver_options = {
+#     "ksp_type": "cg",
+#     "ksp_rtol": 1.0e-14,
+#     "ksp_max_it": 60,
+#     "pc_type": "hypre",
+#     "pc_hypre_type": "boomeramg",
+#     "pc_hypre_boomeramg_relax_type_down": "l1scaled-Jacobi",
+#     "pc_hypre_boomeramg_relax_type_up": "l1scaled-Jacobi",
+#     "pc_hypre_boomeramg_coarsen_type": "PMIS",
+#     "pc_hypre_boomeramg_interp_type": "ext+i",
+# }
+# for key, val in solver_options.items():
+#     opts[f"{solver_prefix}{key}"] = val
 solver.setFromOptions()
 solver.setUp()
 solver.view()
@@ -242,6 +243,7 @@ for iter in range(num_iters):
         interp_ops[i - 1].multTranspose(rs[i].vector, bs[i - 1])
 
     # Solve A_0 u_0 = r_0 on coarse level
+    # FIXME Should this be done on other levels?
     petsc.set_bc(bs[0], bcs=[bcs[0]])
     solvers[0].solve(bs[0], us[0].vector)
     u_files[0].write(iter)
