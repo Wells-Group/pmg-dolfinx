@@ -94,8 +94,8 @@ public:
 
     spdlog::info("Level 0");
     // r = b[i] - A[i] * u[i]
-    (*_operators[0])(*_u[0], *_r[0]);
-    axpy(*_r[0], T(-1), *_r[0], *_b[0]);
+    // (*_operators[0])(*_u[0], *_r[0]);
+    // axpy(*_r[0], T(-1), *_r[0], *_b[0]);
 
     // Solve coarse problem
     if (_coarse_solver)
