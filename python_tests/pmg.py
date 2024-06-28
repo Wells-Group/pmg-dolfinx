@@ -59,7 +59,7 @@ def level_print(string, level):
 
 n = 10
 ks = [1, 3]
-num_iters = 10
+num_iters = 1
 kappa = 2.0
 use_petsc = False
 comm = MPI.COMM_WORLD
@@ -138,20 +138,25 @@ solver.setOptionsPrefix(solver_prefix)
 solver.setOperators(As[0])
 # solver.setType(PETSc.KSP.Type.PREONLY)
 # solver.pc.setType(PETSc.PC.Type.LU)
+# FIXME Find best solver settings
 opts = PETSc.Options()
 # opts["help"] = None
 solver_options = {
     "ksp_type": "cg",
-    "ksp_rtol": 1.0e-8,
+    "ksp_rtol": 1.0e-14,
     "ksp_max_it": 60,
     "pc_type": "hypre",
     "pc_hypre_type": "boomeramg",
+    "pc_hypre_boomeramg_relax_type_down": "l1scaled-Jacobi",
+    "pc_hypre_boomeramg_relax_type_up": "l1scaled-Jacobi",
+    "pc_hypre_boomeramg_coarsen_type": "PMIS",
+    "pc_hypre_boomeramg_interp_type": "ext+i",
 }
 for key, val in solver_options.items():
     opts[f"{solver_prefix}{key}"] = val
 solver.setFromOptions()
 solver.setUp()
-# solver.view()
+solver.view()
 solvers.append(solver)
 
 # Fine
