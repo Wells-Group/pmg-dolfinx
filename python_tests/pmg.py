@@ -59,7 +59,7 @@ def level_print(string, level):
 
 n = 10
 ks = [1, 3]
-num_iters = 10
+num_iters = 1
 kappa = 2.0
 use_petsc = False
 comm = MPI.COMM_WORLD
@@ -138,18 +138,25 @@ solver.setOptionsPrefix(solver_prefix)
 solver.setOperators(As[0])
 # solver.setType(PETSc.KSP.Type.PREONLY)
 # solver.pc.setType(PETSc.PC.Type.LU)
+# FIXME Find best solver settings
 opts = PETSc.Options()
 # opts["help"] = None
 solver_options = {
     "ksp_type": "cg",
-    "ksp_rtol": 1.0e-8,
+    "ksp_rtol": 1.0e-14,
     "ksp_max_it": 60,
     "pc_type": "hypre",
     "pc_hypre_type": "boomeramg",
+    "pc_hypre_boomeramg_relax_type_down": "l1scaled-Jacobi",
+    "pc_hypre_boomeramg_relax_type_up": "l1scaled-Jacobi",
+    "pc_hypre_boomeramg_coarsen_type": "PMIS",
+    "pc_hypre_boomeramg_interp_type": "ext+i",
 }
 for key, val in solver_options.items():
     opts[f"{solver_prefix}{key}"] = val
 solver.setFromOptions()
+solver.setUp()
+solver.view()
 solvers.append(solver)
 
 # Fine
@@ -240,17 +247,22 @@ for iter in range(num_iters):
     u_files[0].write(iter)
     level_print("Level 0:", 0)
     level_print(f"    residual norm = {(residual(bs[0], As[0], us[0])).norm()}", 0)
+    level_print(f"    correction norm = {(us[0].vector).norm()}", 0)
 
     # Sweep up the levels
     for i in range(len(ks) - 1):
+        level_print(f"Level {i + 1}:", i + 1)
         # Interpolate error to next level
         dus[i + 1].interpolate(us[i])
+
+        level_print(f"    norm(us[{i}]) = {us[i].vector.norm()}", i + 1)
+        level_print(f"    norm(dus[{i + 1}]) = {dus[i + 1].vector.norm()}", i + 1)
+
         du_files[i + 1].write(iter)
 
         # Add error to solution u_i += e_i
         us[i + 1].vector.array[:] += dus[i + 1].vector.array
 
-        level_print(f"Level {i + 1}:", i + 1)
         level_print(
             f"    After correction:     residual norm = {(residual(bs[i + 1], As[i + 1], us[i + 1])).norm()}",
             i + 1,
