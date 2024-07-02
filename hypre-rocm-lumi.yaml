@@ -151,7 +151,7 @@ spack:
     fenics-basix:
       variants: build_type=Release
     fenics-dolfinx:
-      variants: build_type=Release
+      variants: +adios2 build_type=Release
     all:
       compiler:
       - gcc@11.2.0-env
