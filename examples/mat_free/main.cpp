@@ -127,28 +127,32 @@ int main(int argc, char* argv[])
     auto kappa = std::make_shared<fem::Constant<T>>(2.0);
     auto f = std::make_shared<fem::Function<T>>(V);
 
+    spdlog::debug("Define forms");
     // Define variational forms
     auto a = std::make_shared<fem::Form<T>>(
         fem::create_form<T>(*form_poisson_a, {V, V}, {}, {{"kappa", kappa}}, {}));
     auto L = std::make_shared<fem::Form<T>>(
         fem::create_form<T>(*form_poisson_L, {V}, {{"f", f}}, {}, {}));
 
-    f->interpolate(
-        [](auto x) -> std::pair<std::vector<T>, std::vector<std::size_t>>
-        {
-          std::vector<T> out;
-          for (std::size_t p = 0; p < x.extent(1); ++p)
-          {
-            auto dx = (x(0, p) - 0.5) * (x(0, p) - 0.5);
-            auto dy = (x(1, p) - 0.5) * (x(1, p) - 0.5);
-            out.push_back(1000 * std::exp(-(dx + dy) / 0.02));
-          }
+    spdlog::debug("Interpolate (rank {})", rank);
+    // f->interpolate(
+    //     [](auto x) -> std::pair<std::vector<T>, std::vector<std::size_t>>
+    //     {
+    //       std::vector<T> out;
+    //       for (std::size_t p = 0; p < x.extent(1); ++p)
+    //       {
+    //         auto dx = (x(0, p) - 0.5) * (x(0, p) - 0.5);
+    //         auto dy = (x(1, p) - 0.5) * (x(1, p) - 0.5);
+    //         out.push_back(1000 * std::exp(-(dx + dy) / 0.02));
+    //       }
 
-          return {out, {out.size()}};
-        });
+    //       return {out, {out.size()}};
+    //     });
 
     int fdim = tdim - 1;
+    spdlog::debug("Create f->c on {}", rank);
     topology->create_connectivity(fdim, tdim);
+    spdlog::debug("Done f->c on {}", rank);
 
     auto dofmap = V->dofmap();
     auto facets = dolfinx::mesh::exterior_facet_indices(*topology);
@@ -163,23 +167,26 @@ int main(int argc, char* argv[])
     thrust::device_vector<T> constants_d(num_cells_all, kappa->value[0]);
     std::span<const T> constants_d_span(thrust::raw_pointer_cast(constants_d.data()),
                                         constants_d.size());
-    spdlog::info("Send constants to GPU (size = {})", constants_d.size());
+    spdlog::info("Send constants to GPU (size = {} bytes)", constants_d.size() * sizeof(T));
 
     // V dofmap
     thrust::device_vector<std::int32_t> dofmap_d(
         dofmap->map().data_handle(), dofmap->map().data_handle() + dofmap->map().size());
     std::span<const std::int32_t> dofmap_d_span(thrust::raw_pointer_cast(dofmap_d.data()),
                                                 dofmap_d.size());
-    spdlog::info("Send dofmap to GPU (size = {})", dofmap_d.size());
+    spdlog::info("Send dofmap to GPU (size = {} bytes)", dofmap_d.size() * sizeof(std::int32_t));
 
     // Define vectors
     using DeviceVector = dolfinx::acc::Vector<T, acc::Device::HIP>;
 
     // Input vector
     auto map = V->dofmap()->index_map;
+    spdlog::info("Create device vector u");
+
     DeviceVector u(map, 1);
     u.set(T{0.0});
 
+    spdlog::info("Create device vector y");
     // Output vector
     DeviceVector y(map, 1);
     y.set(T{0.0});
@@ -190,11 +197,14 @@ int main(int argc, char* argv[])
     auto xdofmap = mesh->geometry().dofmap();
 
     // Geometry dofmap
+    spdlog::info("Copy geometry dofmap to device ({} bytes)",
+                 xdofmap.size() * sizeof(std::int32_t));
     thrust::device_vector<std::int32_t> xdofmap_d(xdofmap.data_handle(),
                                                   xdofmap.data_handle() + xdofmap.size());
     std::span<const std::int32_t> xdofmap_d_span(thrust::raw_pointer_cast(xdofmap_d.data()),
                                                  xdofmap_d.size());
     // Geometry points
+    spdlog::info("Copy geometry to device ({} bytes)", mesh->geometry().x().size() * sizeof(T));
     thrust::device_vector<T> xgeom_d(mesh->geometry().x().begin(), mesh->geometry().x().end());
     std::span<const T> xgeom_d_span(thrust::raw_pointer_cast(xgeom_d.data()), xgeom_d.size());
 
@@ -204,17 +214,17 @@ int main(int argc, char* argv[])
     cmap.tabulate(1, Gpoints, {Gweights.size(), 3}, phi_b);
 
     // Copy dphi to device (skipping phi in table)
+    spdlog::info("Copy dphi to device ({} bytes)", (3 * phi_b.size() * sizeof(T)) / 4);
+
     thrust::device_vector<T> dphi_d(phi_b.begin() + phi_b.size() / 4, phi_b.end());
     std::span<const T> dphi_d_span(thrust::raw_pointer_cast(dphi_d.data()), dphi_d.size());
 
     // Copy quadrature weights to device
+    spdlog::info("Copy Gweights to device ({} bytes)", Gweights.size() * sizeof(T));
     thrust::device_vector<T> Gweights_d(Gweights.begin(), Gweights.end());
     std::span<const T> Gweights_d_span(thrust::raw_pointer_cast(Gweights_d.data()),
                                        Gweights_d.size());
     // -----------------------------------------------------------------------------
-
-    // Create matrix free operator
-    spdlog::debug("Create MatFreeLaplacian");
 
     // TODO Ghosts
     const int num_dofs = map->size_local() + map->num_ghosts();
@@ -224,37 +234,48 @@ int main(int argc, char* argv[])
     std::span<const std::int8_t> bc_marker_d_span(thrust::raw_pointer_cast(bc_marker_d.data()),
                                                   bc_marker_d.size());
 
+    // Create matrix free operator
+    spdlog::info("Create MatFreeLaplacian");
     acc::MatFreeLaplacian<T> op(3, constants_d_span, dofmap_d_span, xgeom_d_span, xdofmap_d_span,
                                 dphi_d_span, Gweights_d_span, lcells, bcells, bc_marker_d_span);
 
     la::Vector<T> b(map, 1);
-    b.set(0.0);
-    fem::assemble_vector(b.mutable_array(), *L);
-    fem::apply_lifting<T, T>(b.mutable_array(), {a}, {{bc}}, {}, T(1));
-    b.scatter_rev(std::plus<T>());
-    fem::set_bc<T, T>(b.mutable_array(), {bc});
+    b.set(1.0);
+    //    fem::assemble_vector(b.mutable_array(), *L);
+    //    fem::apply_lifting<T, T>(b.mutable_array(), {a}, {{bc}}, {}, T(1));
+    //    b.scatter_rev(std::plus<T>());
+    //    fem::set_bc<T, T>(b.mutable_array(), {bc});
     u.copy_from_host(b); // Copy data from host vector to device vector
     u.scatter_fwd_begin();
 
     // Matrix free
-    op(u, y);
+    int nrep = 500;
+
+    dolfinx::common::Timer m1timer("% Mat-free Matvec");
+    for (int i = 0; i < nrep; ++i)
+      op(u, y);
+    m1timer.stop();
 
     std::cout << "Norm of u = " << acc::norm(u) << "\n";
     std::cout << "Norm of y = " << acc::norm(y) << "\n";
 
     // Compare to assembling on CPU and copying matrix to GPU
-    DeviceVector z(map, 1);
-    z.set(T{0.0});
+    //    DeviceVector z(map, 1);
+    //    z.set(T{0.0});
 
-    acc::MatrixOperator<T> mat_op(a, {bc});
-    mat_op(u, z);
-    std::cout << "Norm of u = " << acc::norm(u) << "\n";
-    std::cout << "Norm of z = " << acc::norm(z) << "\n";
+    // acc::MatrixOperator<T> mat_op(a, {bc});
+    // dolfinx::common::Timer mtimer("% CSR Matvec");
+    // for (int i = 0; i < nrep; ++i)
+    //   mat_op(u, z);
+    // mtimer.stop();
 
-    // Compute error
-    DeviceVector e(map, 1);
-    acc::axpy(e, T{-1.0}, y, z);
-    std::cout << "Norm of error = " << acc::norm(e) << "\n";
+    // std::cout << "Norm of u = " << acc::norm(u) << "\n";
+    // std::cout << "Norm of z = " << acc::norm(z) << "\n";
+
+    // // Compute error
+    // DeviceVector e(map, 1);
+    // acc::axpy(e, T{-1.0}, y, z);
+    // std::cout << "Norm of error = " << acc::norm(e) << "\n";
 
     // Display timings
     dolfinx::list_timings(MPI_COMM_WORLD, {dolfinx::TimingType::wall});

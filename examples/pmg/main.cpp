@@ -17,6 +17,7 @@
 #include <boost/program_options.hpp>
 #include <dolfinx.h>
 #include <dolfinx/fem/dolfinx_fem.h>
+#include <dolfinx/io/ADIOS2Writers.h>
 #include <dolfinx/la/MatrixCSR.h>
 #include <dolfinx/la/SparsityPattern.h>
 #include <dolfinx/mesh/generation.h>
@@ -356,6 +357,13 @@ void solve(std::shared_ptr<mesh::Mesh<double>> mesh, bool use_amg)
     pmg.apply(*bs.back(), x, true);
     // spdlog::info("------ end of iteration ------");
   }
+
+  auto u = std::make_shared<fem::Function<T>>(V.back());
+  auto xv = x.thrust_vector();
+  thrust::copy(xv.begin(), xv.end(), u->x()->mutable_array().begin());
+
+  dolfinx::io::VTXWriter<T> write_adios(mesh->comm(), "solution.bp", {u});
+  write_adios.write(0.0);
 }
 
 int main(int argc, char* argv[])

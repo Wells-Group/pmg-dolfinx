@@ -3,6 +3,10 @@ from ufl import (Coefficient, Constant, FunctionSpace, Mesh, Measure,
 import basix
 from basix.ufl import blocked_element, wrap_element
 
+kx = 2
+ky = 3
+kz = 4
+
 # Load namespace
 ns = vars()
 forms = []
@@ -23,7 +27,7 @@ for degree in range(1, 4):
     v = TestFunction(V)
     x = SpatialCoordinate(mesh)
     kappa = Constant(mesh)
-    f = -kappa * div(grad(sin(pi*x[0]) * sin(pi*x[1]) * sin(pi*x[2])))
+    f = -kappa * div(grad(sin(kx*pi*x[0]) * sin(ky*pi*x[1]) * sin(kz*pi*x[2])))
 
     aname = 'a' + str(degree)
     Lname = 'L' + str(degree)

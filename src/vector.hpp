@@ -194,6 +194,9 @@ public:
   /// Get block size
   constexpr int bs() const { return _bs; }
 
+  /// Access
+  thrust::device_vector<T>& thrust_vector() { return _x; }
+
   /// Get local part of the vector (const version)
   std::span<const T> array() const
   {
@@ -460,7 +463,6 @@ void axpy(Vector& r, S alpha, const Vector& x, const Vector& y)
                     [alpha] __host__ __device__(const T& vx, const T& vy)
                     { return vx * alpha + vy; });
   spdlog::debug("AXPY end");
-  
 }
 
 /// Scale vector by alpha
