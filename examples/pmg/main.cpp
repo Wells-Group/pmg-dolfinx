@@ -31,7 +31,7 @@ using DeviceVector = dolfinx::acc::Vector<T, acc::Device::HIP>;
 namespace po = boost::program_options;
 
 template <typename FineOperator>
-void solve(std::shared_ptr<mesh::Mesh<double>> mesh, bool use_amg)
+void solve(std::shared_ptr<mesh::Mesh<double>> mesh, bool use_amg, bool output_to_file)
 {
   if constexpr (std::is_same_v<FineOperator, acc::MatFreeLaplacian<T>>)
   {
@@ -358,20 +358,24 @@ void solve(std::shared_ptr<mesh::Mesh<double>> mesh, bool use_amg)
     // spdlog::info("------ end of iteration ------");
   }
 
-  auto u = std::make_shared<fem::Function<T>>(V.back());
-  auto xv = x.thrust_vector();
-  thrust::copy(xv.begin(), xv.end(), u->x()->mutable_array().begin());
+  if (output_to_file)
+  {
+    auto u = std::make_shared<fem::Function<T>>(V.back());
+    auto xv = x.thrust_vector();
+    thrust::copy(xv.begin(), xv.end(), u->x()->mutable_array().begin());
 
-  dolfinx::io::VTXWriter<T> write_adios(mesh->comm(), "solution.bp", {u});
-  write_adios.write(0.0);
+    dolfinx::io::VTXWriter<T> write_adios(mesh->comm(), "solution.bp", {u});
+    write_adios.write(0.0);
+  }
 }
 
 int main(int argc, char* argv[])
 {
   po::options_description desc("Allowed options");
   desc.add_options()("help,h", "print usage message")(
-      "ndofs", po::value<std::size_t>()->default_value(50000),
-      "number of dofs per rank")("amg", po::bool_switch()->default_value(false));
+      "ndofs", po::value<std::size_t>()->default_value(50000), "number of dofs per rank")(
+      "amg", po::bool_switch()->default_value(false))("output",
+                                                      po::bool_switch()->default_value(false));
 
   po::variables_map vm;
   po::store(po::command_line_parser(argc, argv).options(desc).allow_unregistered().run(), vm);
@@ -384,6 +388,7 @@ int main(int argc, char* argv[])
   }
   const std::size_t ndofs = vm["ndofs"].as<std::size_t>();
   bool use_amg = vm["amg"].as<bool>();
+  bool output_to_file = vm["output"].as<bool>();
 
   init_logging(argc, argv);
   PetscInitialize(&argc, &argv, nullptr, nullptr);
@@ -437,10 +442,10 @@ int main(int argc, char* argv[])
     }
 
     // Solve using Matrix-free operators
-    solve<acc::MatFreeLaplacian<T>>(mesh, use_amg);
+    solve<acc::MatFreeLaplacian<T>>(mesh, use_amg, output_to_file);
 
     // Solve using CSR matrices
-    // solve<acc::MatrixOperator<T>>(mesh, use_amg);
+    // solve<acc::MatrixOperator<T>>(mesh, use_amg, output_to_file);
 
     // Display timings
     dolfinx::list_timings(MPI_COMM_WORLD, {dolfinx::TimingType::wall});
