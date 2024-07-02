@@ -346,40 +346,26 @@ public:
 
     if (!lcells.empty())
     {
+      cell_list_d.resize(lcells.size());
+      thrust::copy(lcells.begin(), lcells.end(), cell_list_d.begin());
 
-      int batch_size = 16384;
-      int nb = lcells.size() / batch_size + 1;
+      compute_geometry<P>();
+      err_check(hipDeviceSynchronize());
 
-      for (int i = 0; i < nb; ++i)
-      {
-        auto start = std::next(lcells.begin(), i * batch_size);
-        std::vector<int>::iterator end;
-        if ((i + 1) * batch_size >= lcells.size())
-          end = lcells.end();
-        else
-          end = std::next(start, batch_size);
+      dim3 block_size(P + 1, P + 1, P + 1);
+      int p1cubed = (P + 1) * (P + 1) * (P + 1);
+      dim3 grid_size(cell_list_d.size());
+      std::size_t shm_size = 4 * p1cubed * sizeof(T);
 
-        cell_list_d.resize(end - start);
-        thrust::copy(start, end, cell_list_d.begin());
+      T* x = in.mutable_array().data();
+      T* y = out.mutable_array().data();
+      hipLaunchKernelGGL(HIP_KERNEL_NAME(stiffness_operator<T, P>), grid_size, block_size, shm_size,
+                         0, x, cell_constants.data(), y, thrust::raw_pointer_cast(G_entity.data()),
+                         cell_dofmap.data(), thrust::raw_pointer_cast(dphi_d.data()),
+                         thrust::raw_pointer_cast(cell_list_d.data()), cell_list_d.size(),
+                         bc_marker.data());
 
-        compute_geometry<P>();
-        err_check(hipDeviceSynchronize());
-
-        dim3 block_size(P + 1, P + 1, P + 1);
-        int p1cubed = (P + 1) * (P + 1) * (P + 1);
-        dim3 grid_size(cell_list_d.size());
-        std::size_t shm_size = 4 * p1cubed * sizeof(T);
-
-        T* x = in.mutable_array().data();
-        T* y = out.mutable_array().data();
-        hipLaunchKernelGGL(
-            HIP_KERNEL_NAME(stiffness_operator<T, P>), grid_size, block_size, shm_size, 0, x,
-            cell_constants.data(), y, thrust::raw_pointer_cast(G_entity.data()), cell_dofmap.data(),
-            thrust::raw_pointer_cast(dphi_d.data()), thrust::raw_pointer_cast(cell_list_d.data()),
-            cell_list_d.size(), bc_marker.data());
-
-        err_check(hipGetLastError());
-      }
+      err_check(hipGetLastError());
     }
 
     spdlog::debug("impl_operator done lcells");
