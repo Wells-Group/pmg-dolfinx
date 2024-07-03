@@ -18,6 +18,8 @@ N.B. to install fenics-basix, you might need to patch spack slightly:
         return options
 ```
 
+(`zfp` is also giving a problem - need to add `-lm` to `CMAKE_C_FLAGS`)
+
 Once `spack install` has completed successfully, you can build the examples in the `examples` folder using cmake.
 
 ```
