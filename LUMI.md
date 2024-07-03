@@ -13,11 +13,8 @@ N.B. to install fenics-basix, you might need to patch spack slightly:
 
 ```
     def cmake_args(self):
-        options = []
-        options.append("-DBLAS_LIBRARIES=" + self.spec["blas"].libs.joined())
-        options.append("-DLAPACK_LIBRARIES=" + self.spec["blas"].libs.joined())
-        lapack_libs = self.spec['lapack'].libs.joined(';')
-        blas_libs = self.spec['blas'].libs.joined(';')
+        options = ["-DBLAS_LIBRARIES=" + self.spec["blas"].libs.joined(),
+	           "-DLAPACK_LIBRARIES=" + self.spec["blas"].libs.joined()]
         return options
 ```
 
