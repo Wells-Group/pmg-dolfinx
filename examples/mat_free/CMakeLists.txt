@@ -20,14 +20,19 @@ if(NOT WIN32)
   set(BoldWhite   "${Esc}[1;37m")
 endif()
 
-set(PROJECT_NAME mat_free C CXX)
+if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
+  set(CMAKE_CUDA_ARCHITECTURES 80)
+endif()
+
+set(PROJECT_NAME mat_free C CXX CUDA)
 project(${PROJECT_NAME})
+
 
 option(profiling          "Enable ROCm scoped profiling"                                  off)
 option(omnitrace	  "Enable AMD omnitrace profiling"				  off)
 option(cpu		  "Build for CPUs"						  off)
-option(nvidia		  "Build for NVidia GPUs"					  off)
-option(amd		  "Build for AMD GPUs"						  on)
+option(nvidia		  "Build for NVidia GPUs"					  on)
+option(amd		  "Build for AMD GPUs"						  off)
 
 if(cpu AND nvidia OR cpu AND amd)
   message(FATAL_ERROR "You cannot select both a cpu build and a GPU (amd or nvidia) build. Only select one of the three options: cpu, nvidia, amd")
@@ -52,13 +57,16 @@ else()
   message(FATAL_ERROR "No target selected for the build. Please select one of the three options: cpu, nvidia, amd")
 endif()
 
+set(CMAKE_CXX_EXTENSIONS off)
 set(CMAKE_CXX_STANDARD 20)
-set(CMAKE_CXX_FLAGS "-Ofast -march=native -stdlib=libstdc++ --gcc-toolchain=/opt/cray/pe/gcc/11.2.0/snos ${CMAKE_CXX_FLAGS} -DNDEBUG -Wall")
+set(CMAKE_CXX_FLAGS "-O3  ${CMAKE_CXX_FLAGS} -DNDEBUG")
+set(CMAKE_CUDA_FLAGS "-O3  ${CMAKE_CXX_FLAGS} -DNDEBUG --extended-lambda")
 set(CMAKE_C_FLAGS "-Ofast -march=native ${CMAKE_C_FLAGS} -DNDEBUG -Wall")
 
 
 # ------------------------------------------------------------------------------
 # General configuration
+
 find_package(MPI)
 find_package(DOLFINX REQUIRED)
 find_package(Boost 1.70 REQUIRED program_options)
@@ -83,11 +91,7 @@ add_custom_command(
   COMMENT "Compile poisson.py using FFCx"
 )
 
-# If using ROCm and HIP
-# On ROCm rocThrust requires rocPRIM
-find_package(hip REQUIRED)
-find_package(rocprim REQUIRED CONFIG)
-find_package(rocthrust REQUIRED CONFIG)
+
 if(profiling)
 	find_library(ROCTRACER_LIBRARY NAMES roctracer64)
 	find_library(ROCTX64_LIBRARY NAMES roctx64)
@@ -114,11 +118,13 @@ elseif(nvidia)
 elseif(cpu)
 	add_definitions(-DCPU_ONLY=1)
 endif()
+
+set_source_files_properties(main.cpp PROPERTIES LANGUAGE CUDA)
 add_executable(${PROJECT_NAME} main.cpp ${CMAKE_CURRENT_BINARY_DIR}/poisson.c)
 
 include_directories("../../")
 
-target_link_libraries(${PROJECT_NAME} dolfinx roc::rocthrust Boost::program_options)
+target_link_libraries(${PROJECT_NAME} dolfinx  Boost::program_options)
 if(profiling)
 	target_link_libraries(${PROJECT_NAME} ${ROCTX64_LIBRARY} ${ROCTRACER_LIBRARY} ${ROCM_SMI64_LIBRARY})
 endif()

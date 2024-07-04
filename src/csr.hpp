@@ -3,19 +3,9 @@
 #include <dolfinx/fem/petsc.h>
 #include <dolfinx/la/MatrixCSR.h>
 
-#include "hip/hip_runtime.h"
-#include <hipsparse.h>
+#include <cuda_runtime.h>
 #include <thrust/device_vector.h>
-
-#define err_check(command)                                                                         \
-  {                                                                                                \
-    hipError_t status = command;                                                                   \
-    if (status != hipSuccess)                                                                      \
-    {                                                                                              \
-      printf("(%s:%d) Error: Hip reports %s\n", __FILE__, __LINE__, hipGetErrorString(status));    \
-      exit(1);                                                                                     \
-    }                                                                                              \
-  }
+#include "err_check.h"
 
 namespace
 {
@@ -246,7 +236,7 @@ public:
                          thrust::raw_pointer_cast(_row_ptr.data()),
                          thrust::raw_pointer_cast(_off_diag_offset.data()),
                          thrust::raw_pointer_cast(_cols.data()), _x, _y);
-      err_check(hipGetLastError());
+      err_check(cudaGetLastError());
       x.scatter_fwd_end();
 
       hipLaunchKernelGGL(spmvT_impl<T>, grid_size, block_size, 0, 0, num_rows,
@@ -254,7 +244,7 @@ public:
                          thrust::raw_pointer_cast(_off_diag_offset.data()),
                          thrust::raw_pointer_cast(_row_ptr.data()) + 1,
                          thrust::raw_pointer_cast(_cols.data()), _x, _y);
-      err_check(hipGetLastError());
+      err_check(cudaGetLastError());
     }
     else
     {
@@ -267,7 +257,7 @@ public:
                          thrust::raw_pointer_cast(_row_ptr.data()),
                          thrust::raw_pointer_cast(_off_diag_offset.data()),
                          thrust::raw_pointer_cast(_cols.data()), _x, _y);
-      err_check(hipGetLastError());
+      err_check(cudaGetLastError());
       x.scatter_fwd_end();
 
       hipLaunchKernelGGL(spmv_impl<T>, grid_size, block_size, 0, 0, num_rows,
@@ -275,7 +265,7 @@ public:
                          thrust::raw_pointer_cast(_off_diag_offset.data()),
                          thrust::raw_pointer_cast(_row_ptr.data()) + 1,
                          thrust::raw_pointer_cast(_cols.data()), _x, _y);
-      err_check(hipGetLastError());
+      err_check(cudaGetLastError());
     }
   }
 

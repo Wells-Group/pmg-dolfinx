@@ -236,7 +236,7 @@ int main(int argc, char* argv[])
 
     // Create matrix free operator
     spdlog::info("Create MatFreeLaplacian");
-    acc::MatFreeLaplacian<T> op(3, constants_d_span, dofmap_d_span, xgeom_d_span, xdofmap_d_span,
+    acc::MatFreeLaplacian<double> op(3, constants_d_span, dofmap_d_span, xgeom_d_span, xdofmap_d_span,
                                 dphi_d_span, Gweights_d_span, lcells, bcells, bc_marker_d_span);
 
     la::Vector<T> b(map, 1);

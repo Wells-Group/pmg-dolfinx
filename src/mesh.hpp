@@ -7,6 +7,8 @@
 #include <map>
 #include <span>
 
+namespace experimental{
+  
 template <std::floating_point T>
 std::vector<T> create_geom(MPI_Comm comm, std::array<std::array<double, 3>, 2> p,
                            std::array<std::int64_t, 3> n)
@@ -114,7 +116,9 @@ build_hex(MPI_Comm comm, MPI_Comm subcomm, std::array<std::array<double, 3>, 2> 
 
   return create_mesh(comm, subcomm, cells, element, subcomm, x, {x.size() / 3, 3}, partitioner);
 }
+}
 
+  
 /// @brief Create a new mesh with an extra boundary layer, such that all cells on other processes
 /// which share a vertex with this process are ghosted.
 /// @param mesh Input mesh
