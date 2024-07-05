@@ -60,7 +60,7 @@ endif()
 set(CMAKE_CXX_EXTENSIONS off)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_FLAGS "-O3  ${CMAKE_CXX_FLAGS} -DNDEBUG")
-set(CMAKE_CUDA_FLAGS "-O3  ${CMAKE_CXX_FLAGS} -DNDEBUG --extended-lambda")
+set(CMAKE_CUDA_FLAGS "-O3  ${CMAKE_CXX_FLAGS} -DNDEBUG --extended-lambda --expt-relaxed-constexpr")
 set(CMAKE_C_FLAGS "-Ofast -march=native ${CMAKE_C_FLAGS} -DNDEBUG -Wall")
 
 

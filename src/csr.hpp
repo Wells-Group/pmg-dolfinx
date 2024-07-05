@@ -231,19 +231,19 @@ public:
       dim3 block_size(256);
       dim3 grid_size((num_rows + block_size.x - 1) / block_size.x);
       x.scatter_fwd_begin();
-      hipLaunchKernelGGL(spmvT_impl<T>, grid_size, block_size, 0, 0, num_rows,
-                         thrust::raw_pointer_cast(_values.data()),
-                         thrust::raw_pointer_cast(_row_ptr.data()),
-                         thrust::raw_pointer_cast(_off_diag_offset.data()),
-                         thrust::raw_pointer_cast(_cols.data()), _x, _y);
+      spmvT_impl<T><<<grid_size, block_size, 0, 0>>>(num_rows, 
+                                                               thrust::raw_pointer_cast(_values.data()),
+                                                               thrust::raw_pointer_cast(_row_ptr.data()),
+                                                               thrust::raw_pointer_cast(_off_diag_offset.data()),
+                                                               thrust::raw_pointer_cast(_cols.data()), _x, _y);
       err_check(cudaGetLastError());
       x.scatter_fwd_end();
-
-      hipLaunchKernelGGL(spmvT_impl<T>, grid_size, block_size, 0, 0, num_rows,
-                         thrust::raw_pointer_cast(_values.data()),
-                         thrust::raw_pointer_cast(_off_diag_offset.data()),
-                         thrust::raw_pointer_cast(_row_ptr.data()) + 1,
-                         thrust::raw_pointer_cast(_cols.data()), _x, _y);
+      
+      spmvT_impl<T><<<grid_size, block_size, 0, 0>>>( num_rows,
+                                                      thrust::raw_pointer_cast(_values.data()),
+                                                      thrust::raw_pointer_cast(_off_diag_offset.data()),
+                                                      thrust::raw_pointer_cast(_row_ptr.data()) + 1,
+                                                      thrust::raw_pointer_cast(_cols.data()), _x, _y);
       err_check(cudaGetLastError());
     }
     else
@@ -252,19 +252,20 @@ public:
       dim3 block_size(256);
       dim3 grid_size((num_rows + block_size.x - 1) / block_size.x);
       x.scatter_fwd_begin();
-      hipLaunchKernelGGL(spmv_impl<T>, grid_size, block_size, 0, 0, num_rows,
-                         thrust::raw_pointer_cast(_values.data()),
-                         thrust::raw_pointer_cast(_row_ptr.data()),
-                         thrust::raw_pointer_cast(_off_diag_offset.data()),
-                         thrust::raw_pointer_cast(_cols.data()), _x, _y);
+      spdlog::info("block/grid: {} {}", block_size.x, grid_size.x);
+      spmv_impl<T><<<grid_size, block_size, 0, 0>>>( num_rows,
+                                                     thrust::raw_pointer_cast(_values.data()),
+                                                     thrust::raw_pointer_cast(_row_ptr.data()),
+                                                     thrust::raw_pointer_cast(_off_diag_offset.data()),
+                                                     thrust::raw_pointer_cast(_cols.data()), _x, _y);
       err_check(cudaGetLastError());
       x.scatter_fwd_end();
 
-      hipLaunchKernelGGL(spmv_impl<T>, grid_size, block_size, 0, 0, num_rows,
-                         thrust::raw_pointer_cast(_values.data()),
-                         thrust::raw_pointer_cast(_off_diag_offset.data()),
-                         thrust::raw_pointer_cast(_row_ptr.data()) + 1,
-                         thrust::raw_pointer_cast(_cols.data()), _x, _y);
+      spmv_impl<T><<<grid_size, block_size, 0, 0>>>( num_rows,
+                                                    thrust::raw_pointer_cast(_values.data()),
+                                                    thrust::raw_pointer_cast(_off_diag_offset.data()),
+                                                    thrust::raw_pointer_cast(_row_ptr.data()) + 1,
+                                                    thrust::raw_pointer_cast(_cols.data()), _x, _y);
       err_check(cudaGetLastError());
     }
   }
