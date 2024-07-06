@@ -1,7 +1,6 @@
 // Copyright (C) 2023 Igor A. Baratta
 // SPDX-License-Identifier:    MIT
 
-#include "interpolate.hpp"
 #include "vector.hpp"
 #include <algorithm>
 #include <dolfinx/common/IndexMap.h>

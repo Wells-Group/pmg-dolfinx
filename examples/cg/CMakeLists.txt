@@ -61,6 +61,7 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_FLAGS "-Ofast -march=native ${CMAKE_CXX_FLAGS} -DNDEBUG -Wall")
 set(CMAKE_C_FLAGS "-Ofast -march=native ${CMAKE_C_FLAGS} -DNDEBUG -Wall")
 set(CMAKE_HIP_FLAGS "-Ofast -march=native -stdlib=libstdc++ --gcc-toolchain=/opt/cray/pe/gcc/11.2.0/snos ${CMAKE_CXX_FLAGS} -DNDEBUG -Wall -I/opt/cray/pe/mpich/8.1.27/ofi/gnu/9.1/include")
+set(CMAKE_CUDA_FLAGS "-O3 -DNDEBUG --extended-lambda --expt-relaxed-constexpr")
 
 # ------------------------------------------------------------------------------
 # General configuration

@@ -1,3 +1,4 @@
+#include<cstdio>
 
 // Some useful utilities for error checking and synchronisation
 // for each hardware type
@@ -16,6 +17,7 @@
     }                                                                                              \
   }
 #elif USE_CUDA
+#include <cuda_runtime.h>
 #define err_check(command)                                                                         \
   {                                                                                                \
     cudaError_t status = command;                                                                  \

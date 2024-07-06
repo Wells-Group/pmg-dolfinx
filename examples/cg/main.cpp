@@ -6,6 +6,7 @@
 #include "src/mesh.hpp"
 #include "src/operators.hpp"
 #include "src/vector.hpp"
+#include "src/util.hpp"
 
 #include <array>
 #include <basix/e-lagrange.h>
@@ -269,7 +270,6 @@ int main(int argc, char* argv[])
     cheb.set_max_iterations(30);
 
     b_d.copy_from_host(b); // Copy data from host vector to device vector
-                           //     err_check(hipDeviceSynchronize());
 
     // Set bcs on solution vector and copy do device
     la::Vector<T> sol(map, 1);
@@ -279,7 +279,7 @@ int main(int argc, char* argv[])
     fem::set_bc<T, T>(sol.mutable_array(), {bc});
     x.copy_from_host(sol);
 
-    err_check(hipDeviceSynchronize());
+    device_synchronize();
 
     cheb.solve(op, x, b_d, true);
 

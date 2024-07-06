@@ -1,6 +1,7 @@
 
 #include "operators.hpp"
 #include "vector.hpp"
+#include "util.hpp"
 #include <dolfinx/fem/DirichletBC.h>
 #include <dolfinx/fem/Form.h>
 
@@ -19,7 +20,7 @@ public:
     // Create Coarse Operator using PETSc and Hypre
     spdlog::info("Create PETScOperator");
     coarse_op = std::make_unique<PETScOperator<T>>(a, std::vector{bcs});
-    err_check(hipDeviceSynchronize());
+    device_synchronize();
 
     auto im_op = coarse_op->index_map();
     spdlog::info("OP:{}/{}/{}", im_op->size_global(), im_op->size_local(), im_op->num_ghosts());
@@ -48,8 +49,13 @@ public:
 
     const PetscInt local_size = V->dofmap()->index_map->size_local();
     const PetscInt global_size = V->dofmap()->index_map->size_global();
+#ifdef USE_HIP
     VecCreateMPIHIPWithArray(comm, PetscInt(1), local_size, global_size, NULL, &_x);
     VecCreateMPIHIPWithArray(comm, PetscInt(1), local_size, global_size, NULL, &_b);
+#elif USE_CUDA
+    VecCreateMPICUDAWithArray(comm, PetscInt(1), local_size, global_size, NULL, &_x);
+    VecCreateMPICUDAWithArray(comm, PetscInt(1), local_size, global_size, NULL, &_b);
+#endif
   }
 
   ~CoarseSolverType()

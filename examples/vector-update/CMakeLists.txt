@@ -20,11 +20,6 @@ if(NOT WIN32)
   set(BoldWhite   "${Esc}[1;37m")
 endif()
 
-set(CMAKE_HIP_ARCHITECTURES gfx90a)
-
-set(PROJECT_NAME vector-update)
-project(${PROJECT_NAME} C CXX HIP)
-
 option(profiling          "Enable ROCm scoped profiling"                                  off)
 option(omnitrace	  "Enable AMD omnitrace profiling"				  off)
 option(cpu		  "Build for CPUs"						  off)
@@ -36,6 +31,15 @@ if(cpu AND nvidia OR cpu AND amd)
 endif()
 if(nvidia AND amd)
   message(FATAL_ERROR "You cannot select both amd and nvidia GPU builds. Only select one of the three options: cpu, nvidia, amd")
+endif()
+
+set(PROJECT_NAME vector-update)
+if(amd)
+  set(CMAKE_HIP_ARCHITECTURES gfx90a)
+  project(${PROJECT_NAME} C CXX HIP)
+elseif(nvidia)
+  set(CMAKE_CUDA_ARCHITECTURES 80)
+  project(${PROJECT_NAME} C CXX CUDA)
 endif()
 
 
@@ -58,7 +62,7 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_HIP_FLAGS "-Ofast -march=native -stdlib=libstdc++ --gcc-toolchain=/opt/cray/pe/gcc/11.2.0/snos ${CMAKE_CXX_FLAGS} -DNDEBUG -Wall -I/opt/cray/pe/mpich/8.1.27/ofi/gnu/9.1/include")
 set(CMAKE_CXX_FLAGS "-Ofast -march=native ${CMAKE_CXX_FLAGS} -DNDEBUG -Wall")
 set(CMAKE_C_FLAGS "-Ofast -march=native ${CMAKE_C_FLAGS} -DNDEBUG -Wall")
-
+set(CMAKE_CUDA_FLAGS "-O3 -DNDEBUG --extended-lambda --expt-relaxed-constexpr")
 
 # ------------------------------------------------------------------------------
 # General configuration
@@ -114,18 +118,23 @@ if(omnitrace)
 endif()
 
 if(amd)
-	add_definitions(-DUSE_HIP=1)
-	set_source_files_properties(main.cpp PROPERTIES LANGUAGE HIP)
+  add_definitions(-DUSE_HIP=1)
+  set_source_files_properties(main.cpp PROPERTIES LANGUAGE HIP)
 elseif(nvidia)
-	add_definitions(-DUSE_CUDA=1)
+  add_definitions(-DUSE_CUDA=1)
+  set_source_files_properties(main.cpp PROPERTIES LANGUAGE CUDA)
 elseif(cpu)
-	add_definitions(-DCPU_ONLY=1)
+  add_definitions(-DCPU_ONLY=1)
 endif()
 add_executable(${PROJECT_NAME} main.cpp ${CMAKE_CURRENT_BINARY_DIR}/poisson.c)
 
 include_directories("../../")
 
-target_link_libraries(${PROJECT_NAME} dolfinx roc::rocthrust Boost::program_options)
+target_link_libraries(${PROJECT_NAME} dolfinx Boost::program_options)
+if(amd)
+  target_link_libraries(${PROJECT_NAME}  roc::rocthrust)
+endif()
+
 if(profiling)
 	target_link_libraries(${PROJECT_NAME} ${ROCTX64_LIBRARY} ${ROCTRACER_LIBRARY} ${ROCM_SMI64_LIBRARY})
 endif()
