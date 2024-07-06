@@ -20,6 +20,8 @@ if(NOT WIN32)
   set(BoldWhite   "${Esc}[1;37m")
 endif()
 
+set(CMAKE_HIP_ARCHITECTURES gfx90a)
+
 set(PROJECT_NAME mat_free C CXX HIP)
 project(${PROJECT_NAME})
 
@@ -53,9 +55,11 @@ else()
 endif()
 
 set(CMAKE_CXX_STANDARD 20)
-set(CMAKE_CXX_FLAGS "-Ofast -march=native -stdlib=libstdc++ --gcc-toolchain=/opt/cray/pe/gcc/11.2.0/snos ${CMAKE_CXX_FLAGS} -DNDEBUG -Wall")
+set(CMAKE_CXX_FLAGS "-Ofast -march=native ${CMAKE_CXX_FLAGS} -DNDEBUG -Wall")
 set(CMAKE_C_FLAGS "-Ofast -march=native ${CMAKE_C_FLAGS} -DNDEBUG -Wall")
 
+# FIXME: How to get MPI on Cray
+set(CMAKE_HIP_FLAGS "-Ofast -march=native -stdlib=libstdc++ --gcc-toolchain=/opt/cray/pe/gcc/11.2.0/snos ${CMAKE_CXX_FLAGS} -DNDEBUG -Wall -I/opt/cray/pe/mpich/8.1.27/ofi/gnu/9.1/include")
 
 # ------------------------------------------------------------------------------
 # General configuration
@@ -64,7 +68,6 @@ find_package(DOLFINX REQUIRED)
 find_package(Boost 1.70 REQUIRED program_options)
 
 set(CMAKE_INCLUDE_CURRENT_DIR ON)
-
 
 # Set the GPU to compile for
 if(amd)
@@ -85,9 +88,11 @@ add_custom_command(
 
 # If using ROCm and HIP
 # On ROCm rocThrust requires rocPRIM
-find_package(hip REQUIRED)
-find_package(rocprim REQUIRED CONFIG)
-find_package(rocthrust REQUIRED CONFIG)
+if(amd)
+    find_package(hip REQUIRED)
+    find_package(rocprim REQUIRED CONFIG)
+    find_package(rocthrust REQUIRED CONFIG)
+endif()
 if(profiling)
 	find_library(ROCTRACER_LIBRARY NAMES roctracer64)
 	find_library(ROCTX64_LIBRARY NAMES roctx64)
@@ -109,7 +114,7 @@ if(omnitrace)
 endif()
 if(amd)
 	add_definitions(-DUSE_HIP=1)
-
+	set_source_files_properties(main.cpp PROPERTIES LANGUAGE HIP)
 elseif(nvidia)
 	add_definitions(-DUSE_CUDA=1)
 elseif(cpu)

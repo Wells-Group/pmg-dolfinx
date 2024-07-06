@@ -3,19 +3,9 @@
 #include <dolfinx/fem/petsc.h>
 #include <dolfinx/la/MatrixCSR.h>
 
-#include "hip/hip_runtime.h"
-#include <hipsparse.h>
 #include <thrust/device_vector.h>
 
-#define err_check(command)                                                                         \
-  {                                                                                                \
-    hipError_t status = command;                                                                   \
-    if (status != hipSuccess)                                                                      \
-    {                                                                                              \
-      printf("(%s:%d) Error: Hip reports %s\n", __FILE__, __LINE__, hipGetErrorString(status));    \
-      exit(1);                                                                                     \
-    }                                                                                              \
-  }
+#include "util.hpp"
 
 namespace
 {
@@ -178,11 +168,9 @@ public:
     fem::interpolation_matrix<T>(V0, V1, _A->mat_set_values());
     _A->scatter_rev();
 
-    // Create HIP matrix
+    // Create HIP/CUDA matrix
     _col_map = std::make_shared<const common::IndexMap>(pattern.column_index_map());
     _row_map = V1.dofmap()->index_map;
-
-    // Create hip sparse matrix
     std::int32_t num_rows = _row_map->size_local();
     std::int32_t nnz = _A->row_ptr()[num_rows];
     _nnz = nnz;
@@ -241,20 +229,20 @@ public:
       dim3 block_size(256);
       dim3 grid_size((num_rows + block_size.x - 1) / block_size.x);
       x.scatter_fwd_begin();
-      hipLaunchKernelGGL(spmvT_impl<T>, grid_size, block_size, 0, 0, num_rows,
-                         thrust::raw_pointer_cast(_values.data()),
-                         thrust::raw_pointer_cast(_row_ptr.data()),
-                         thrust::raw_pointer_cast(_off_diag_offset.data()),
-                         thrust::raw_pointer_cast(_cols.data()), _x, _y);
-      err_check(hipGetLastError());
+      spmvT_impl<T>
+          <<<grid_size, block_size, 0, 0>>>(num_rows, thrust::raw_pointer_cast(_values.data()),
+                                            thrust::raw_pointer_cast(_row_ptr.data()),
+                                            thrust::raw_pointer_cast(_off_diag_offset.data()),
+                                            thrust::raw_pointer_cast(_cols.data()), _x, _y);
+      check_device_last_error();
       x.scatter_fwd_end();
 
-      hipLaunchKernelGGL(spmvT_impl<T>, grid_size, block_size, 0, 0, num_rows,
-                         thrust::raw_pointer_cast(_values.data()),
-                         thrust::raw_pointer_cast(_off_diag_offset.data()),
-                         thrust::raw_pointer_cast(_row_ptr.data()) + 1,
-                         thrust::raw_pointer_cast(_cols.data()), _x, _y);
-      err_check(hipGetLastError());
+      spmvT_impl<T>
+          <<<grid_size, block_size, 0, 0>>>(num_rows, thrust::raw_pointer_cast(_values.data()),
+                                            thrust::raw_pointer_cast(_off_diag_offset.data()),
+                                            thrust::raw_pointer_cast(_row_ptr.data()) + 1,
+                                            thrust::raw_pointer_cast(_cols.data()), _x, _y);
+      check_device_last_error();
     }
     else
     {
@@ -262,20 +250,20 @@ public:
       dim3 block_size(256);
       dim3 grid_size((num_rows + block_size.x - 1) / block_size.x);
       x.scatter_fwd_begin();
-      hipLaunchKernelGGL(spmv_impl<T>, grid_size, block_size, 0, 0, num_rows,
-                         thrust::raw_pointer_cast(_values.data()),
-                         thrust::raw_pointer_cast(_row_ptr.data()),
-                         thrust::raw_pointer_cast(_off_diag_offset.data()),
-                         thrust::raw_pointer_cast(_cols.data()), _x, _y);
-      err_check(hipGetLastError());
+      spmv_impl<T>
+          <<<grid_size, block_size, 0, 0>>>(num_rows, thrust::raw_pointer_cast(_values.data()),
+                                            thrust::raw_pointer_cast(_row_ptr.data()),
+                                            thrust::raw_pointer_cast(_off_diag_offset.data()),
+                                            thrust::raw_pointer_cast(_cols.data()), _x, _y);
+      check_device_last_error();
       x.scatter_fwd_end();
 
-      hipLaunchKernelGGL(spmv_impl<T>, grid_size, block_size, 0, 0, num_rows,
-                         thrust::raw_pointer_cast(_values.data()),
-                         thrust::raw_pointer_cast(_off_diag_offset.data()),
-                         thrust::raw_pointer_cast(_row_ptr.data()) + 1,
-                         thrust::raw_pointer_cast(_cols.data()), _x, _y);
-      err_check(hipGetLastError());
+      spmv_impl<T>
+          <<<grid_size, block_size, 0, 0>>>(num_rows, thrust::raw_pointer_cast(_values.data()),
+                                            thrust::raw_pointer_cast(_off_diag_offset.data()),
+                                            thrust::raw_pointer_cast(_row_ptr.data()) + 1,
+                                            thrust::raw_pointer_cast(_cols.data()), _x, _y);
+      check_device_last_error();
     }
   }
 

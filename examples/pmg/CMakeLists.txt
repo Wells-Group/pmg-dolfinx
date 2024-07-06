@@ -20,7 +20,9 @@ if(NOT WIN32)
   set(BoldWhite   "${Esc}[1;37m")
 endif()
 
-set(PROJECT_NAME pmg C CXX)
+set(CMAKE_HIP_ARCHITECTURES gfx90a)
+
+set(PROJECT_NAME pmg C CXX HIP)
 project(${PROJECT_NAME})
 
 option(profiling          "Enable ROCm scoped profiling"                                  off)
@@ -53,9 +55,9 @@ else()
 endif()
 
 set(CMAKE_CXX_STANDARD 20)
-set(CMAKE_CXX_FLAGS "-Ofast -march=native -stdlib=libstdc++ --gcc-toolchain=/opt/cray/pe/gcc/11.2.0/snos ${CMAKE_CXX_FLAGS} -DNDEBUG -Wall")
+set(CMAKE_CXX_FLAGS "-Ofast -march=native ${CMAKE_CXX_FLAGS} -DNDEBUG -Wall")
 set(CMAKE_C_FLAGS "-Ofast -march=native ${CMAKE_C_FLAGS} -DNDEBUG -Wall")
-
+set(CMAKE_HIP_FLAGS "-Ofast -march=native -stdlib=libstdc++ --gcc-toolchain=/opt/cray/pe/gcc/11.2.0/snos ${CMAKE_CXX_FLAGS} -DNDEBUG -Wall -I/opt/cray/pe/mpich/8.1.27/ofi/gnu/9.1/include")
 
 # ------------------------------------------------------------------------------
 # General configuration
@@ -111,6 +113,7 @@ if(omnitrace)
 endif()
 if(amd)
 	add_definitions(-DUSE_HIP=1)
+	set_source_files_properties(main.cpp PROPERTIES LANGUAGE HIP)
 elseif(nvidia)
 	add_definitions(-DUSE_CUDA=1)
 elseif(cpu)

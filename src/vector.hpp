@@ -3,10 +3,7 @@
 
 #pragma once
 
-#ifdef USE_HIP
-#include <hip/hip_runtime.h>
-#elif USE_CUDA
-#endif
+#include "util.hpp"
 
 #undef __noinline__
 
@@ -57,38 +54,6 @@ static __global__ void unpack_add(std::int32_t N, const int32_t* __restrict__ in
   }
 }
 } // namespace
-
-#ifdef USE_HIP
-#define err_check(command)                                                                         \
-  {                                                                                                \
-    hipError_t status = command;                                                                   \
-    if (status != hipSuccess)                                                                      \
-    {                                                                                              \
-      printf("(%s:%d) Error: Hip reports %s\n", __FILE__, __LINE__, hipGetErrorString(status));    \
-      exit(1);                                                                                     \
-    }                                                                                              \
-  }
-#elif USE_CUDA
-#define err_check(command)                                                                         \
-  {                                                                                                \
-    cudaError_t status = command;                                                                  \
-    if (status != cudaSuccess)                                                                     \
-    {                                                                                              \
-      printf("(%s:%d) Error: CUDA reports %s\n", __FILE__, __LINE__, cudaGetErrorString(status));  \
-      exit(1);                                                                                     \
-    }                                                                                              \
-  }
-#elif CPU
-#define err_check(command)                                                                         \
-  {                                                                                                \
-    int status = command;                                                                          \
-    if (status != 0)                                                                               \
-    {                                                                                              \
-      printf("(%s:%d) Error: Report %s\n", __FILE__, __LINE__, perror());                          \
-      exit(1);                                                                                     \
-    }                                                                                              \
-  }
-#endif
 
 namespace dolfinx::acc
 {
@@ -153,39 +118,14 @@ public:
   void copy_from_host(const OtherVector& other)
   {
     // Copies only local data
-    auto* other_ptr = other.array().data();
-    auto* this_ptr = thrust::raw_pointer_cast(_x.data());
-    std::size_t size_bytes = _map->size_local() * sizeof(value_type);
-#ifdef USE_HIP
-    err_check(hipMemcpy(this_ptr, other_ptr, size_bytes, hipMemcpyHostToDevice));
-#elif USE_CUDA
-    err_check(cudaMemcpy(this_ptr, other_ptr, size_bytes, cudaMemcpyHostToDevice));
-#elif CPU
-#endif
+    thrust::copy(other.array().begin(), other.array().begin() + _map->size_local(), _x.begin());
   }
 
   template <typename OtherVector>
   void copy(OtherVector& other)
   {
-    auto* other_ptr = other.array().data();
-    auto* this_ptr = thrust::raw_pointer_cast(_x.data());
-    std::size_t size_bytes = other.array().size() * sizeof(value_type);
-    hipMemcpyKind kind;
-    if constexpr (this->device != Device::CPP)
-    {
-      if constexpr (OtherVector::device == Device::CPP)
-        kind = hipMemcpyHostToDevice;
-      else
-        kind = hipMemcpyDeviceToDevice;
-    }
-    else
-    {
-      if constexpr (OtherVector::device == Device::CPP)
-        kind = hipMemcpyHostToHost;
-      else
-        kind = hipMemcpyDeviceToHost;
-    }
-    err_check(hipMemcpy(this_ptr, other_ptr, size_bytes, kind));
+    _x.resize(other.array().size());
+    thrust::copy(other.array().begin(), other.array().end(), _x.begin());
   }
 
   /// Get IndexMap
@@ -250,16 +190,20 @@ public:
     dim3 dim_block(block_size);
     dim3 dim_grid(num_blocks);
 
-    const std::int32_t* indices = thrust::raw_pointer_cast(_local_indices.data());
-    const T* in = this->array().data();
-    T* out = thrust::raw_pointer_cast(_buffer_local.data());
-    hipLaunchKernelGGL(pack<T>, dim_grid, dim_block, 0, 0, _local_indices.size(), indices, in, out);
-    err_check(hipDeviceSynchronize());
+    if (!_local_indices.empty())
+    {
+      const std::int32_t* indices = thrust::raw_pointer_cast(_local_indices.data());
+      const T* in = this->array().data();
+      T* out = thrust::raw_pointer_cast(_buffer_local.data());
+      pack<T><<<dim_grid, dim_block, 0, 0>>>(_local_indices.size(), indices, in, out);
+      device_synchronize();
+    }
 
     T* remote = thrust::raw_pointer_cast(_buffer_remote.data());
-    _scatterer->scatter_fwd_begin(std::span<const T>(out, _buffer_local.size()),
-                                  std::span<T>(remote, _buffer_remote.size()),
-                                  std::span<MPI_Request>(_request), common::Scatterer<>::type::p2p);
+    _scatterer->scatter_fwd_begin(
+        std::span<const T>(thrust::raw_pointer_cast(_buffer_local.data()), _buffer_local.size()),
+        std::span<T>(remote, _buffer_remote.size()), std::span<MPI_Request>(_request),
+        common::Scatterer<>::type::p2p);
   }
 
   void scatter_fwd_end(int block_size = 512)
@@ -287,9 +231,8 @@ public:
       const std::int32_t* indices = thrust::raw_pointer_cast(_remote_indices.data());
       const T* in = thrust::raw_pointer_cast(_buffer_remote.data());
       T* out = x_remote.data();
-      hipLaunchKernelGGL(unpack<T>, dim_grid, dim_block, 0, 0, _remote_indices.size(), indices, in,
-                         out);
-      err_check(hipDeviceSynchronize());
+      unpack<T><<<dim_grid, dim_block, 0, 0>>>(_remote_indices.size(), indices, in, out);
+      device_synchronize();
     }
     spdlog::debug("scatter_fwd_end end");
   }
@@ -314,9 +257,8 @@ public:
     const std::int32_t* indices = thrust::raw_pointer_cast(_remote_indices.data());
     const T* in = this->array().data() + local_size;
     T* out = thrust::raw_pointer_cast(_buffer_remote.data());
-    hipLaunchKernelGGL(pack<T>, dim_grid, dim_block, 0, 0, _remote_indices.size(), indices, in,
-                       out);
-    err_check(hipDeviceSynchronize());
+    pack<T><<<dim_grid, dim_block, 0, 0>>>(_remote_indices.size(), indices, in, out);
+    device_synchronize();
 
     T* local = thrust::raw_pointer_cast(_buffer_local.data());
     _scatterer->scatter_rev_begin(std::span<const T>(out, _buffer_remote.size()),
@@ -339,9 +281,8 @@ public:
     const std::int32_t* indices = thrust::raw_pointer_cast(_local_indices.data());
     const T* in = thrust::raw_pointer_cast(_buffer_local.data());
     T* out = x_local.data();
-    hipLaunchKernelGGL(unpack_add<T>, dim_grid, dim_block, 0, 0, _local_indices.size(), indices, in,
-                       out);
-    err_check(hipDeviceSynchronize());
+    unpack_add<T><<<dim_grid, dim_block, 0, 0>>>(_local_indices.size(), indices, in, out);
+    device_synchronize();
   }
 
   /// Scatter local data from ghosts, and accumulate in owned part of vector

@@ -1,10 +1,11 @@
 // Copyright (C) 2023 Igor A. Baratta
 // SPDX-License-Identifier:    MIT
 
-#include "hip/hip_runtime.h"
 #include <basix/finite-element.h>
 #include <basix/quadrature.h>
 #include <thrust/device_vector.h>
+
+#include "util.hpp"
 
 #pragma once
 
@@ -331,10 +332,10 @@ public:
     spdlog::debug("cell_list_d size {}", cell_list_d.size());
 
     std::size_t shm_size = 24 * sizeof(T); // coordinate size (8x3)
-    hipLaunchKernelGGL(HIP_KERNEL_NAME(geometry_computation<T, P>), grid_size, block_size, shm_size,
-                       0, xgeom.data(), thrust::raw_pointer_cast(G_entity.data()),
-                       geometry_dofmap.data(), dphi_geometry.data(), G_weights.data(),
-                       thrust::raw_pointer_cast(cell_list_d.data()), cell_list_d.size());
+    geometry_computation<T, P><<<grid_size, block_size, shm_size, 0>>>(
+        xgeom.data(), thrust::raw_pointer_cast(G_entity.data()), geometry_dofmap.data(),
+        dphi_geometry.data(), G_weights.data(), thrust::raw_pointer_cast(cell_list_d.data()),
+        cell_list_d.size());
   }
 
   template <int P, typename Vector>
@@ -350,7 +351,7 @@ public:
       thrust::copy(lcells.begin(), lcells.end(), cell_list_d.begin());
 
       compute_geometry<P>();
-      err_check(hipDeviceSynchronize());
+      device_synchronize();
 
       dim3 block_size(P + 1, P + 1, P + 1);
       int p1cubed = (P + 1) * (P + 1) * (P + 1);
@@ -359,13 +360,12 @@ public:
 
       T* x = in.mutable_array().data();
       T* y = out.mutable_array().data();
-      hipLaunchKernelGGL(HIP_KERNEL_NAME(stiffness_operator<T, P>), grid_size, block_size, shm_size,
-                         0, x, cell_constants.data(), y, thrust::raw_pointer_cast(G_entity.data()),
-                         cell_dofmap.data(), thrust::raw_pointer_cast(dphi_d.data()),
-                         thrust::raw_pointer_cast(cell_list_d.data()), cell_list_d.size(),
-                         bc_marker.data());
+      stiffness_operator<T, P><<<grid_size, block_size, shm_size, 0>>>(
+          x, cell_constants.data(), y, thrust::raw_pointer_cast(G_entity.data()),
+          cell_dofmap.data(), thrust::raw_pointer_cast(dphi_d.data()),
+          thrust::raw_pointer_cast(cell_list_d.data()), cell_list_d.size(), bc_marker.data());
 
-      err_check(hipGetLastError());
+      check_device_last_error();
     }
 
     spdlog::debug("impl_operator done lcells");
@@ -390,7 +390,8 @@ public:
       thrust::copy(bcells.begin(), bcells.end(), cell_list_d.begin());
 
       compute_geometry<P>();
-      err_check(hipDeviceSynchronize());
+      device_synchronize();
+
       dim3 block_size(P + 1, P + 1, P + 1);
       int p1cubed = (P + 1) * (P + 1) * (P + 1);
       dim3 grid_size(cell_list_d.size());
@@ -399,16 +400,16 @@ public:
       T* x = in.mutable_array().data();
       T* y = out.mutable_array().data();
 
-      hipLaunchKernelGGL(HIP_KERNEL_NAME(stiffness_operator<T, P>), grid_size, block_size, shm_size,
-                         0, x, cell_constants.data(), y, thrust::raw_pointer_cast(G_entity.data()),
-                         cell_dofmap.data(), thrust::raw_pointer_cast(dphi_d.data()),
-                         thrust::raw_pointer_cast(cell_list_d.data()), cell_list_d.size(),
-                         bc_marker.data());
+      stiffness_operator<T, P><<<grid_size, block_size, shm_size, 0>>>(
+          x, cell_constants.data(), y, thrust::raw_pointer_cast(G_entity.data()),
+          cell_dofmap.data(), thrust::raw_pointer_cast(dphi_d.data()),
+          thrust::raw_pointer_cast(cell_list_d.data()), cell_list_d.size(), bc_marker.data());
 
-      err_check(hipGetLastError());
+      check_device_last_error();
     }
 
-    err_check(hipDeviceSynchronize());
+    device_synchronize();
+
     spdlog::debug("impl_operator done bcells");
   }
 

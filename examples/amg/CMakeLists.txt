@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.20)
+cmake_minimum_required(VERSION 3.27)
 
 if(NOT WIN32)
   string(ASCII 27 Esc)
@@ -20,7 +20,9 @@ if(NOT WIN32)
   set(BoldWhite   "${Esc}[1;37m")
 endif()
 
-set(PROJECT_NAME amg C CXX)
+set(CMAKE_HIP_ARCHITECTURES gfx90a)
+
+set(PROJECT_NAME amg C CXX HIP)
 project(${PROJECT_NAME})
 
 option(profiling          "Enable ROCm scoped profiling"                                  off)
@@ -53,9 +55,9 @@ else()
 endif()
 
 set(CMAKE_CXX_STANDARD 20)
-set(CMAKE_CXX_FLAGS "-Ofast -march=native -stdlib=libstdc++ --gcc-toolchain=/opt/cray/pe/gcc/11.2.0/snos ${CMAKE_CXX_FLAGS} -DNDEBUG -Wall")
+set(CMAKE_CXX_FLAGS "-Ofast -march=native ${CMAKE_CXX_FLAGS} -DNDEBUG -Wall")
 set(CMAKE_C_FLAGS "-Ofast -march=native ${CMAKE_C_FLAGS} -DNDEBUG -Wall")
-
+set(CMAKE_HIP_FLAGS "-Ofast -march=native -stdlib=libstdc++ --gcc-toolchain=/opt/cray/pe/gcc/11.2.0/snos ${CMAKE_CXX_FLAGS} -DNDEBUG -Wall -I/opt/cray/pe/mpich/8.1.27/ofi/gnu/9.1/include")
 
 # ------------------------------------------------------------------------------
 # General configuration
@@ -83,11 +85,13 @@ add_custom_command(
   COMMENT "Compile poisson.py using FFCx"
 )
 
-# If using ROCm and HIP
-# On ROCm rocThrust requires rocPRIM
-find_package(hip REQUIRED)
-find_package(rocprim REQUIRED CONFIG)
-find_package(rocthrust REQUIRED CONFIG)
+if(amd)
+    # If using ROCm and HIP
+    # On ROCm rocThrust requires rocPRIM
+    find_package(hip REQUIRED)
+    find_package(rocprim REQUIRED CONFIG)
+    find_package(rocthrust REQUIRED CONFIG)
+endif()
 if(profiling)
 	find_library(ROCTRACER_LIBRARY NAMES roctracer64)
 	find_library(ROCTX64_LIBRARY NAMES roctx64)
@@ -104,11 +108,12 @@ if(omnitrace)
 	find_path(OMNITRACE_INCLUDE omnitrace/user.h "${OMNITRACE_DIR}/include")
 	include_directories(${OMNITRACE_INCLUDE})
 	find_library(OMNITRACE_LIBRARY NAMES omnitrace HINTS "${OMNITRACE_DIR}/lib")
-	find_library(OMNITRACE_USER_LIBRARY NAMES omnitrace-user HINTS "${OMNITRACE_DIR}/lib")	
+	find_library(OMNITRACE_USER_LIBRARY NAMES omnitrace-user HINTS "${OMNITRACE_DIR}/lib")
 	add_definitions(-DOMNITRACE=1)
 endif()
 if(amd)
 	add_definitions(-DUSE_HIP=1)
+	set_source_files_properties(main.cpp PROPERTIES LANGUAGE HIP)
 elseif(nvidia)
 	add_definitions(-DUSE_CUDA=1)
 elseif(cpu)

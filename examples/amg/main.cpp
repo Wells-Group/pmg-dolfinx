@@ -146,8 +146,6 @@ int main(int argc, char* argv[])
 
     // Define vectors
     using DeviceVector = dolfinx::acc::Vector<T, acc::Device::HIP>;
-    using HostVector = dolfinx::acc::Vector<T, acc::Device::CPP>;
-
     spdlog::info("Create Petsc Operator");
 
     // Create petsc operator
