@@ -1,0 +1,49 @@
+spack:
+  config:
+    shared_linking:
+      type: runpath
+      bind: false
+  compilers:
+  - compiler:
+      spec: gcc@11.3.0-env
+      paths:
+        cc: /usr/local/software/spack/spack-views/rocky8-a100-20221118/gcc-11.3.0/gcc-11.3.0/i4xnp7h53ty3rosv2mjoycl2d6cyjddv/bin/gcc
+        cxx: /usr/local/software/spack/spack-views/rocky8-a100-20221118/gcc-11.3.0/gcc-11.3.0/i4xnp7h53ty3rosv2mjoycl2d6cyjddv/bin/g++
+        f77: /usr/local/software/spack/spack-views/rocky8-a100-20221118/gcc-11.3.0/gcc-11.3.0/i4xnp7h53ty3rosv2mjoycl2d6cyjddv/bin/gfortran
+        fc: /usr/local/software/spack/spack-views/rocky8-a100-20221118/gcc-11.3.0/gcc-11.3.0/i4xnp7h53ty3rosv2mjoycl2d6cyjddv/bin/gfortran
+      flags:
+        cflags: -O3
+        cxxflags: -O3
+        fflags: -O3
+      operating_system: rocky8
+      modules:
+      target: any
+      
+  packages:
+    intel-oneapi-mpi:
+      buildable: false
+      externals:
+      - spec: intel-oneapi-mpi@2021.6.0 
+        modules:
+        - intel-oneapi-mpi/2021.6.0/intel/guxuvcpm 
+    pkg-config:
+      buildable: false
+      externals:
+      - spec: pkg-config@1.4.2
+        prefix: /usr
+    hypre:
+      variants: +cuda 
+    petsc:
+      variants: +hypre+cuda
+    all:
+      compiler:
+      - gcc@11.3.0-env
+      providers:
+        mpi:
+        - intel-oneapi-mpi
+        pkgconfig:
+        - pkg-config
+  view: true
+  specs:
+  - fenics-dolfinx@main ^petsc +hypre+cuda
+  - py-fenics-ffcx@main

@@ -88,6 +88,30 @@ public:
     VecHIPResetArray(_x);
   }
 
+    void solve(dolfinx::acc::Vector<T, acc::Device::CUDA>& x,
+               dolfinx::acc::Vector<T, acc::Device::CUDA>& y)
+  {
+    VecCUDAPlaceArray(_b, y.array().data());
+    VecCUDAPlaceArray(_x, x.array().data());
+
+    KSPSolve(_solver, _b, _x);
+    KSPView(_solver, PETSC_VIEWER_STDOUT_WORLD);
+
+    KSPConvergedReason reason;
+    KSPGetConvergedReason(_solver, &reason);
+
+    PetscInt num_iterations = 0;
+    int ierr = KSPGetIterationNumber(_solver, &num_iterations);
+    if (ierr != 0)
+      spdlog::error("KSPGetIterationNumber Error:{}", ierr);
+
+    spdlog::info("Converged reason: {}", (int)reason);
+    spdlog::info("Num iterations: {}", num_iterations);
+
+    VecCUDAResetArray(_b);
+    VecCUDAResetArray(_x);
+  }
+
 private:
   Vec _b, _x;
   KSP _solver;

@@ -365,6 +365,7 @@ void solve(std::shared_ptr<mesh::Mesh<double>> mesh, bool use_amg, bool output_t
     // spdlog::info("------ end of iteration ------");
   }
 
+#ifdef HAS_ADIOS2
   if (output_to_file)
   {
     auto u = std::make_shared<fem::Function<T>>(V.back());
@@ -374,6 +375,7 @@ void solve(std::shared_ptr<mesh::Mesh<double>> mesh, bool use_amg, bool output_t
     dolfinx::io::VTXWriter<T> write_adios(mesh->comm(), "solution.bp", {u});
     write_adios.write(0.0);
   }
+#endif
 }
 
 int main(int argc, char* argv[])
