@@ -36,7 +36,6 @@ public:
     spdlog::info("Set Operators");
     KSPSetOperators(_solver, A, A);
     spdlog::info("Set iteration count");
-    PetscReal rtol = 1e-14;
     PetscInt maxits = 60;
     KSPSetTolerances(_solver, PETSC_DEFAULT, PETSC_DEFAULT, PETSC_DEFAULT, maxits);
     spdlog::info("Set PC Type");

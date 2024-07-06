@@ -27,7 +27,13 @@
 
 using namespace dolfinx;
 using T = double;
+
+#ifdef USE_HIP
 using DeviceVector = dolfinx::acc::Vector<T, acc::Device::HIP>;
+#else
+using DeviceVector = dolfinx::acc::Vector<T, acc::Device::CUDA>;
+#endif
+
 namespace po = boost::program_options;
 
 template <typename FineOperator>
@@ -177,7 +183,7 @@ void solve(std::shared_ptr<mesh::Mesh<double>> mesh, bool use_amg, bool output_t
         std::span(thrust::raw_pointer_cast(bc_marker_d[i].data()), bc_marker_d[i].size()));
   }
 
-  err_check(hipDeviceSynchronize());
+  device_synchronize();
 
   // Copy constants to device (all same, one per cell, scalar)
   thrust::device_vector<T> constants(mesh->topology()->index_map(tdim)->size_local()
@@ -200,7 +206,7 @@ void solve(std::shared_ptr<mesh::Mesh<double>> mesh, bool use_amg, bool output_t
           std::span<std::int32_t>(thrust::raw_pointer_cast(dofmapV[i].data()), dofmapV[i].size()));
     }
 
-    err_check(hipDeviceSynchronize());
+  device_synchronize();
 
     for (std::size_t i = 0; i < V.size(); ++i)
     {
@@ -231,7 +237,7 @@ void solve(std::shared_ptr<mesh::Mesh<double>> mesh, bool use_amg, bool output_t
           std::span(thrust::raw_pointer_cast(Gweights_d[i].data()), Gweights_d[i].size()));
     }
 
-    err_check(hipDeviceSynchronize());
+  device_synchronize();
 
     spdlog::debug("Copy geometry data to device");
     geomx_device.resize(mesh->geometry().x().size());
@@ -246,7 +252,8 @@ void solve(std::shared_ptr<mesh::Mesh<double>> mesh, bool use_amg, bool output_t
     geom_x_dofmap = std::span<std::int32_t>(thrust::raw_pointer_cast(geomx_dofmap_device.data()),
                                             geomx_dofmap_device.size());
 
-    err_check(hipDeviceSynchronize());
+      device_synchronize();
+
   }
 
   std::vector<std::shared_ptr<DeviceVector>> bs(V.size());
@@ -271,7 +278,7 @@ void solve(std::shared_ptr<mesh::Mesh<double>> mesh, bool use_amg, bool output_t
       A.get_diag_inverse(diag_inv);
       operators[i]->set_diag_inverse(diag_inv);
 
-      err_check(hipDeviceSynchronize());
+      device_synchronize();
     }
     else
     {
