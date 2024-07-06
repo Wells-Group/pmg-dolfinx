@@ -24,7 +24,7 @@ class PETScOperator
 public:
   /**
    * @brief Constructs a PETScOperator object with the given form and Dirichlet
-   * boundary conditions. It assembles the matrix and converts it to a HIP
+   * boundary conditions. It assembles the matrix and converts it to a HIP/CUDA
    * matrix.
    *
    * @param a         A shared pointer to the finite element form.
@@ -46,7 +46,7 @@ public:
 
     spdlog::info("Create matrix... {}x{}", pattern.index_map(0)->size_global(),
                  pattern.index_map(1)->size_global());
-    _host_mat = la::petsc::create_matrix(a->mesh()->comm(), pattern, "aijhipsparse");
+    _host_mat = la::petsc::create_matrix(a->mesh()->comm(), pattern, "aijcudasparse");
 
     spdlog::info("Zero matrix...");
     MatZeroEntries(_host_mat);
@@ -68,8 +68,8 @@ public:
     spdlog::info("Mat norm = {}", norm);
 
     spdlog::info("Convert matrix...");
-    // Create HIP matrix
-    dolfinx::common::Timer t1("~Convert matrix to MATAIJHIPSPARSE");
+    // Create matrix
+    dolfinx::common::Timer t1("~Convert matrix to MATAIJ[HIP/CUDA]SPARSE");
     int ierr = MatConvert(_host_mat, MATSAME, MAT_INITIAL_MATRIX, &_hip_mat);
     spdlog::info("ierr={}", ierr);
     t1.stop();
@@ -82,10 +82,17 @@ public:
     const PetscInt global_size = _map->size_global();
     spdlog::info("Create vecs... {}/{}", local_size, global_size);
 
+#ifdef USE_HIP
     ierr = VecCreateMPIHIPWithArray(_comm, PetscInt(1), local_size, global_size, NULL, &_x_petsc);
     spdlog::info("ierr={}", ierr);
     ierr = VecCreateMPIHIPWithArray(_comm, PetscInt(1), local_size, global_size, NULL, &_y_petsc);
     spdlog::info("ierr={}", ierr);
+#elif USE_CUDA
+    ierr = VecCreateMPICUDAWithArray(_comm, PetscInt(1), local_size, global_size, NULL, &_x_petsc);
+    spdlog::info("ierr={}", ierr);
+    ierr = VecCreateMPICUDAWithArray(_comm, PetscInt(1), local_size, global_size, NULL, &_y_petsc);
+    spdlog::info("ierr={}", ierr);
+#endif
   }
 
   PETScOperator(const fem::FunctionSpace<T>& V0, const fem::FunctionSpace<T>& V1)
@@ -123,14 +130,24 @@ public:
     fem::interpolation_matrix<PetscScalar>(V0, V1, set_fn);
 
     // Create HIP matrix
-    MatConvert(_host_mat, MATAIJHIPSPARSE, MAT_INITIAL_MATRIX, &_hip_mat);
 
+#ifdef USE_HIP
+    MatConvert(_host_mat, MATAIJHIPSPARSE, MAT_INITIAL_MATRIX, &_hip_mat);
+#elif USE_CUDA
+    MatConvert(_host_mat, MATAIJCUSPARSE, MAT_INITIAL_MATRIX, &_hip_mat);
+#endif
+    
     _map = pattern.index_map(1);
     const PetscInt local_size = _map->size_local();
     const PetscInt global_size = _map->size_global();
 
+#ifdef USE_HIP
     VecCreateMPIHIPWithArray(_comm, PetscInt(1), local_size, global_size, NULL, &_x_petsc);
     VecCreateMPIHIPWithArray(_comm, PetscInt(1), local_size, global_size, NULL, &_y_petsc);
+#elif USE_CUDA
+    VecCreateMPICUDAWithArray(_comm, PetscInt(1), local_size, global_size, NULL, &_x_petsc);
+    VecCreateMPICUDAWithArray(_comm, PetscInt(1), local_size, global_size, NULL, &_y_petsc);
+#endif
   }
 
   /**
@@ -168,11 +185,15 @@ public:
   template <typename Vector>
   void operator()(const Vector& x, Vector& y, bool transpose = false)
   {
-    spdlog::info("HipPlaceArray");
-
+    spdlog::info("PlaceArray");
+#ifdef USE_HIP
     int ierr = VecHIPPlaceArray(_x_petsc, x.array().data());
     ierr = VecHIPPlaceArray(_y_petsc, y.array().data());
-
+#elif USE_CUDA
+    int ierr = VecCUDAPlaceArray(_x_petsc, x.array().data());
+    ierr = VecCUDAPlaceArray(_y_petsc, y.array().data());
+#endif
+    
     int nx, ny;
     MatGetLocalSize(_hip_mat, &nx, &ny);
     spdlog::info("Mat shape = {}x{}", nx, ny);
@@ -189,9 +210,14 @@ public:
       // y = A x
       MatMult(_hip_mat, _x_petsc, _y_petsc);
 
-    spdlog::info("HipResetArray");
+    spdlog::info("ResetArray");
+#ifdef USE_HIP
     VecHIPResetArray(_y_petsc);
     VecHIPResetArray(_x_petsc);
+#elif USE_CUDA
+    VecCUDAResetArray(_y_petsc);
+    VecCUDAResetArray(_x_petsc);
+#endif
   }
 
 private:

@@ -145,7 +145,11 @@ int main(int argc, char* argv[])
     fem::set_bc<T, T>(b.mutable_array(), {bc});
 
     // Define vectors
+#ifdef USE_HIP
     using DeviceVector = dolfinx::acc::Vector<T, acc::Device::HIP>;
+#elif USE_CUDA
+    using DeviceVector = dolfinx::acc::Vector<T, acc::Device::CUDA>;
+#endif
     using HostVector = dolfinx::acc::Vector<T, acc::Device::CPP>;
 
     spdlog::info("Create Petsc Operator");
@@ -195,11 +199,18 @@ int main(int argc, char* argv[])
     const PetscInt local_size = V->dofmap()->index_map->size_local();
     const PetscInt global_size = V->dofmap()->index_map->size_global();
     Vec _b, _x;
+    
+#ifdef USE_HIP
     VecCreateMPIHIPWithArray(comm, PetscInt(1), local_size, global_size, NULL, &_x);
     VecCreateMPIHIPWithArray(comm, PetscInt(1), local_size, global_size, NULL, &_b);
-
     VecHIPPlaceArray(_b, y.array().data());
     VecHIPPlaceArray(_x, x.array().data());
+#elif USE_CUDA
+    VecCreateMPICUDAWithArray(comm, PetscInt(1), local_size, global_size, NULL, &_x);
+    VecCreateMPICUDAWithArray(comm, PetscInt(1), local_size, global_size, NULL, &_b);
+    VecCUDAPlaceArray(_b, y.array().data());
+    VecCUDAPlaceArray(_x, x.array().data());
+#endif
 
     dolfinx::common::Timer tsolve("ZZZ Solve");
     KSPSolve(solver, _b, _x);
@@ -220,9 +231,14 @@ int main(int argc, char* argv[])
       std::cout << "Num iterations: " << num_iterations << "\n";
     }
 
+#ifdef USE_HIP
     VecHIPResetArray(_b);
     VecHIPResetArray(_x);
-
+#elif USE_CUDA
+    VecCUDAResetArray(_b);
+    VecCUDAResetArray(_x);
+#endif
+    
     spdlog::info("x.norm = {}", acc::norm(x));
     spdlog::info("[0] y.norm = {}", acc::norm(y));
 
