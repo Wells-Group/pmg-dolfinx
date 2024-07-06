@@ -20,7 +20,7 @@ if(NOT WIN32)
   set(BoldWhite   "${Esc}[1;37m")
 endif()
 
-set(PROJECT_NAME mat_free C CXX)
+set(PROJECT_NAME mat_free C CXX HIP)
 project(${PROJECT_NAME})
 
 option(profiling          "Enable ROCm scoped profiling"                                  off)
@@ -109,6 +109,7 @@ if(omnitrace)
 endif()
 if(amd)
 	add_definitions(-DUSE_HIP=1)
+
 elseif(nvidia)
 	add_definitions(-DUSE_CUDA=1)
 elseif(cpu)

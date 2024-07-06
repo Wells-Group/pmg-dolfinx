@@ -260,22 +260,22 @@ int main(int argc, char* argv[])
     std::cout << "Norm of y = " << acc::norm(y) << "\n";
 
     // Compare to assembling on CPU and copying matrix to GPU
-    //    DeviceVector z(map, 1);
-    //    z.set(T{0.0});
+    DeviceVector z(map, 1);
+    z.set(T{0.0});
 
-    // acc::MatrixOperator<T> mat_op(a, {bc});
-    // dolfinx::common::Timer mtimer("% CSR Matvec");
-    // for (int i = 0; i < nrep; ++i)
-    //   mat_op(u, z);
-    // mtimer.stop();
+    acc::MatrixOperator<T> mat_op(a, {bc});
+    dolfinx::common::Timer mtimer("% CSR Matvec");
+    for (int i = 0; i < nrep; ++i)
+      mat_op(u, z);
+    mtimer.stop();
 
-    // std::cout << "Norm of u = " << acc::norm(u) << "\n";
-    // std::cout << "Norm of z = " << acc::norm(z) << "\n";
+    std::cout << "Norm of u = " << acc::norm(u) << "\n";
+    std::cout << "Norm of z = " << acc::norm(z) << "\n";
 
-    // // Compute error
-    // DeviceVector e(map, 1);
-    // acc::axpy(e, T{-1.0}, y, z);
-    // std::cout << "Norm of error = " << acc::norm(e) << "\n";
+    // Compute error
+    DeviceVector e(map, 1);
+    acc::axpy(e, T{-1.0}, y, z);
+    std::cout << "Norm of error = " << acc::norm(e) << "\n";
 
     // Display timings
     dolfinx::list_timings(MPI_COMM_WORLD, {dolfinx::TimingType::wall});
