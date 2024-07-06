@@ -267,7 +267,7 @@ int main(int argc, char* argv[])
     dolfinx::common::Timer mtimer("% CSR Matvec");
     for (int i = 0; i < nrep; ++i)
       mat_op(u, z);
-     mtimer.stop();
+    mtimer.stop();
 
     std::cout << "Norm of u = " << acc::norm(u) << "\n";
     std::cout << "Norm of z = " << acc::norm(z) << "\n";

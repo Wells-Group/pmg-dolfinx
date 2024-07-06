@@ -194,14 +194,17 @@ public:
     dim3 dim_block(block_size);
     dim3 dim_grid(num_blocks);
 
-    const std::int32_t* indices = thrust::raw_pointer_cast(_local_indices.data());
-    const T* in = this->array().data();
-    T* out = thrust::raw_pointer_cast(_buffer_local.data());
-    pack<T><<<dim_grid, dim_block, 0, 0>>>(_local_indices.size(), indices, in, out);
-    err_check(cudaDeviceSynchronize());
-
+    if (!_local_indices.empty())
+    {
+      const std::int32_t* indices = thrust::raw_pointer_cast(_local_indices.data());
+      const T* in = this->array().data();
+      T* out = thrust::raw_pointer_cast(_buffer_local.data());
+      pack<T><<<dim_grid, dim_block, 0, 0>>>(_local_indices.size(), indices, in, out);
+      err_check(cudaDeviceSynchronize());
+    }
+    
     T* remote = thrust::raw_pointer_cast(_buffer_remote.data());
-    _scatterer->scatter_fwd_begin(std::span<const T>(out, _buffer_local.size()),
+    _scatterer->scatter_fwd_begin(std::span<const T>(thrust::raw_pointer_cast(_buffer_local.data()), _buffer_local.size()),
                                   std::span<T>(remote, _buffer_remote.size()),
                                   std::span<MPI_Request>(_request), common::Scatterer<>::type::p2p);
   }
