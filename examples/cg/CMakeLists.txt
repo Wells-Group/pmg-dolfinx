@@ -20,11 +20,6 @@ if(NOT WIN32)
   set(BoldWhite   "${Esc}[1;37m")
 endif()
 
-set(CMAKE_HIP_ARCHITECTURES gfx90a)
-
-set(PROJECT_NAME cg C CXX HIP)
-project(${PROJECT_NAME})
-
 option(profiling          "Enable ROCm scoped profiling"                                  off)
 option(omnitrace	  "Enable AMD omnitrace profiling"				  off)
 option(cpu		  "Build for CPUs"						  off)
@@ -38,6 +33,14 @@ if(nvidia AND amd)
   message(FATAL_ERROR "You cannot select both amd and nvidia GPU builds. Only select one of the three options: cpu, nvidia, amd")
 endif()
 
+set(PROJECT_NAME cg)
+if(amd)
+  set(CMAKE_HIP_ARCHITECTURES gfx90a)
+  project(${PROJECT_NAME} C CXX HIP)
+elseif(nvidia)
+  set(CMAKE_CUDA_ARCHITECTURES 80)
+  project(${PROJECT_NAME} C CXX CUDA)
+endif()
 
 if(omnitrace AND NOT profiling)
   set(profiling on)
@@ -67,7 +70,6 @@ find_package(Boost 1.70 REQUIRED program_options)
 
 set(CMAKE_INCLUDE_CURRENT_DIR ON)
 
-
 # Set the GPU to compile for
 if(amd)
   set(GPU_TARGETS "gfx90a" CACHE STRING "GPU targets to compile for")
@@ -85,11 +87,13 @@ add_custom_command(
   COMMENT "Compile poisson.py using FFCx"
 )
 
-# If using ROCm and HIP
-# On ROCm rocThrust requires rocPRIM
-find_package(hip REQUIRED)
-find_package(rocprim REQUIRED CONFIG)
-find_package(rocthrust REQUIRED CONFIG)
+if(amd)
+  # If using ROCm and HIP
+  # On ROCm rocThrust requires rocPRIM
+  find_package(hip REQUIRED)
+  find_package(rocprim REQUIRED CONFIG)
+  find_package(rocthrust REQUIRED CONFIG)
+endif()
 if(profiling)
 	find_library(ROCTRACER_LIBRARY NAMES roctracer64)
 	find_library(ROCTX64_LIBRARY NAMES roctx64)
@@ -122,10 +126,15 @@ add_executable(${PROJECT_NAME} main.cpp ${CMAKE_CURRENT_BINARY_DIR}/poisson.c)
 
 include_directories("../../")
 
-target_link_libraries(${PROJECT_NAME} dolfinx roc::rocthrust Boost::program_options hipsparse)
+target_link_libraries(${PROJECT_NAME} dolfinx Boost::program_options)
+
+if(amd)
+  target_link_libraries(${PROJECT_NAME} roc::rocthrust hipsparse)
+endif()
+
 if(profiling)
-	target_link_libraries(${PROJECT_NAME} ${ROCTX64_LIBRARY} ${ROCTRACER_LIBRARY} ${ROCM_SMI64_LIBRARY})
+  target_link_libraries(${PROJECT_NAME} ${ROCTX64_LIBRARY} ${ROCTRACER_LIBRARY} ${ROCM_SMI64_LIBRARY})
 endif()
 if(omnitrace)
-	target_link_libraries(${PROJECT_NAME} ${OMNITRACE_USER_LIBRARY} ${OMNITRACE_LIBRARY})
+  target_link_libraries(${PROJECT_NAME} ${OMNITRACE_USER_LIBRARY} ${OMNITRACE_LIBRARY})
 endif()

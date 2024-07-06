@@ -24,7 +24,7 @@ class PETScOperator
 public:
   /**
    * @brief Constructs a PETScOperator object with the given form and Dirichlet
-   * boundary conditions. It assembles the matrix and converts it to a HIP
+   * boundary conditions. It assembles the matrix and converts it to a HIP/CUDA
    * matrix.
    *
    * @param a         A shared pointer to the finite element form.
@@ -46,7 +46,11 @@ public:
 
     spdlog::info("Create matrix... {}x{}", pattern.index_map(0)->size_global(),
                  pattern.index_map(1)->size_global());
+#ifdef USE_HIP
     _host_mat = la::petsc::create_matrix(a->mesh()->comm(), pattern, "aijhipsparse");
+#elif USE_CUDA
+    _host_mat = la::petsc::create_matrix(a->mesh()->comm(), pattern, "aijcusparse");
+#endif
 
     spdlog::info("Zero matrix...");
     MatZeroEntries(_host_mat);
@@ -68,9 +72,9 @@ public:
     spdlog::info("Mat norm = {}", norm);
 
     spdlog::info("Convert matrix...");
-    // Create HIP matrix
-    dolfinx::common::Timer t1("~Convert matrix to MATAIJHIPSPARSE");
-    int ierr = MatConvert(_host_mat, MATSAME, MAT_INITIAL_MATRIX, &_hip_mat);
+    // Create HIP/CUDA matrix
+    dolfinx::common::Timer t1("~Convert matrix to MATAIJ[HIP/CU]SPARSE");
+    int ierr = MatConvert(_host_mat, MATSAME, MAT_INITIAL_MATRIX, &_device_mat);
     spdlog::info("ierr={}", ierr);
     t1.stop();
 
@@ -82,10 +86,17 @@ public:
     const PetscInt global_size = _map->size_global();
     spdlog::info("Create vecs... {}/{}", local_size, global_size);
 
+#ifdef USE_HIP
     ierr = VecCreateMPIHIPWithArray(_comm, PetscInt(1), local_size, global_size, NULL, &_x_petsc);
     spdlog::info("ierr={}", ierr);
     ierr = VecCreateMPIHIPWithArray(_comm, PetscInt(1), local_size, global_size, NULL, &_y_petsc);
     spdlog::info("ierr={}", ierr);
+#elif USE_CUDA
+    ierr = VecCreateMPICUDAWithArray(_comm, PetscInt(1), local_size, global_size, NULL, &_x_petsc);
+    spdlog::info("ierr={}", ierr);
+    ierr = VecCreateMPICUDAWithArray(_comm, PetscInt(1), local_size, global_size, NULL, &_y_petsc);
+    spdlog::info("ierr={}", ierr);
+#endif
   }
 
   PETScOperator(const fem::FunctionSpace<T>& V0, const fem::FunctionSpace<T>& V1)
@@ -122,15 +133,23 @@ public:
     auto set_fn = la::petsc::Matrix::set_block_fn(_host_mat, INSERT_VALUES);
     fem::interpolation_matrix<PetscScalar>(V0, V1, set_fn);
 
-    // Create HIP matrix
-    MatConvert(_host_mat, MATAIJHIPSPARSE, MAT_INITIAL_MATRIX, &_hip_mat);
+    // Create HIP/CUDA matrix
+#ifdef USE_HIP
+    MatConvert(_host_mat, MATAIJHIPSPARSE, MAT_INITIAL_MATRIX, &_device_mat);
+#elif USE_CUDA
+    MatConvert(_host_mat, MATAIJCUSPARSE, MAT_INITIAL_MATRIX, &_device_mat);
+#endif
 
     _map = pattern.index_map(1);
     const PetscInt local_size = _map->size_local();
     const PetscInt global_size = _map->size_global();
-
+#ifdef USE_HIP
     VecCreateMPIHIPWithArray(_comm, PetscInt(1), local_size, global_size, NULL, &_x_petsc);
     VecCreateMPIHIPWithArray(_comm, PetscInt(1), local_size, global_size, NULL, &_y_petsc);
+#elif USE_CUDA
+    VecCreateMPICUDAWithArray(_comm, PetscInt(1), local_size, global_size, NULL, &_x_petsc);
+    VecCreateMPICUDAWithArray(_comm, PetscInt(1), local_size, global_size, NULL, &_y_petsc);
+#endif
   }
 
   /**
@@ -140,8 +159,7 @@ public:
   {
     VecDestroy(&_x_petsc);
     VecDestroy(&_y_petsc);
-    MatDestroy(&_hip_mat);
-    MatDestroy(&_hip_mat);
+    MatDestroy(&_device_mat);
   }
 
   std::shared_ptr<const common::IndexMap> index_map() { return _map; };
@@ -149,7 +167,7 @@ public:
   /**
    * @brief Return device PETSc Mat pointer.
    */
-  Mat device_matrix() const { return _hip_mat; }
+  Mat device_matrix() const { return _device_mat; }
 
   /**
    * @brief Return host PETSc Mat pointer.
@@ -168,13 +186,18 @@ public:
   template <typename Vector>
   void operator()(const Vector& x, Vector& y, bool transpose = false)
   {
-    spdlog::info("HipPlaceArray");
+    spdlog::info("Hip/CuPlaceArray");
 
+#ifdef USE_HIP
     int ierr = VecHIPPlaceArray(_x_petsc, x.array().data());
     ierr = VecHIPPlaceArray(_y_petsc, y.array().data());
+#elif USE_CUDA
+    int ierr = VecCUDAPlaceArray(_x_petsc, x.array().data());
+    ierr = VecCUDAPlaceArray(_y_petsc, y.array().data());
+#endif
 
     int nx, ny;
-    MatGetLocalSize(_hip_mat, &nx, &ny);
+    MatGetLocalSize(_device_mat, &nx, &ny);
     spdlog::info("Mat shape = {}x{}", nx, ny);
     VecGetLocalSize(_x_petsc, &nx);
     spdlog::info("Vec size x = {}", nx);
@@ -184,21 +207,26 @@ public:
     spdlog::info("MatMult");
     if (transpose)
       // y = A^T x
-      MatMultTranspose(_hip_mat, _x_petsc, _y_petsc);
+      MatMultTranspose(_device_mat, _x_petsc, _y_petsc);
     else
       // y = A x
-      MatMult(_hip_mat, _x_petsc, _y_petsc);
+      MatMult(_device_mat, _x_petsc, _y_petsc);
 
-    spdlog::info("HipResetArray");
+    spdlog::info("Hip/CuResetArray");
+#ifdef USE_HIP
     VecHIPResetArray(_y_petsc);
     VecHIPResetArray(_x_petsc);
+#elif USE_CUDA
+    VecCUDAResetArray(_y_petsc);
+    VecCUDAResetArray(_x_petsc);
+#endif
   }
 
 private:
   Vec _x_petsc = nullptr; // PETSc vector for input
   Vec _y_petsc = nullptr; // PETSc vector for output
   Mat _host_mat;          // Host PETSc matrix
-  Mat _hip_mat;           // HIP matrix
+  Mat _device_mat;        // HIP/CUDA matrix
   MPI_Comm _comm;         // MPI communicator
   std::shared_ptr<const common::IndexMap> _map;
 };
