@@ -279,7 +279,7 @@ int main(int argc, char* argv[])
     fem::set_bc<T, T>(sol.mutable_array(), {bc});
     x.copy_from_host(sol);
 
-    err_check(hipDeviceSynchronize());
+    err_check(cudaDeviceSynchronize());
 
     cheb.solve(op, x, b_d, true);
 
