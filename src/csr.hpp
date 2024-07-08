@@ -265,6 +265,8 @@ public:
                                             thrust::raw_pointer_cast(_cols.data()), _x, _y);
       check_device_last_error();
     }
+
+    device_synchronize();
   }
 
   std::shared_ptr<const common::IndexMap> column_index_map() { return _col_map; }

@@ -188,16 +188,23 @@ int main(int argc, char* argv[])
     spdlog::info("KSP Setup");
     KSPSetUp(solver);
 
-    spdlog::info("Create Petsc HIP arrays");
+    spdlog::info("Create Petsc HIP/CUDA arrays");
     // SET OPTIONS????
     const PetscInt local_size = V->dofmap()->index_map->size_local();
     const PetscInt global_size = V->dofmap()->index_map->size_global();
     Vec _b, _x;
+
+#ifdef USE_HIP    
     VecCreateMPIHIPWithArray(comm, PetscInt(1), local_size, global_size, NULL, &_x);
     VecCreateMPIHIPWithArray(comm, PetscInt(1), local_size, global_size, NULL, &_b);
-
     VecHIPPlaceArray(_b, y.array().data());
     VecHIPPlaceArray(_x, x.array().data());
+#elif USE_CUDA
+    VecCreateMPICUDAWithArray(comm, PetscInt(1), local_size, global_size, NULL, &_x);
+    VecCreateMPICUDAWithArray(comm, PetscInt(1), local_size, global_size, NULL, &_b);
+    VecCUDAPlaceArray(_b, y.array().data());
+    VecCUDAPlaceArray(_x, x.array().data());
+#endif    
 
     dolfinx::common::Timer tsolve("ZZZ Solve");
     KSPSolve(solver, _b, _x);

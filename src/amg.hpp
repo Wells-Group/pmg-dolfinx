@@ -88,8 +88,8 @@ public:
     VecHIPResetArray(_x);
   }
 
-    void solve(dolfinx::acc::Vector<T, acc::Device::CUDA>& x,
-               dolfinx::acc::Vector<T, acc::Device::CUDA>& y)
+  void solve(dolfinx::acc::Vector<T, acc::Device::CUDA>& x,
+             dolfinx::acc::Vector<T, acc::Device::CUDA>& y)
   {
     VecCUDAPlaceArray(_b, y.array().data());
     VecCUDAPlaceArray(_x, x.array().data());
