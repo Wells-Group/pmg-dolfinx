@@ -12,7 +12,7 @@ namespace dolfinx::acc
 {
 /// Conjugate gradient method
 template <typename Vector, typename Operator, typename Prolongation, typename Restriction,
-          typename Solver, typename CoarseSolver>
+          typename Solver, typename CoarseSolver, typename Interpolator>
 class MultigridPreconditioner
 {
   /// The value type
@@ -50,6 +50,11 @@ public:
   void set_interpolators(std::vector<std::shared_ptr<Prolongation>>& interpolators)
   {
     _interpolation = interpolators;
+  }
+
+  void set_interpolators(std::vector<std::shared_ptr<Interpolator>>& interpolators)
+  {
+    _matfree_interpolation = interpolators;
   }
 
   // Apply M^{-1}x = y
@@ -121,7 +126,10 @@ public:
       spdlog::info("Level {}", i + 1);
 
       // [coarse->fine] Prolong correction
-      (*_interpolation[i])(*_u[i], *_du[i + 1], false);
+      if (_matfree_interpolation[i])
+        _matfree_interpolation[i]->interpolate(*_u[i], *_du[i + 1]);
+      else
+        (*_interpolation[i])(*_u[i], *_du[i + 1], false);
 
       spdlog::info("norm(_u[{}]) = {}", i, acc::norm(*_u[i]));
       spdlog::info("norm(_du[{}]) = {}", i + 1, acc::norm(*_du[i + 1]));
@@ -174,6 +182,8 @@ private:
   // Prologation and restriction operatos
   // Size should be nlevels - 1
   std::vector<std::shared_ptr<Prolongation>> _interpolation;
+
+  std::vector<std::shared_ptr<Interpolator>> _matfree_interpolation;
 
   // Operators used to compute the residual
   std::vector<std::shared_ptr<Operator>> _operators;

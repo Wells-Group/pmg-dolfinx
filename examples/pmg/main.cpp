@@ -332,8 +332,11 @@ void solve(std::shared_ptr<mesh::Mesh<double>> mesh, bool use_amg, bool output_t
   // Create Prolongation operator
   std::vector<std::shared_ptr<acc::MatrixOperator<T>>> prolongation(V.size() - 1);
 
-  Interpolator<T> Q1Q3(V[0]->element(), V[1]->element(), device_dofmaps[0], device_dofmaps[1],
-                       bcells, lcells);
+  // Interpolator from Q1 to Q3
+  auto Q1Q3 = std::make_shared<Interpolator<T>>(V[0]->element()->basix_element(),
+                                                V[1]->element()->basix_element(), device_dofmaps[0],
+                                                device_dofmaps[1], bcells, lcells);
+  std::vector<std::shared_ptr<Interpolator<T>>> matfree_interpolators = {Q1Q3};
 
   // From V1 to V0
   spdlog::warn("Creating Prolongation Operators");
@@ -344,7 +347,7 @@ void solve(std::shared_ptr<mesh::Mesh<double>> mesh, bool use_amg, bool output_t
   using SolverType = acc::Chebyshev<DeviceVector>;
 
   using PMG = acc::MultigridPreconditioner<DeviceVector, FineOperator, CSRType, CSRType, SolverType,
-                                           CoarseSolverType<T>>;
+                                           CoarseSolverType<T>, Interpolator<T>>;
 
   spdlog::info("Create PMG");
   PMG pmg(maps, 1, bc_marker_d_span[0]);
@@ -355,6 +358,9 @@ void solve(std::shared_ptr<mesh::Mesh<double>> mesh, bool use_amg, bool output_t
 
   // Sets CSR matrices or matrix-free kernels to do interpolation
   pmg.set_interpolators(prolongation);
+
+  //
+  pmg.set_interpolators(matfree_interpolators);
 
   // Create solution vector
   spdlog::info("Create x");

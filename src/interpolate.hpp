@@ -1,4 +1,3 @@
-#include "small-csr.hpp"
 #include <basix/finite-element.h>
 #include <basix/interpolation.h>
 #include <cstdint>
@@ -78,6 +77,9 @@ public:
     // Get local interpolation matrix and compress to CSR format
     auto [mat, shape] = basix::compute_interpolation_operator(inp_element, out_element);
     T tol = 1e-12;
+    std::vector<std::int32_t> Mrow_ptr = {0};
+    std::vector<std::int32_t> Mcolumns;
+    std::vector<T> Mvalues;
     for (std::size_t row = 0; row < shape[0]; ++row)
     {
       for (std::size_t col = 0; col < shape[1]; ++col)
@@ -89,12 +91,16 @@ public:
           Mvalues.push_back(val);
         }
       }
-      Mrow_ptr.push_back(columns.size());
+      Mrow_ptr.push_back(Mcolumns.size());
     }
+    assert((num_cell_dofs_Q2 + 1) == Mrow_ptr.size());
 
     // Copy CSR to device
+    Mptr_device.resize(Mrow_ptr.size());
     thrust::copy(Mrow_ptr.begin(), Mrow_ptr.end(), Mptr_device.begin());
+    Mcol_device.resize(Mcolumns.size());
     thrust::copy(Mcolumns.begin(), Mcolumns.end(), Mcol_device.begin());
+    Mval_device.resize(Mvalues.size());
     thrust::copy(Mvalues.begin(), Mvalues.end(), Mval_device.begin());
   }
 
@@ -109,7 +115,7 @@ public:
     T* output_values = output_vector.mutable_array().data();
 
     int ncells = local_cells.size();
-    const std::int32_t* cell_list = local_cells.data();
+    thrust::device_vector<std::int32_t> cell_list_d(local_cells.begin(), local_cells.end());
     assert(ncells <= output_dofmap.size() / num_cell_dofs_Q2);
 
     dim3 block_size(256);
@@ -119,29 +125,40 @@ public:
     input_vector.scatter_fwd_begin();
 
     spdlog::info("From {} to {} on {} cells", num_cell_dofs_Q1, num_cell_dofs_Q2, ncells);
+    spdlog::info("Input dofmap size = {}, output dofmap size = {}", input_dofmap.size(),
+                 output_dofmap.size());
 
-    interpolate_Q1Q2<T><grid_size, block_size, 0, 0>(
-        ncells, cell_list, input_dofmap.data(), num_cell_dofs_Q1, output_dofmap.data(),
-        num_cell_dofs_Q2, input_values, output_values, thrust::raw_pointer_cast(Mptr_device.data()),
-        thrust::raw_pointer_cast(Mcol_device.data()), thrust::raw_pointer_cast(Mval_device.data()));
+    interpolate_Q1Q2<T><<<grid_size, block_size, 0, 0>>>(
+        ncells, thrust::raw_pointer_cast(cell_list_d.data()), input_dofmap.data(), num_cell_dofs_Q1,
+        output_dofmap.data(), num_cell_dofs_Q2, input_values, output_values,
+        thrust::raw_pointer_cast(Mptr_device.data()), thrust::raw_pointer_cast(Mcol_device.data()),
+        thrust::raw_pointer_cast(Mval_device.data()));
 
     check_device_last_error();
 
     // Wait for vector update of input_vector to complete
     input_vector.scatter_fwd_end();
 
-    const std::int32_t* b_cell_list = boundary_cells.data();
+    cell_list_d.resize(boundary_cells.size());
+    thrust::copy(boundary_cells.begin(), boundary_cells.end(), cell_list_d.begin());
     ncells = boundary_cells.size();
-    spdlog::info("From {} dofs/cell to {} on {} (boundary) cells", num_cell_dofs_Q1,
-                 num_cell_dofs_Q2, ncells);
+    if (ncells > 0)
+    {
+      spdlog::info("From {} dofs/cell to {} on {} (boundary) cells", num_cell_dofs_Q1,
+                   num_cell_dofs_Q2, ncells);
 
-    interpolate_Q1Q2<T><grid_size, block_size, 0, 0>(
-        ncells, b_cell_list, input_dofmap.data(), num_cell_dofs_Q1, output_dofmap.data(),
-        num_cell_dofs_Q2, input_values, output_values, thrust::raw_pointer_cast(Mptr_device.data()),
-        thrust::raw_pointer_cast(Mcol_device.data()), thrust::raw_pointer_cast(Mval_device.data()));
+      interpolate_Q1Q2<T><<<grid_size, block_size, 0, 0>>>(
+          ncells, thrust::raw_pointer_cast(cell_list_d.data()), input_dofmap.data(),
+          num_cell_dofs_Q1, output_dofmap.data(), num_cell_dofs_Q2, input_values, output_values,
+          thrust::raw_pointer_cast(Mptr_device.data()),
+          thrust::raw_pointer_cast(Mcol_device.data()),
+          thrust::raw_pointer_cast(Mval_device.data()));
+    }
 
     device_synchronize();
     check_device_last_error();
+
+    spdlog::debug("Done mat-free interpolation");
   }
 
 private:
