@@ -16,15 +16,17 @@ namespace
 //        Q2_dofs_per_cell: int
 //        valuesQ1: vector of values for Q1
 //        valuesQ2: vector of values for Q2
-//        mat_row_offset: CSR matrix row offsets for local interpolation matrix, number of entries =
-//        Q2_dofs_per_cell + 1 mat_column: CSR matrix columns for local interpolation matrix
-//        mat_value: CSR matrix values for local interpolation matrix
+//        Mptr: CSR matrix row offsets for local interpolation matrix,
+//          number of entries = Q2_dofs_per_cell + 1
+//        Mcols: CSR matrix columns for local interpolation matrix
+//        Mvals: CSR matrix values for local interpolation matrix
 // Output: vector valuesQ2
 template <typename T>
 __global__ void interpolate_Q1Q2(int N, const std::int32_t* cell_list, const std::int32_t* Q1dofmap,
                                  int Q1_dofs_per_cell, const std::int32_t* Q2dofmap,
                                  int Q2_dofs_per_cell, const T* valuesQ1, T* valuesQ2,
-                                 const SmallCSRDevice<T>* mat)
+                                 const std::int32_t* Mptr, const std::int32_t* Mcols,
+                                 const T* Mvals)
 {
   // Calculate the cell index for this thread.
   int i = blockIdx.x * blockDim.x + threadIdx.x;
@@ -34,7 +36,14 @@ __global__ void interpolate_Q1Q2(int N, const std::int32_t* cell_list, const std
     const std::int32_t cell = cell_list[i];
     const std::int32_t* cellQ1 = Q1dofmap + cell * Q1_dofs_per_cell;
     const std::int32_t* cellQ2 = Q2dofmap + cell * Q2_dofs_per_cell;
-    mat->apply_indirect(cellQ1, cellQ2, valuesQ1, valuesQ2);
+
+    for (std::int32_t j = 0; j < Q2_dofs_per_cell; j++)
+    {
+      T vj = 0;
+      for (std::int32_t k = Mptr[j]; k < Mptr[j + 1]; k++)
+        vj += Mvals[k] * valuesQ1[cellQ1[Mcols[k]]];
+      valuesQ2[cellQ2[j]] = vj;
+    }
   }
 }
 
@@ -54,15 +63,10 @@ public:
   Interpolator(const basix::FiniteElement<T>& inp_element,
                const basix::FiniteElement<T>& out_element, std::span<const std::int32_t> inp_dofmap,
                std::span<const std::int32_t> out_dofmap, std::span<const std::int32_t> b_cells,
-               std::span<const std::int32_t> l_cells, bool use_transpose)
+               std::span<const std::int32_t> l_cells)
       : input_dofmap(inp_dofmap), output_dofmap(out_dofmap), boundary_cells(b_cells),
         local_cells(l_cells)
   {
-    // Local CSR data to be copied to device
-    std::vector<std::int32_t> _cols;
-    std::vector<std::int32_t> _row_offset;
-    std::vector<T> _vals;
-
     num_cell_dofs_Q1 = inp_element.dim();
     num_cell_dofs_Q2 = out_element.dim();
 
@@ -70,18 +74,28 @@ public:
     assert(input_dofmap.size() % num_cell_dofs_Q1 == 0);
     assert(output_dofmap.size() % num_cell_dofs_Q2 == 0);
     assert(output_dofmap.size() / num_cell_dofs_Q2 == input_dofmap.size() / num_cell_dofs_Q1);
-    assert(_row_offset.size() == num_cell_dofs_Q2 + 1);
 
-    if (use_transpose)
+    // Get local interpolation matrix and compress to CSR format
+    auto [mat, shape] = basix::compute_interpolation_operator(inp_element, out_element);
+    T tol = 1e-12;
+    for (std::size_t row = 0; row < shape[0]; ++row)
     {
-      auto [mat, shape] = basix::compute_interpolation_operator(out_element, inp_element);
-      _mat_csr = std::make_unique<SmallCSR<T>>(mat, shape, true);
+      for (std::size_t col = 0; col < shape[1]; ++col)
+      {
+        T val = mat[row * shape[1] + col];
+        if (std::abs(val) > tol)
+        {
+          Mcolumns.push_back(col);
+          Mvalues.push_back(val);
+        }
+      }
+      Mrow_ptr.push_back(columns.size());
     }
-    else
-    {
-      auto [mat, shape] = basix::compute_interpolation_operator(inp_element, out_element);
-      _mat_csr = std::make_unique<SmallCSR<T>>(mat, shape, false);
-    }
+
+    // Copy CSR to device
+    thrust::copy(Mrow_ptr.begin(), Mrow_ptr.end(), Mptr_device.begin());
+    thrust::copy(Mcolumns.begin(), Mcolumns.end(), Mcol_device.begin());
+    thrust::copy(Mvalues.begin(), Mvalues.end(), Mval_device.begin());
   }
 
   // Interpolate from input_values to output_values (both on device)
@@ -106,11 +120,12 @@ public:
 
     spdlog::info("From {} to {} on {} cells", num_cell_dofs_Q1, num_cell_dofs_Q2, ncells);
 
-    hipLaunchKernelGGL(interpolate_Q1Q2<T>, grid_size, block_size, 0, 0, ncells, cell_list,
-                       input_dofmap.data(), num_cell_dofs_Q1, output_dofmap.data(),
-                       num_cell_dofs_Q2, input_values, output_values, _mat_csr->device_matrix());
+    interpolate_Q1Q2<T><grid_size, block_size, 0, 0>(
+        ncells, cell_list, input_dofmap.data(), num_cell_dofs_Q1, output_dofmap.data(),
+        num_cell_dofs_Q2, input_values, output_values, thrust::raw_pointer_cast(Mptr_device.data()),
+        thrust::raw_pointer_cast(Mcol_device.data()), thrust::raw_pointer_cast(Mval_device.data()));
 
-    err_check(hipGetLastError());
+    check_device_last_error();
 
     // Wait for vector update of input_vector to complete
     input_vector.scatter_fwd_end();
@@ -120,12 +135,13 @@ public:
     spdlog::info("From {} dofs/cell to {} on {} (boundary) cells", num_cell_dofs_Q1,
                  num_cell_dofs_Q2, ncells);
 
-    hipLaunchKernelGGL(interpolate_Q1Q2<T>, grid_size, block_size, 0, 0, ncells, b_cell_list,
-                       input_dofmap.data(), num_cell_dofs_Q1, output_dofmap.data(),
-                       num_cell_dofs_Q2, input_values, output_values, _mat_csr->device_matrix());
+    interpolate_Q1Q2<T><grid_size, block_size, 0, 0>(
+        ncells, b_cell_list, input_dofmap.data(), num_cell_dofs_Q1, output_dofmap.data(),
+        num_cell_dofs_Q2, input_values, output_values, thrust::raw_pointer_cast(Mptr_device.data()),
+        thrust::raw_pointer_cast(Mcol_device.data()), thrust::raw_pointer_cast(Mval_device.data()));
 
-    err_check(hipDeviceSynchronize());
-    err_check(hipGetLastError());
+    device_synchronize();
+    check_device_last_error();
   }
 
 private:
@@ -133,10 +149,11 @@ private:
   int num_cell_dofs_Q1;
   int num_cell_dofs_Q2;
 
-  // Per-cell CSR interpolation matrix
-  std::unique_ptr<SmallCSR<T>> _mat_csr;
+  // Per-cell CSR interpolation matrix (on device)
+  thrust::device_vector<std::int32_t> Mcol_device, Mptr_device;
+  thrust::device_vector<T> Mval_device;
 
-  // Dofmaps (on device).
+  // Dofmaps (on device)
   std::span<const std::int32_t> input_dofmap;
   std::span<const std::int32_t> output_dofmap;
 

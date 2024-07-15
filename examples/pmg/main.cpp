@@ -2,6 +2,7 @@
 #include "../../src/cg.hpp"
 #include "../../src/chebyshev.hpp"
 #include "../../src/csr.hpp"
+#include "../../src/interpolate.hpp"
 #include "../../src/laplacian.hpp"
 #include "../../src/mesh.hpp"
 #include "../../src/operators.hpp"
@@ -206,7 +207,7 @@ void solve(std::shared_ptr<mesh::Mesh<double>> mesh, bool use_amg, bool output_t
           std::span<std::int32_t>(thrust::raw_pointer_cast(dofmapV[i].data()), dofmapV[i].size()));
     }
 
-  device_synchronize();
+    device_synchronize();
 
     for (std::size_t i = 0; i < V.size(); ++i)
     {
@@ -237,7 +238,7 @@ void solve(std::shared_ptr<mesh::Mesh<double>> mesh, bool use_amg, bool output_t
           std::span(thrust::raw_pointer_cast(Gweights_d[i].data()), Gweights_d[i].size()));
     }
 
-  device_synchronize();
+    device_synchronize();
 
     spdlog::debug("Copy geometry data to device");
     geomx_device.resize(mesh->geometry().x().size());
@@ -252,8 +253,7 @@ void solve(std::shared_ptr<mesh::Mesh<double>> mesh, bool use_amg, bool output_t
     geom_x_dofmap = std::span<std::int32_t>(thrust::raw_pointer_cast(geomx_dofmap_device.data()),
                                             geomx_dofmap_device.size());
 
-      device_synchronize();
-
+    device_synchronize();
   }
 
   std::vector<std::shared_ptr<DeviceVector>> bs(V.size());
@@ -331,6 +331,9 @@ void solve(std::shared_ptr<mesh::Mesh<double>> mesh, bool use_amg, bool output_t
 
   // Create Prolongation operator
   std::vector<std::shared_ptr<acc::MatrixOperator<T>>> prolongation(V.size() - 1);
+
+  Interpolator<T> Q1Q3(V[0]->element(), V[1]->element(), device_dofmaps[0], device_dofmaps[1],
+                       bcells, lcells);
 
   // From V1 to V0
   spdlog::warn("Creating Prolongation Operators");
