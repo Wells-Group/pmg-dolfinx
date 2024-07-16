@@ -49,7 +49,7 @@ __global__ void interpolate_Q1Q2(int N, const std::int32_t* cell_list, const std
 template <typename T>
 __global__ void interpolate_Q2Q1(int N, const std::int32_t* cell_list, const std::int32_t* Q1dofmap,
                                  int Q1_dofs_per_cell, const std::int32_t* Q2dofmap,
-                                 int Q2_dofs_per_cell, const T* valuesQ1, T* valuesQ2,
+                                 int Q2_dofs_per_cell, T* valuesQ1, const T* valuesQ2,
                                  const std::int32_t* Mptr, const std::int32_t* Mcols,
                                  const T* Mvals, const T* Q2mult)
 {
@@ -82,29 +82,27 @@ class Interpolator
 {
 public:
   // Set up interpolation from Q1 to Q2
-  // inp_element - element of input space
-  // out_element - element of output space
-  // inp_dofmap - dofmap of input space (on device)
-  // out_dofmap - dofmap of output space (on device)
+  // Q1_element - element of input space (Q1)
+  // Q2_element - element of output space (Q2)
+  // Q1_dofmap - dofmap of input space (on device)
+  // Q2_dofmap - dofmap of output space (on device)
   // l_cells - local cells, to interpolate immediately
   // b_cells - boundary cells, to interpolate after vector update
-  Interpolator(const basix::FiniteElement<T>& inp_element,
-               const basix::FiniteElement<T>& out_element, std::span<const std::int32_t> inp_dofmap,
-               std::span<const std::int32_t> out_dofmap, std::span<const std::int32_t> l_cells,
-               std::span<const std::int32_t> b_cells)
-      : input_dofmap(inp_dofmap), output_dofmap(out_dofmap), local_cells(l_cells),
-        boundary_cells(b_cells)
+  Interpolator(const basix::FiniteElement<T>& Q1_element, const basix::FiniteElement<T>& Q2_element,
+               std::span<const std::int32_t> Q1_dofmap, std::span<const std::int32_t> Q2_dofmap,
+               std::span<const std::int32_t> l_cells, std::span<const std::int32_t> b_cells)
+      : Q1_dofmap(Q1_dofmap), Q2_dofmap(Q2_dofmap), local_cells(l_cells), boundary_cells(b_cells)
   {
-    num_cell_dofs_Q1 = inp_element.dim();
-    num_cell_dofs_Q2 = out_element.dim();
+    num_cell_dofs_Q1 = Q1_element.dim();
+    num_cell_dofs_Q2 = Q2_element.dim();
 
     // Checks on dofmap shapes and sizes
-    assert(input_dofmap.size() % num_cell_dofs_Q1 == 0);
-    assert(output_dofmap.size() % num_cell_dofs_Q2 == 0);
-    assert(output_dofmap.size() / num_cell_dofs_Q2 == input_dofmap.size() / num_cell_dofs_Q1);
+    assert(Q1_dofmap.size() % num_cell_dofs_Q1 == 0);
+    assert(Q2_dofmap.size() % num_cell_dofs_Q2 == 0);
+    assert(Q2_dofmap.size() / num_cell_dofs_Q2 == Q1_dofmap.size() / num_cell_dofs_Q1);
 
     // Get local interpolation matrix and compress to CSR format
-    auto [mat, shape] = basix::compute_interpolation_operator(inp_element, out_element);
+    auto [mat, shape] = basix::compute_interpolation_operator(Q1_element, Q2_element);
     T tol = 1e-12;
     std::vector<std::int32_t> Mptr = {0};
     std::vector<std::int32_t> Mcolumns;
@@ -159,48 +157,49 @@ public:
     thrust::copy(Mvalues.begin(), Mvalues.end(), MvalT_device.begin());
 
     // Compute dofmap multiplicity
-    std::int32_t max_dof = *std::max_element(output_dofmap.begin(), output_dofmap.end());
+    std::int32_t max_dof = *std::max_element(Q2_dofmap.begin(), Q2_dofmap.end());
     std::vector<T> Q2count(max_dof + 1, 0);
-    for (std::int32_t q : output_dofmap)
-      Q2count[q] += 1.0;
+    for (std::int32_t dof : Q2_dofmap)
+      Q2count[dof] += 1.0;
     Q2mult.resize(Q2count.size());
     thrust::copy(Q2count.begin(), Q2count.end(), Q2mult.begin());
   }
 
   // Interpolate from input_values to output_values (both on device)
+  // Use this only for prolongation, i.e. coarse->fine interpolation
   template <typename Vector>
-  void interpolate(Vector& input_vector, Vector& output_vector)
+  void interpolate(Vector& Q1_vector, Vector& Q2_vector)
   {
     dolfinx::common::Timer tt("% Interpolate Kernel");
 
-    // Input vector is also changed by MPI vector update
-    T* input_values = input_vector.mutable_array().data();
-    T* output_values = output_vector.mutable_array().data();
+    // Input (Q1) vector is also changed by MPI vector update
+    T* Q1_values = Q1_vector.mutable_array().data();
+    T* Q2_values = Q2_vector.mutable_array().data();
 
     int ncells = local_cells.size();
     thrust::device_vector<std::int32_t> cell_list_d(local_cells.begin(), local_cells.end());
-    assert(ncells <= output_dofmap.size() / num_cell_dofs_Q2);
+    assert(ncells <= Q2_dofmap.size() / num_cell_dofs_Q2);
 
     dim3 block_size(256);
     dim3 grid_size((ncells + block_size.x - 1) / block_size.x);
 
-    // Start vector update of input_vector
-    input_vector.scatter_fwd_begin();
+    // Start vector update of Q1_vector
+    Q1_vector.scatter_fwd_begin();
 
     spdlog::info("From {} to {} on {} cells", num_cell_dofs_Q1, num_cell_dofs_Q2, ncells);
-    spdlog::info("Input dofmap size = {}, output dofmap size = {}", input_dofmap.size(),
-                 output_dofmap.size());
+    spdlog::info("Input dofmap size = {}, output dofmap size = {}", Q1_dofmap.size(),
+                 Q2_dofmap.size());
 
     interpolate_Q1Q2<T><<<grid_size, block_size, 0, 0>>>(
-        ncells, thrust::raw_pointer_cast(cell_list_d.data()), input_dofmap.data(), num_cell_dofs_Q1,
-        output_dofmap.data(), num_cell_dofs_Q2, input_values, output_values,
+        ncells, thrust::raw_pointer_cast(cell_list_d.data()), Q1_dofmap.data(), num_cell_dofs_Q1,
+        Q2_dofmap.data(), num_cell_dofs_Q2, Q1_values, Q2_values,
         thrust::raw_pointer_cast(Mptr_device.data()), thrust::raw_pointer_cast(Mcol_device.data()),
         thrust::raw_pointer_cast(Mval_device.data()));
 
     check_device_last_error();
 
     // Wait for vector update of input_vector to complete
-    input_vector.scatter_fwd_end();
+    Q1_vector.scatter_fwd_end();
 
     cell_list_d.resize(boundary_cells.size());
     thrust::copy(boundary_cells.begin(), boundary_cells.end(), cell_list_d.begin());
@@ -211,11 +210,71 @@ public:
                    num_cell_dofs_Q2, ncells);
 
       interpolate_Q1Q2<T><<<grid_size, block_size, 0, 0>>>(
-          ncells, thrust::raw_pointer_cast(cell_list_d.data()), input_dofmap.data(),
-          num_cell_dofs_Q1, output_dofmap.data(), num_cell_dofs_Q2, input_values, output_values,
+          ncells, thrust::raw_pointer_cast(cell_list_d.data()), Q1_dofmap.data(), num_cell_dofs_Q1,
+          Q2_dofmap.data(), num_cell_dofs_Q2, Q1_values, Q2_values,
           thrust::raw_pointer_cast(Mptr_device.data()),
           thrust::raw_pointer_cast(Mcol_device.data()),
           thrust::raw_pointer_cast(Mval_device.data()));
+    }
+
+    device_synchronize();
+    check_device_last_error();
+
+    spdlog::debug("Done mat-free interpolation");
+  }
+
+  template <typename Vector>
+  void reverse_interpolate(Vector& Q2_vector, Vector& Q1_vector)
+  {
+    spdlog::info("Reverse interpolate");
+
+    dolfinx::common::Timer tt("% Reverse interpolate Kernel");
+
+    // Input vector is also changed by MPI vector update
+    T* Q1_values = Q1_vector.mutable_array().data();
+    T* Q2_values = Q2_vector.mutable_array().data();
+
+    int ncells = local_cells.size();
+    thrust::device_vector<std::int32_t> cell_list_d(local_cells.begin(), local_cells.end());
+    assert(ncells <= output_dofmap.size() / num_cell_dofs_Q2);
+
+    dim3 block_size(256);
+    dim3 grid_size((ncells + block_size.x - 1) / block_size.x);
+
+    // Start vector update of input_vector
+    Q2_vector.scatter_fwd_begin();
+
+    spdlog::info("From {} to {} on {} cells", num_cell_dofs_Q2, num_cell_dofs_Q1, ncells);
+    spdlog::info("Input dofmap size = {}, output dofmap size = {}", Q2_dofmap.size(),
+                 Q1_dofmap.size());
+
+    Q1_vector.set(0.0);
+    interpolate_Q2Q1<T><<<grid_size, block_size, 0, 0>>>(
+        ncells, thrust::raw_pointer_cast(cell_list_d.data()), Q1_dofmap.data(), num_cell_dofs_Q1,
+        Q2_dofmap.data(), num_cell_dofs_Q2, Q1_values, Q2_values,
+        thrust::raw_pointer_cast(MptrT_device.data()),
+        thrust::raw_pointer_cast(McolT_device.data()),
+        thrust::raw_pointer_cast(MvalT_device.data()), thrust::raw_pointer_cast(Q2mult.data()));
+
+    check_device_last_error();
+
+    // Wait for vector update of input_vector to complete
+    Q2_vector.scatter_fwd_end();
+
+    cell_list_d.resize(boundary_cells.size());
+    thrust::copy(boundary_cells.begin(), boundary_cells.end(), cell_list_d.begin());
+    ncells = boundary_cells.size();
+    if (ncells > 0)
+    {
+      spdlog::info("From {} dofs/cell to {} on {} (boundary) cells", num_cell_dofs_Q1,
+                   num_cell_dofs_Q2, ncells);
+
+      interpolate_Q2Q1<T><<<grid_size, block_size, 0, 0>>>(
+          ncells, thrust::raw_pointer_cast(cell_list_d.data()), Q1_dofmap.data(), num_cell_dofs_Q1,
+          Q2_dofmap.data(), num_cell_dofs_Q2, Q1_values, Q2_values,
+          thrust::raw_pointer_cast(MptrT_device.data()),
+          thrust::raw_pointer_cast(McolT_device.data()),
+          thrust::raw_pointer_cast(MvalT_device.data()), thrust::raw_pointer_cast(Q2mult.data()));
     }
 
     device_synchronize();
@@ -239,8 +298,8 @@ private:
   thrust::device_vector<T> Q2mult;
 
   // Dofmaps (on device)
-  std::span<const std::int32_t> input_dofmap;
-  std::span<const std::int32_t> output_dofmap;
+  std::span<const std::int32_t> Q1_dofmap;
+  std::span<const std::int32_t> Q2_dofmap;
 
   // List of local cells, which can be updated before a Vector update
   std::span<const std::int32_t> local_cells;

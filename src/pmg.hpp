@@ -94,7 +94,8 @@ public:
       spdlog::info("After initial smooth: rnorm = {}", acc::norm(*_r[i]));
 
       // Restrict residual from level i to level (i - 1)
-      (*_interpolation[i - 1])(*_r[i], *_b[i - 1], true);
+      _matfree_interpolation[i - 1]->reverse_interpolate(*_r[i], *_b[i - 1]);
+      //(*_interpolation[i - 1])(*_r[i], *_b[i - 1], true);
     }
 
     spdlog::info("Level 0");
