@@ -335,7 +335,7 @@ void solve(std::shared_ptr<mesh::Mesh<double>> mesh, bool use_amg, bool output_t
   // Interpolator from Q1 to Q3
   auto Q1Q3 = std::make_shared<Interpolator<T>>(V[0]->element()->basix_element(),
                                                 V[1]->element()->basix_element(), device_dofmaps[0],
-                                                device_dofmaps[1], bcells, lcells);
+                                                device_dofmaps[1], lcells, bcells);
   std::vector<std::shared_ptr<Interpolator<T>>> matfree_interpolators = {Q1Q3};
 
   // From V1 to V0

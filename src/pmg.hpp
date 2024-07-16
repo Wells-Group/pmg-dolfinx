@@ -126,10 +126,10 @@ public:
       spdlog::info("Level {}", i + 1);
 
       // [coarse->fine] Prolong correction
-      if (_matfree_interpolation[i])
-        _matfree_interpolation[i]->interpolate(*_u[i], *_du[i + 1]);
-      else
-        (*_interpolation[i])(*_u[i], *_du[i + 1], false);
+      //      if (_matfree_interpolation[i])
+      _matfree_interpolation[i]->interpolate(*_u[i], *_du[i + 1]);
+      //      else
+      //        (*_interpolation[i])(*_u[i], *_du[i + 1], false);
 
       spdlog::info("norm(_u[{}]) = {}", i, acc::norm(*_u[i]));
       spdlog::info("norm(_du[{}]) = {}", i + 1, acc::norm(*_du[i + 1]));

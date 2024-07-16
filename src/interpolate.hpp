@@ -1,13 +1,12 @@
 #include <basix/finite-element.h>
 #include <basix/interpolation.h>
 #include <cstdint>
-#include <hip/hip_runtime.h>
 #include <thrust/device_vector.h>
 
 namespace
 {
 
-// Interpolate cells from Q1 to Q2
+// Interpolate cells from Q1 to Q2 (prolongation) coarse->fine operator
 // Input: N - number of cells
 //        Q1dofs - dofmap Q1: list of shape N x Q1_dofs_per_cell
 //        Q1_dofs_per_cell: int
@@ -29,19 +28,49 @@ __global__ void interpolate_Q1Q2(int N, const std::int32_t* cell_list, const std
 {
   // Calculate the cell index for this thread.
   int i = blockIdx.x * blockDim.x + threadIdx.x;
-  // Check if the row index is out of bounds.
+  // Check if the cell index is out of bounds.
   if (i < N)
   {
     const std::int32_t cell = cell_list[i];
-    const std::int32_t* cellQ1 = Q1dofmap + cell * Q1_dofs_per_cell;
-    const std::int32_t* cellQ2 = Q2dofmap + cell * Q2_dofs_per_cell;
+    const std::int32_t* dofsQ1 = Q1dofmap + cell * Q1_dofs_per_cell;
+    const std::int32_t* dofsQ2 = Q2dofmap + cell * Q2_dofs_per_cell;
 
     for (std::int32_t j = 0; j < Q2_dofs_per_cell; j++)
     {
       T vj = 0;
       for (std::int32_t k = Mptr[j]; k < Mptr[j + 1]; k++)
-        vj += Mvals[k] * valuesQ1[cellQ1[Mcols[k]]];
-      valuesQ2[cellQ2[j]] = vj;
+        vj += Mvals[k] * valuesQ1[dofsQ1[Mcols[k]]];
+      valuesQ2[dofsQ2[j]] = vj;
+    }
+  }
+}
+
+// Reverse interpolation (restriction) fine->coarse operator
+template <typename T>
+__global__ void interpolate_Q2Q1(int N, const std::int32_t* cell_list, const std::int32_t* Q1dofmap,
+                                 int Q1_dofs_per_cell, const std::int32_t* Q2dofmap,
+                                 int Q2_dofs_per_cell, const T* valuesQ1, T* valuesQ2,
+                                 const std::int32_t* Mptr, const std::int32_t* Mcols,
+                                 const T* Mvals, const T* Q2mult)
+{
+  // Calculate the cell index for this thread.
+  int i = blockIdx.x * blockDim.x + threadIdx.x;
+  // Check if the cell index is out of bounds.
+  if (i < N)
+  {
+    const std::int32_t cell = cell_list[i];
+    const std::int32_t* dofsQ1 = Q1dofmap + cell * Q1_dofs_per_cell;
+    const std::int32_t* dofsQ2 = Q2dofmap + cell * Q2_dofs_per_cell;
+
+    for (std::int32_t j = 0; j < Q1_dofs_per_cell; j++)
+    {
+      T vj = 0;
+      for (std::int32_t k = Mptr[j]; k < Mptr[j + 1]; k++)
+      {
+        std::int32_t dofQ2 = dofsQ2[Mcols[k]];
+        vj += Mvals[k] * valuesQ2[dofQ2] / Q2mult[dofQ2];
+      }
+      atomicAdd(&valuesQ1[dofsQ1[j]], vj);
     }
   }
 }
@@ -57,14 +86,14 @@ public:
   // out_element - element of output space
   // inp_dofmap - dofmap of input space (on device)
   // out_dofmap - dofmap of output space (on device)
-  // b_cells - boundary cells, to interpolate after vector update
   // l_cells - local cells, to interpolate immediately
+  // b_cells - boundary cells, to interpolate after vector update
   Interpolator(const basix::FiniteElement<T>& inp_element,
                const basix::FiniteElement<T>& out_element, std::span<const std::int32_t> inp_dofmap,
-               std::span<const std::int32_t> out_dofmap, std::span<const std::int32_t> b_cells,
-               std::span<const std::int32_t> l_cells)
-      : input_dofmap(inp_dofmap), output_dofmap(out_dofmap), boundary_cells(b_cells),
-        local_cells(l_cells)
+               std::span<const std::int32_t> out_dofmap, std::span<const std::int32_t> l_cells,
+               std::span<const std::int32_t> b_cells)
+      : input_dofmap(inp_dofmap), output_dofmap(out_dofmap), local_cells(l_cells),
+        boundary_cells(b_cells)
   {
     num_cell_dofs_Q1 = inp_element.dim();
     num_cell_dofs_Q2 = out_element.dim();
@@ -77,7 +106,7 @@ public:
     // Get local interpolation matrix and compress to CSR format
     auto [mat, shape] = basix::compute_interpolation_operator(inp_element, out_element);
     T tol = 1e-12;
-    std::vector<std::int32_t> Mrow_ptr = {0};
+    std::vector<std::int32_t> Mptr = {0};
     std::vector<std::int32_t> Mcolumns;
     std::vector<T> Mvalues;
     for (std::size_t row = 0; row < shape[0]; ++row)
@@ -91,17 +120,51 @@ public:
           Mvalues.push_back(val);
         }
       }
-      Mrow_ptr.push_back(Mcolumns.size());
+      Mptr.push_back(Mcolumns.size());
     }
-    assert((num_cell_dofs_Q2 + 1) == Mrow_ptr.size());
+    assert((num_cell_dofs_Q2 + 1) == Mptr.size());
 
     // Copy CSR to device
-    Mptr_device.resize(Mrow_ptr.size());
-    thrust::copy(Mrow_ptr.begin(), Mrow_ptr.end(), Mptr_device.begin());
+    Mptr_device.resize(Mptr.size());
+    thrust::copy(Mptr.begin(), Mptr.end(), Mptr_device.begin());
     Mcol_device.resize(Mcolumns.size());
     thrust::copy(Mcolumns.begin(), Mcolumns.end(), Mcol_device.begin());
     Mval_device.resize(Mvalues.size());
     thrust::copy(Mvalues.begin(), Mvalues.end(), Mval_device.begin());
+
+    // Create transpose matrix
+    Mptr.clear();
+    Mptr.push_back(0);
+    Mcolumns.clear();
+    Mvalues.clear();
+    for (std::size_t row = 0; row < shape[1]; ++row)
+    {
+      for (std::size_t col = 0; col < shape[0]; ++col)
+      {
+        T val = mat[col * shape[1] + row];
+        if (std::abs(val) > tol)
+        {
+          Mcolumns.push_back(col);
+          Mvalues.push_back(val);
+        }
+      }
+      Mptr.push_back(Mcolumns.size());
+    }
+    // Copy CSR to device (transpose)
+    MptrT_device.resize(Mptr.size());
+    thrust::copy(Mptr.begin(), Mptr.end(), MptrT_device.begin());
+    McolT_device.resize(Mcolumns.size());
+    thrust::copy(Mcolumns.begin(), Mcolumns.end(), McolT_device.begin());
+    MvalT_device.resize(Mvalues.size());
+    thrust::copy(Mvalues.begin(), Mvalues.end(), MvalT_device.begin());
+
+    // Compute dofmap multiplicity
+    std::int32_t max_dof = *std::max_element(output_dofmap.begin(), output_dofmap.end());
+    std::vector<T> Q2count(max_dof + 1, 0);
+    for (std::int32_t q : output_dofmap)
+      Q2count[q] += 1.0;
+    Q2mult.resize(Q2count.size());
+    thrust::copy(Q2count.begin(), Q2count.end(), Q2mult.begin());
   }
 
   // Interpolate from input_values to output_values (both on device)
@@ -166,18 +229,23 @@ private:
   int num_cell_dofs_Q1;
   int num_cell_dofs_Q2;
 
-  // Per-cell CSR interpolation matrix (on device)
+  // Per-cell CSR interpolation matrix and transpose (on device)
   thrust::device_vector<std::int32_t> Mcol_device, Mptr_device;
   thrust::device_vector<T> Mval_device;
+  thrust::device_vector<std::int32_t> McolT_device, MptrT_device;
+  thrust::device_vector<T> MvalT_device;
+
+  // Multiplicity of dofs in Q2
+  thrust::device_vector<T> Q2mult;
 
   // Dofmaps (on device)
   std::span<const std::int32_t> input_dofmap;
   std::span<const std::int32_t> output_dofmap;
 
+  // List of local cells, which can be updated before a Vector update
+  std::span<const std::int32_t> local_cells;
+
   // List of cells which are in the "boundary region" which need to wait for a Vector update
   // before interpolation (on device)
   std::span<const std::int32_t> boundary_cells;
-
-  // List of local cells, which can be updated before a Vector update
-  std::span<const std::int32_t> local_cells;
 };
