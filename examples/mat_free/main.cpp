@@ -53,7 +53,7 @@ int main(int argc, char* argv[])
     MPI_Comm_rank(comm, &rank);
     MPI_Comm_size(comm, &size);
 
-    const int order = 3;
+    const int order = 4;
     double nx_approx = (std::pow(ndofs * size, 1.0 / 3.0) - 1) / order;
     std::int64_t n0 = static_cast<std::int64_t>(nx_approx);
     std::array<std::int64_t, 3> nx = {n0, n0, n0};
@@ -99,9 +99,10 @@ int main(int argc, char* argv[])
     }
 
     // Quadrature points and weights on hex (3D)
+    std::map<int, int> Qdegree = {{2, 3}, {3, 4}, {4, 6}, {5, 8}};
     auto [Gpoints, Gweights] = basix::quadrature::make_quadrature<T>(
         basix::quadrature::type::gll, basix::cell::type::hexahedron, basix::polyset::type::standard,
-        order + 1);
+        Qdegree[order]);
 
     auto V = std::make_shared<fem::FunctionSpace<T>>(fem::create_functionspace(mesh, *element));
     auto [lcells, bcells] = compute_boundary_cells(V);
@@ -236,8 +237,9 @@ int main(int argc, char* argv[])
 
     // Create matrix free operator
     spdlog::info("Create MatFreeLaplacian");
-    acc::MatFreeLaplacian<T> op(3, constants_d_span, dofmap_d_span, xgeom_d_span, xdofmap_d_span,
-                                dphi_d_span, Gweights_d_span, lcells, bcells, bc_marker_d_span);
+    acc::MatFreeLaplacian<T> op(order, constants_d_span, dofmap_d_span, xgeom_d_span,
+                                xdofmap_d_span, dphi_d_span, Gweights_d_span, lcells, bcells,
+                                bc_marker_d_span);
 
     la::Vector<T> b(map, 1);
     b.set(1.0);

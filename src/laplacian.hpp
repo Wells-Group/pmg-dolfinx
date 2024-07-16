@@ -330,6 +330,7 @@ public:
     spdlog::debug("dphi_geometry size {}", dphi_geometry.size());
     spdlog::debug("G_weights size {}", G_weights.size());
     spdlog::debug("cell_list_d size {}", cell_list_d.size());
+    spdlog::debug("Calling geometry_computation [{}]", P);
 
     std::size_t shm_size = 24 * sizeof(T); // coordinate size (8x3)
     geometry_computation<T, P><<<grid_size, block_size, shm_size, 0>>>(
@@ -358,6 +359,7 @@ public:
       dim3 grid_size(cell_list_d.size());
       std::size_t shm_size = 4 * p1cubed * sizeof(T);
 
+      spdlog::debug("Calling stiffness_operator on lcells [{}]", lcells.size());
       T* x = in.mutable_array().data();
       T* y = out.mutable_array().data();
       stiffness_operator<T, P><<<grid_size, block_size, shm_size, 0>>>(
@@ -425,6 +427,13 @@ public:
       impl_operator<2>(in, out);
     else if (degree == 3)
       impl_operator<3>(in, out);
+    else if (degree == 4)
+      impl_operator<4>(in, out);
+    else if (degree == 5)
+      impl_operator<5>(in, out);
+    else
+      throw std::runtime_error("Unsupported degree");
+
     spdlog::debug("Mat free operator end");
   }
 
