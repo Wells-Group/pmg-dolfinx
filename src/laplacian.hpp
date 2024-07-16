@@ -425,6 +425,13 @@ public:
       impl_operator<2>(in, out);
     else if (degree == 3)
       impl_operator<3>(in, out);
+    else if (degree == 4)
+      impl_operator<4>(in, out);
+    else if (degree == 5)
+      impl_operator<5>(in, out);
+    else
+      // FIXME
+      throw std::runtime_error("Degree not supported");
     spdlog::debug("Mat free operator end");
   }
 

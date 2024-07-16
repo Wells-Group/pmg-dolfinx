@@ -20,6 +20,8 @@ v = TestFunction(V)
 f = Coefficient(V)
 kappa = Constant(mesh)
 
-dx = Measure("dx", metadata={"quadrature_rule": "GLL", "quadrature_degree": 4})
+deg_to_quad = {2: 3, 3: 4, 4: 6, 5: 8}
+dx = Measure("dx", metadata={"quadrature_rule": "GLL",
+                             "quadrature_degree": deg_to_quad[degree]})
 a = kappa * inner(grad(u), grad(v)) * dx
 L = inner(f, v) * dx

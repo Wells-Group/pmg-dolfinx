@@ -99,9 +99,10 @@ int main(int argc, char* argv[])
     }
 
     // Quadrature points and weights on hex (3D)
+    std::map<int, int> Qdegree = {{2, 3}, {3, 4}, {4, 6}, {5, 8}};
     auto [Gpoints, Gweights] = basix::quadrature::make_quadrature<T>(
         basix::quadrature::type::gll, basix::cell::type::hexahedron, basix::polyset::type::standard,
-        order + 1);
+        Qdegree[order]);
 
     auto V = std::make_shared<fem::FunctionSpace<T>>(fem::create_functionspace(mesh, *element));
     auto [lcells, bcells] = compute_boundary_cells(V);
@@ -236,7 +237,7 @@ int main(int argc, char* argv[])
 
     // Create matrix free operator
     spdlog::info("Create MatFreeLaplacian");
-    acc::MatFreeLaplacian<T> op(3, constants_d_span, dofmap_d_span, xgeom_d_span, xdofmap_d_span,
+    acc::MatFreeLaplacian<T> op(order, constants_d_span, dofmap_d_span, xgeom_d_span, xdofmap_d_span,
                                 dphi_d_span, Gweights_d_span, lcells, bcells, bc_marker_d_span);
 
     la::Vector<T> b(map, 1);
