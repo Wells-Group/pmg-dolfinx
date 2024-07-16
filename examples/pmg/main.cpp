@@ -329,24 +329,19 @@ void solve(std::shared_ptr<mesh::Mesh<double>> mesh, bool use_amg, bool output_t
     smoothers[i]->set_max_iterations(2);
   }
 
-  // Create Prolongation operator
-  std::vector<std::shared_ptr<acc::MatrixOperator<T>>> prolongation(V.size() - 1);
+  // Create Matrix-Free Interpolators
+  spdlog::warn("Creating Interpolation Operators");
+  std::vector<std::shared_ptr<Interpolator<T>>> matfree_interpolators(V.size() - 1);
 
-  // Interpolator from Q1 to Q3
-  auto Q1Q3 = std::make_shared<Interpolator<T>>(V[0]->element()->basix_element(),
-                                                V[1]->element()->basix_element(), device_dofmaps[0],
-                                                device_dofmaps[1], lcells, bcells);
-  std::vector<std::shared_ptr<Interpolator<T>>> matfree_interpolators = {Q1Q3};
-
-  // From V1 to V0
-  spdlog::warn("Creating Prolongation Operators");
   for (int i = 0; i < V.size() - 1; ++i)
-    prolongation[i] = std::make_shared<acc::MatrixOperator<T>>(*V[i], *V[i + 1]);
+  {
+    matfree_interpolators[i] = std::make_shared<Interpolator<T>>(
+        V[i]->element()->basix_element(), V[i + 1]->element()->basix_element(), device_dofmaps[i],
+        device_dofmaps[i + 1], lcells, bcells);
+  }
 
-  using CSRType = acc::MatrixOperator<T>;
   using SolverType = acc::Chebyshev<DeviceVector>;
-
-  using PMG = acc::MultigridPreconditioner<DeviceVector, FineOperator, CSRType, CSRType, SolverType,
+  using PMG = acc::MultigridPreconditioner<DeviceVector, FineOperator, SolverType,
                                            CoarseSolverType<T>, Interpolator<T>>;
 
   spdlog::info("Create PMG");
@@ -356,10 +351,7 @@ void solve(std::shared_ptr<mesh::Mesh<double>> mesh, bool use_amg, bool output_t
   spdlog::info("Set Coarse Solver");
   pmg.set_coarse_solver(coarse_solver);
 
-  // Sets CSR matrices or matrix-free kernels to do interpolation
-  pmg.set_interpolators(prolongation);
-
-  //
+  // Sets matrix-free kernels to do interpolation
   pmg.set_interpolators(matfree_interpolators);
 
   // Create solution vector
