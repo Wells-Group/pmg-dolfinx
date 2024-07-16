@@ -6,19 +6,18 @@
 namespace
 {
 
-// Interpolate cells from Q1 to Q2 (prolongation) coarse->fine operator
-// Input: N - number of cells
-//        Q1dofs - dofmap Q1: list of shape N x Q1_dofs_per_cell
-//        Q1_dofs_per_cell: int
-//        Q2dofs - dofmap Q2: list of shape N x Q2_dofs_per_cell
-//        Q2_dofs_per_cell: int
-//        valuesQ1: vector of values for Q1
-//        valuesQ2: vector of values for Q2
-//        Mptr: CSR matrix row offsets for local interpolation matrix,
-//          number of entries = Q2_dofs_per_cell + 1
-//        Mcols: CSR matrix columns for local interpolation matrix
-//        Mvals: CSR matrix values for local interpolation matrix
-// Output: vector valuesQ2
+/// @brief Interpolate cells from Q1 to Q2 (prolongation) coarse->fine operator
+/// @param N - number of cells
+/// @param cell_list: list of cell indices of length N
+/// @param Q1dofmap: list of shape N x Q1_dofs_per_cell
+/// @param Q1_dofs_per_cell: int
+/// @param Q2dofmap: list of shape N x Q2_dofs_per_cell
+/// @param Q2_dofs_per_cell: int
+/// @param valuesQ1: vector of values for Q1 (input)
+/// @param valuesQ2: vector of values for Q2 (output)
+/// @param Mptr: CSR matrix row offsets for local interpolation matrix (size Q2_dofs_per_cell + 1)
+/// @param Mcols: CSR matrix columns for local interpolation matrix
+/// @param Mvals: CSR matrix values for local interpolation matrix
 template <typename T>
 __global__ void interpolate_Q1Q2(int N, const std::int32_t* cell_list, const std::int32_t* Q1dofmap,
                                  int Q1_dofs_per_cell, const std::int32_t* Q2dofmap,
@@ -45,7 +44,19 @@ __global__ void interpolate_Q1Q2(int N, const std::int32_t* cell_list, const std
   }
 }
 
-// Reverse interpolation (restriction) fine->coarse operator
+/// @brief Interpolate cells from Q2 to Q1 (restriction) fine->coarse operator
+/// @param N - number of cells
+/// @param cell_list: list of cell indices of length N
+/// @param Q1dofmap: list of shape N x Q1_dofs_per_cell
+/// @param Q1_dofs_per_cell: int
+/// @param Q2dofmap: list of shape N x Q2_dofs_per_cell
+/// @param Q2_dofs_per_cell: int
+/// @param valuesQ1: vector of values for Q1 (output)
+/// @param valuesQ2: vector of values for Q2 (input)
+/// @param Mptr: CSR matrix row offsets for local interpolation matrix (size Q1_dofs_per_cell + 1)
+/// @param Mcols: CSR matrix columns for local interpolation matrix
+/// @param Mvals: CSR matrix values for local interpolation matrix
+/// @note CSR matrix data is the transpose of the data used for interpolate_Q1Q2
 template <typename T>
 __global__ void interpolate_Q2Q1(int N, const std::int32_t* cell_list, const std::int32_t* Q1dofmap,
                                  int Q1_dofs_per_cell, const std::int32_t* Q2dofmap,
@@ -77,17 +88,19 @@ __global__ void interpolate_Q2Q1(int N, const std::int32_t* cell_list, const std
 
 } // namespace
 
+/// @brief Matrix-free Interpolator between two P-levels
+///
 template <typename T>
 class Interpolator
 {
 public:
-  // Set up interpolation from Q1 to Q2
-  // Q1_element - element of input space (Q1)
-  // Q2_element - element of output space (Q2)
-  // Q1_dofmap - dofmap of input space (on device)
-  // Q2_dofmap - dofmap of output space (on device)
-  // l_cells - local cells, to interpolate immediately
-  // b_cells - boundary cells, to interpolate after vector update
+  /// @brief Set up interpolator from coarse space Q1 to fine space Q2
+  /// @param Q1_element - element of coarse space (Q1)
+  /// @param  Q2_element - element of fine space (Q2)
+  /// @param Q1_dofmap - dofmap Q1 (on device)
+  /// @param Q2_dofmap - dofmap Q2 (on device)
+  /// @param  l_cells - local cells, to interpolate immediately
+  /// @param b_cells - boundary cells, to interpolate after vector update
   Interpolator(const basix::FiniteElement<T>& Q1_element, const basix::FiniteElement<T>& Q2_element,
                std::span<const std::int32_t> Q1_dofmap, std::span<const std::int32_t> Q2_dofmap,
                std::span<const std::int32_t> l_cells, std::span<const std::int32_t> b_cells)
@@ -165,8 +178,10 @@ public:
     thrust::copy(Q2count.begin(), Q2count.end(), Q2mult.begin());
   }
 
-  // Interpolate from input_values to output_values (both on device)
-  // Use this only for prolongation, i.e. coarse->fine interpolation
+  /// @brief Interpolate from input_values to output_values (both on device)
+  /// Prolongation: i.e. coarse->fine (Q1->Q2) interpolation
+  /// @param Q1_vector DeviceVector containing input data
+  /// @param Q2_vector DeviceVector for output data
   template <typename Vector>
   void interpolate(Vector& Q1_vector, Vector& Q2_vector)
   {
@@ -223,6 +238,10 @@ public:
     spdlog::debug("Done mat-free interpolation");
   }
 
+  /// @brief Interpolate from input values to output values (both on device)
+  /// Restriction: fine->coarse (Q2->Q1) interpolation
+  /// @param Q2_vector DeviceVector containing input data
+  /// @param Q1_vector DeviceVector for output data
   template <typename Vector>
   void reverse_interpolate(Vector& Q2_vector, Vector& Q1_vector)
   {
