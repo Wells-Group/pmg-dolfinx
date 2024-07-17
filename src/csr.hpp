@@ -166,7 +166,6 @@ public:
 
     // FIXME: should this be mat_add or mat_set?
     fem::interpolation_matrix<T>(V0, V1, _A->mat_set_values());
-    _A->scatter_rev();
 
     // Create HIP/CUDA matrix
     _col_map = std::make_shared<const common::IndexMap>(pattern.column_index_map());
