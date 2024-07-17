@@ -34,7 +34,7 @@ int main(int argc, char* argv[])
   desc.add_options()("help,h", "print usage message")(
       "ndofs", po::value<std::size_t>()->default_value(343), "number of dofs per rank")(
       "mat_comp", po::bool_switch()->default_value(false), "Compare result to matrix operator")(
-      "batch_size", po::value<std::size_t>()->default_value(16384), "The geometry batch size. Set to 0 to precompute");
+      "batch_size", po::value<std::size_t>()->default_value(0), "The geometry batch size. Set to 0 to precompute");
 
   po::variables_map vm;
   po::store(po::command_line_parser(argc, argv).options(desc).allow_unregistered().run(), vm);
