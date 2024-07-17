@@ -320,6 +320,32 @@ public:
     thrust::copy(lcells.begin(), lcells.end(), lcells_device.begin());
     bcells_device.resize(bcells.size());
     thrust::copy(bcells.begin(), bcells.end(), bcells_device.begin());
+
+    // If we're not batching the geomery, precompute it
+    if (batch_size == 0)
+    {
+      // FIXME Store cells and local/ghost offsets instead to avoid this?
+      spdlog::info("Precomputing geometry");
+      thrust::device_vector<std::int32_t> cells_d(lcells_device.size() + bcells_device.size());
+      thrust::copy(lcells_device.begin(), lcells_device.end(), cells_d.begin());
+      thrust::copy(bcells_device.begin(), bcells_device.end(), cells_d.begin() + lcells_device.size());
+      std::span<std::int32_t> cell_list_d(thrust::raw_pointer_cast(cells_d.data()), cells_d.size());
+
+      // FIXME Tidy
+      if (degree == 1)
+        compute_geometry<1>(cell_list_d);
+      else if (degree == 2)
+        compute_geometry<2>(cell_list_d);
+      else if (degree == 3)
+        compute_geometry<3>(cell_list_d);
+      else if (degree == 4)
+        compute_geometry<4>(cell_list_d);
+      else if (degree == 5)
+        compute_geometry<5>(cell_list_d);
+      else
+        throw std::runtime_error("Unsupported degree");
+      device_synchronize();
+    }
   }
 
   // Compute weighted geometry data on GPU
@@ -362,10 +388,12 @@ public:
                                    (i_next - i));
         i = i_next;
 
-        spdlog::debug("Calling compute_geometry on local cells [{}]", cell_list_d.size());
-
-        compute_geometry<P>(cell_list_d);
-        device_synchronize();
+        if (batch_size > 0)
+        {
+          spdlog::debug("Calling compute_geometry on local cells [{}]", cell_list_d.size());
+          compute_geometry<P>(cell_list_d);
+          device_synchronize();
+        }
 
         dim3 block_size(P + 1, P + 1, P + 1);
         int p1cubed = (P + 1) * (P + 1) * (P + 1);
@@ -404,8 +432,11 @@ public:
       std::span<int> cell_list_d(thrust::raw_pointer_cast(bcells_device.data()),
                                  bcells_device.size());
 
-      compute_geometry<P>(cell_list_d);
-      device_synchronize();
+      if (batch_size > 0)
+      {
+        compute_geometry<P>(cell_list_d);
+        device_synchronize();
+      }
 
       dim3 block_size(P + 1, P + 1, P + 1);
       int p1cubed = (P + 1) * (P + 1) * (P + 1);
