@@ -181,8 +181,12 @@ public:
     spdlog::warn("Max column = {}", *std::max_element(_A->cols().begin(), _A->cols().end()));
 
     T norm = 0.0;
-    for (T v : _A->values())
-      norm += v * v;
+    auto v = _A->values();
+    for (int i = 0; i < nnz; ++i)
+      norm += v[i] * v[i];
+
+    double global_norm = 0;
+    MPI_Allreduce(&norm, &global_norm, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
     spdlog::info("A interp norm = {}", std::sqrt(norm));
 
     _row_ptr = thrust::device_vector<std::int32_t>(num_rows + 1);
