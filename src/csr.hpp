@@ -55,6 +55,58 @@ __global__ void spmvT_impl(int N, const T* values, const std::int32_t* row_begin
 
 namespace dolfinx::acc
 {
+
+template <typename T>
+std::vector<T>
+compute_matrix_inv_diag(std::shared_ptr<fem::Form<T, T>> a,
+                        const std::vector<std::shared_ptr<const fem::DirichletBC<T, double>>>& bcs)
+{
+  dolfinx::common::Timer t0("~ compute Matrix diagonal");
+
+  if (a->rank() != 2)
+    throw std::runtime_error("Form should have rank be 2.");
+
+  auto V = a->function_spaces()[0];
+  auto _row_map = V->dofmap()->index_map;
+  std::vector<T> diag(_row_map->size_local());
+
+  auto vec_add_values = [&diag](std::span<const std::int32_t> rows,
+                                std::span<const std::int32_t> cols, std::span<const T> data)
+  {
+    int nr = rows.size();
+    int nc = cols.size();
+    for (int i = 0; i < nr; ++i)
+      for (int j = 0; j < nc; ++j)
+        if (rows[i] == cols[j])
+          diag[rows[i]] += data[i * nc + j];
+    return 0;
+  };
+
+  auto vec_set_values = [&diag](std::span<const std::int32_t> rows,
+                                std::span<const std::int32_t> cols, std::span<const T> data)
+  {
+    int nr = rows.size();
+    int nc = cols.size();
+    for (int i = 0; i < nr; ++i)
+      for (int j = 0; j < nc; ++j)
+        if (rows[i] == cols[j])
+          diag[rows[i]] = data[i * nc + j];
+    return 0;
+  };
+
+  fem::assemble_matrix(vec_add_values, *a, bcs);
+  // diag.scatter_rev();
+  fem::set_diagonal<T>(vec_set_values, *V, bcs, T(1.0));
+
+  for (auto& v : diag)
+  {
+    std::cout << v << " ";
+    v = 1.0 / v;
+  }
+
+  return diag;
+}
+
 template <typename T>
 class MatrixOperator
 {

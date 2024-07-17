@@ -269,13 +269,13 @@ void solve(std::shared_ptr<mesh::Mesh<double>> mesh, bool use_amg, bool output_t
       spdlog::info("Create operator on V[{}]", i);
       operators[i] = std::make_shared<acc::MatFreeLaplacian<T>>(
           order[i], device_constants, device_dofmaps[i], geom_x, geom_x_dofmap,
-          geometry_dphi_d_span[i], Gweights_d_span[i], lcells, bcells, bc_marker_d_span[i]);
+          geometry_dphi_d_span[i], Gweights_d_span[i], lcells, bcells, bc_marker_d_span[i], 32768);
 
       // FIXME: do this better
       // Compute CSR matrix, to get diagonal for MatFree
-      acc::MatrixOperator<T> A(a_i, bc_i);
+      std::vector<T> diag_inv_vec = acc::compute_matrix_inv_diag(a_i, bc_i);
       DeviceVector diag_inv(maps[i], 1);
-      A.get_diag_inverse(diag_inv);
+      thrust::copy(diag_inv_vec.begin(), diag_inv_vec.end(), diag_inv.mutable_array().begin());
       operators[i]->set_diag_inverse(diag_inv);
 
       device_synchronize();

@@ -328,7 +328,8 @@ public:
       spdlog::info("Precomputing geometry");
       thrust::device_vector<std::int32_t> cells_d(lcells_device.size() + bcells_device.size());
       thrust::copy(lcells_device.begin(), lcells_device.end(), cells_d.begin());
-      thrust::copy(bcells_device.begin(), bcells_device.end(), cells_d.begin() + lcells_device.size());
+      thrust::copy(bcells_device.begin(), bcells_device.end(),
+                   cells_d.begin() + lcells_device.size());
       std::span<std::int32_t> cell_list_d(thrust::raw_pointer_cast(cells_d.data()), cells_d.size());
 
       // FIXME Tidy
@@ -462,6 +463,7 @@ public:
   template <typename Vector>
   void operator()(Vector& in, Vector& out)
   {
+    dolfinx::common::Timer top("% Matfree operator");
     spdlog::debug("Mat free operator start");
     out.set(T{0.0});
 
