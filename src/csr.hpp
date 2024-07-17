@@ -228,13 +228,21 @@ public:
       int num_rows = _row_map->size_local();
       dim3 block_size(256);
       dim3 grid_size((num_rows + block_size.x - 1) / block_size.x);
-
-      spmvT_impl<T><<<grid_size, block_size, 0, 0>>>(
-          num_rows, thrust::raw_pointer_cast(_values.data()),
-          thrust::raw_pointer_cast(_row_ptr.data()), thrust::raw_pointer_cast(_row_ptr.data()) + 1,
-          thrust::raw_pointer_cast(_cols.data()), _x, _y);
+      x.scatter_fwd_begin();
+      spmvT_impl<T>
+          <<<grid_size, block_size, 0, 0>>>(num_rows, thrust::raw_pointer_cast(_values.data()),
+                                            thrust::raw_pointer_cast(_row_ptr.data()),
+                                            thrust::raw_pointer_cast(_off_diag_offset.data()),
+                                            thrust::raw_pointer_cast(_cols.data()), _x, _y);
       check_device_last_error();
-      y.scatter_rev();
+      x.scatter_fwd_end();
+
+      spmvT_impl<T>
+          <<<grid_size, block_size, 0, 0>>>(num_rows, thrust::raw_pointer_cast(_values.data()),
+                                            thrust::raw_pointer_cast(_off_diag_offset.data()),
+                                            thrust::raw_pointer_cast(_row_ptr.data()) + 1,
+                                            thrust::raw_pointer_cast(_cols.data()), _x, _y);
+      check_device_last_error();
     }
     else
     {

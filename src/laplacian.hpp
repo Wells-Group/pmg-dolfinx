@@ -290,10 +290,11 @@ public:
                    std::span<const std::int32_t> dofmap, std::span<const T> xgeom,
                    std::span<const std::int32_t> geometry_dofmap, std::span<const T> dphi_geometry,
                    std::span<const T> G_weights, const std::vector<int>& lcells,
-                   const std::vector<int>& bcells, std::span<const std::int8_t> bc_marker)
+                   const std::vector<int>& bcells, std::span<const std::int8_t> bc_marker,
+                   std::size_t batch_size = 0)
       : degree(degree), cell_constants(coefficients), cell_dofmap(dofmap), xgeom(xgeom),
         geometry_dofmap(geometry_dofmap), dphi_geometry(dphi_geometry), G_weights(G_weights),
-        bc_marker(bc_marker), lcells(lcells), bcells(bcells)
+        bc_marker(bc_marker), lcells(lcells), bcells(bcells), batch_size(batch_size)
   {
     std::map<int, int> Qdegree = {{2, 3}, {3, 4}, {4, 6}, {5, 8}};
 
@@ -349,25 +350,36 @@ public:
     if (!lcells.empty())
     {
       cell_list_d.resize(lcells.size());
-      thrust::copy(lcells.begin(), lcells.end(), cell_list_d.begin());
+      std::size_t i = 0;
+      std::size_t i_batch_size = (batch_size == 0) ? lcells.size() : batch_size;
+      while (i < lcells.size())
+      {
+        std::size_t i_next = std::min(lcells.size(), i + i_batch_size);
+        cell_list_d.resize(i_next - i);
 
-      compute_geometry<P>();
-      device_synchronize();
+        thrust::copy(std::next(lcells.begin(), i), std::next(lcells.begin(), i_next),
+                     cell_list_d.begin());
+        i = i_next;
 
-      dim3 block_size(P + 1, P + 1, P + 1);
-      int p1cubed = (P + 1) * (P + 1) * (P + 1);
-      dim3 grid_size(cell_list_d.size());
-      std::size_t shm_size = 4 * p1cubed * sizeof(T);
+        spdlog::debug("Calling compute_geometry on local cells [{}]", cell_list_d.size());
+        compute_geometry<P>();
+        device_synchronize();
 
-      spdlog::debug("Calling stiffness_operator on lcells [{}]", lcells.size());
-      T* x = in.mutable_array().data();
-      T* y = out.mutable_array().data();
-      stiffness_operator<T, P><<<grid_size, block_size, shm_size, 0>>>(
-          x, cell_constants.data(), y, thrust::raw_pointer_cast(G_entity.data()),
-          cell_dofmap.data(), thrust::raw_pointer_cast(dphi_d.data()),
-          thrust::raw_pointer_cast(cell_list_d.data()), cell_list_d.size(), bc_marker.data());
+        dim3 block_size(P + 1, P + 1, P + 1);
+        int p1cubed = (P + 1) * (P + 1) * (P + 1);
+        dim3 grid_size(cell_list_d.size());
+        std::size_t shm_size = 4 * p1cubed * sizeof(T);
 
-      check_device_last_error();
+        spdlog::debug("Calling stiffness_operator on local cells [{}]", cell_list_d.size());
+        T* x = in.mutable_array().data();
+        T* y = out.mutable_array().data();
+        stiffness_operator<T, P><<<grid_size, block_size, shm_size, 0>>>(
+            x, cell_constants.data(), y, thrust::raw_pointer_cast(G_entity.data()),
+            cell_dofmap.data(), thrust::raw_pointer_cast(dphi_d.data()),
+            thrust::raw_pointer_cast(cell_list_d.data()), cell_list_d.size(), bc_marker.data());
+
+        check_device_last_error();
+      }
     }
 
     spdlog::debug("impl_operator done lcells");
@@ -479,6 +491,9 @@ private:
   // On device storage for the inverse diagonal, needed for Jacobi
   // preconditioner (to remove in future)
   thrust::device_vector<T> _diag_inv;
+
+  // Batch size for geometry computation (set to 0 for no batching)
+  std::size_t batch_size;
 };
 
 } // namespace dolfinx::acc
