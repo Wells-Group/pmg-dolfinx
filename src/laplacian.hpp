@@ -294,7 +294,7 @@ public:
                    std::size_t batch_size = 0)
       : degree(degree), cell_constants(coefficients), cell_dofmap(dofmap), xgeom(xgeom),
         geometry_dofmap(geometry_dofmap), dphi_geometry(dphi_geometry), G_weights(G_weights),
-        bc_marker(bc_marker), lcells(lcells), bcells(bcells), batch_size(batch_size)
+        bc_marker(bc_marker), batch_size(batch_size)
   {
     std::map<int, int> Qdegree = {{2, 3}, {3, 4}, {4, 6}, {5, 8}};
 
@@ -315,6 +315,11 @@ public:
     // Basis value gradient evualation table
     dphi_d.resize(table.size() / 2);
     thrust::copy(std::next(table.begin(), table.size() / 2), table.end(), dphi_d.begin());
+
+    lcells_device.resize(lcells.size());
+    thrust::copy(lcells.begin(), lcells.end(), lcells_device.begin());
+    bcells_device.resize(bcells.size());
+    thrust::copy(bcells.begin(), bcells.end(), bcells_device.begin());
   }
 
   // Compute weighted geometry data on GPU
@@ -336,8 +341,7 @@ public:
     std::size_t shm_size = 24 * sizeof(T); // coordinate size (8x3)
     geometry_computation<T, P><<<grid_size, block_size, shm_size, 0>>>(
         xgeom.data(), thrust::raw_pointer_cast(G_entity.data()), geometry_dofmap.data(),
-        dphi_geometry.data(), G_weights.data(), thrust::raw_pointer_cast(cell_list_d.data()),
-        cell_list_d.size());
+        dphi_geometry.data(), G_weights.data(), cell_list_d.data(), cell_list_d.size());
   }
 
   template <int P, typename Vector>
@@ -347,21 +351,19 @@ public:
 
     in.scatter_fwd_begin();
 
-    if (!lcells.empty())
+    if (!lcells_device.empty())
     {
-      cell_list_d.resize(lcells.size());
       std::size_t i = 0;
-      std::size_t i_batch_size = (batch_size == 0) ? lcells.size() : batch_size;
-      while (i < lcells.size())
+      std::size_t i_batch_size = (batch_size == 0) ? lcells_device.size() : batch_size;
+      while (i < lcells_device.size())
       {
-        std::size_t i_next = std::min(lcells.size(), i + i_batch_size);
-        cell_list_d.resize(i_next - i);
-
-        thrust::copy(std::next(lcells.begin(), i), std::next(lcells.begin(), i_next),
-                     cell_list_d.begin());
+        std::size_t i_next = std::min(lcells_device.size(), i + i_batch_size);
+        cell_list_d
+            = std::span<int>(thrust::raw_pointer_cast(lcells_device.data()) + i, (i_next - i));
         i = i_next;
 
         spdlog::debug("Calling compute_geometry on local cells [{}]", cell_list_d.size());
+
         compute_geometry<P>();
         device_synchronize();
 
@@ -375,8 +377,8 @@ public:
         T* y = out.mutable_array().data();
         stiffness_operator<T, P><<<grid_size, block_size, shm_size, 0>>>(
             x, cell_constants.data(), y, thrust::raw_pointer_cast(G_entity.data()),
-            cell_dofmap.data(), thrust::raw_pointer_cast(dphi_d.data()),
-            thrust::raw_pointer_cast(cell_list_d.data()), cell_list_d.size(), bc_marker.data());
+            cell_dofmap.data(), thrust::raw_pointer_cast(dphi_d.data()), cell_list_d.data(),
+            cell_list_d.size(), bc_marker.data());
 
         check_device_last_error();
       }
@@ -397,11 +399,11 @@ public:
 
     spdlog::debug("impl_operator after scatter");
 
-    if (!bcells.empty())
+    if (!bcells_device.empty())
     {
-      spdlog::debug("impl_operator doing bcells. bcells size = {}", bcells.size());
-      cell_list_d.resize(bcells.size());
-      thrust::copy(bcells.begin(), bcells.end(), cell_list_d.begin());
+      spdlog::debug("impl_operator doing bcells. bcells size = {}", bcells_device.size());
+      cell_list_d
+          = std::span<int>(thrust::raw_pointer_cast(bcells_device.data()), bcells_device.size());
 
       compute_geometry<P>();
       device_synchronize();
@@ -416,8 +418,8 @@ public:
 
       stiffness_operator<T, P><<<grid_size, block_size, shm_size, 0>>>(
           x, cell_constants.data(), y, thrust::raw_pointer_cast(G_entity.data()),
-          cell_dofmap.data(), thrust::raw_pointer_cast(dphi_d.data()),
-          thrust::raw_pointer_cast(cell_list_d.data()), cell_list_d.size(), bc_marker.data());
+          cell_dofmap.data(), thrust::raw_pointer_cast(dphi_d.data()), cell_list_d.data(),
+          cell_list_d.size(), bc_marker.data());
 
       check_device_last_error();
     }
@@ -483,10 +485,10 @@ private:
   thrust::device_vector<T> dphi_d;
 
   // Lists of cells which are local (lcells) and boundary (bcells)
-  std::vector<int> lcells, bcells;
+  thrust::device_vector<int> lcells_device, bcells_device;
 
-  // On-device list of cells to execute over
-  thrust::device_vector<int> cell_list_d;
+  // Current list of cells to be processed (TODO: remove this from here)
+  std::span<int> cell_list_d;
 
   // On device storage for the inverse diagonal, needed for Jacobi
   // preconditioner (to remove in future)
