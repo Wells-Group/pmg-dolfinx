@@ -251,15 +251,15 @@ int main(int argc, char* argv[])
     u.scatter_fwd_begin();
 
     // Matrix free
-    int nrep = 500;
+    int nrep = 100;
 
     dolfinx::common::Timer m1timer("% Mat-free Matvec");
     for (int i = 0; i < nrep; ++i)
       op(u, y);
     m1timer.stop();
 
-    // std::cout << "Norm of u = " << acc::norm(u) << "\n";
-    // std::cout << "Norm of y = " << acc::norm(y) << "\n";
+    std::cout << "Norm of u = " << acc::norm(u) << "\n";
+    std::cout << "Norm of y = " << acc::norm(y) << "\n";
 
     // // Compare to assembling on CPU and copying matrix to GPU
     // DeviceVector z(map, 1);
