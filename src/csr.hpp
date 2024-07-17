@@ -187,7 +187,7 @@ public:
 
     double global_norm = 0;
     MPI_Allreduce(&norm, &global_norm, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
-    spdlog::info("A interp norm = {}", std::sqrt(norm));
+    spdlog::info("A interp norm = {}", std::sqrt(global_norm));
 
     _row_ptr = thrust::device_vector<std::int32_t>(num_rows + 1);
     _off_diag_offset = thrust::device_vector<std::int32_t>(num_rows);
