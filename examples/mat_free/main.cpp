@@ -33,7 +33,7 @@ int main(int argc, char* argv[])
   po::options_description desc("Allowed options");
   desc.add_options()("help,h", "print usage message")(
       "ndofs", po::value<std::size_t>()->default_value(343), "number of dofs per rank")(
-      "matrix_comparison", po::bool_switch()->default_value(false), "Compare result to matrix operator");
+      "mat_comp", po::bool_switch()->default_value(false), "Compare result to matrix operator");
 
   po::variables_map vm;
   po::store(po::command_line_parser(argc, argv).options(desc).allow_unregistered().run(), vm);
@@ -45,7 +45,7 @@ int main(int argc, char* argv[])
     return 0;
   }
   const std::size_t ndofs = vm["ndofs"].as<std::size_t>();
-  const bool matrix_comparison = vm["matrix_comparison"].as<bool>();
+  const bool matrix_comparison = vm["mat_comp"].as<bool>();
 
   init_logging(argc, argv);
   MPI_Init(&argc, &argv);
