@@ -324,7 +324,7 @@ public:
 
   // Compute weighted geometry data on GPU
   template <int P>
-  void compute_geometry()
+  void compute_geometry(std::span<int> cell_list_d)
   {
     G_entity.resize(G_weights.size() * cell_list_d.size() * 6);
     dim3 block_size(G_weights.size());
@@ -358,13 +358,13 @@ public:
       while (i < lcells_device.size())
       {
         std::size_t i_next = std::min(lcells_device.size(), i + i_batch_size);
-        cell_list_d
-            = std::span<int>(thrust::raw_pointer_cast(lcells_device.data()) + i, (i_next - i));
+        std::span<int> cell_list_d(thrust::raw_pointer_cast(lcells_device.data()) + i,
+                                   (i_next - i));
         i = i_next;
 
         spdlog::debug("Calling compute_geometry on local cells [{}]", cell_list_d.size());
 
-        compute_geometry<P>();
+        compute_geometry<P>(cell_list_d);
         device_synchronize();
 
         dim3 block_size(P + 1, P + 1, P + 1);
@@ -392,7 +392,6 @@ public:
     spdlog::debug("G_entity size {}", G_entity.size());
     spdlog::debug("cell_dofmap size {}", cell_dofmap.size());
     spdlog::debug("dphi_d size {}", dphi_d.size());
-    spdlog::debug("cell_list_d size {}", cell_list_d.size());
     spdlog::debug("bc_marker size {}", bc_marker.size());
 
     in.scatter_fwd_end();
@@ -402,10 +401,10 @@ public:
     if (!bcells_device.empty())
     {
       spdlog::debug("impl_operator doing bcells. bcells size = {}", bcells_device.size());
-      cell_list_d
-          = std::span<int>(thrust::raw_pointer_cast(bcells_device.data()), bcells_device.size());
+      std::span<int> cell_list_d(thrust::raw_pointer_cast(bcells_device.data()),
+                                 bcells_device.size());
 
-      compute_geometry<P>();
+      compute_geometry<P>(cell_list_d);
       device_synchronize();
 
       dim3 block_size(P + 1, P + 1, P + 1);
@@ -486,9 +485,6 @@ private:
 
   // Lists of cells which are local (lcells) and boundary (bcells)
   thrust::device_vector<int> lcells_device, bcells_device;
-
-  // Current list of cells to be processed (TODO: remove this from here)
-  std::span<int> cell_list_d;
 
   // On device storage for the inverse diagonal, needed for Jacobi
   // preconditioner (to remove in future)
