@@ -241,9 +241,11 @@ int main(int argc, char* argv[])
 
     // Create matrix free operator
     spdlog::info("Create MatFreeLaplacian");
+    dolfinx::common::Timer op_create_timer("% Create matfree operator");
     acc::MatFreeLaplacian<T> op(order, constants_d_span, dofmap_d_span, xgeom_d_span,
                                 xdofmap_d_span, dphi_d_span, Gweights_d_span, lcells, bcells,
                                 bc_marker_d_span, batch_size);
+    op_create_timer.stop();
 
     la::Vector<T> b(map, 1);
     b.set(1.0);
@@ -255,7 +257,7 @@ int main(int argc, char* argv[])
     u.scatter_fwd_begin();
 
     // Matrix free
-    int nrep = 100;
+    int nrep = 1000;
 
     dolfinx::common::Timer m1timer("% Mat-free Matvec");
     for (int i = 0; i < nrep; ++i)
