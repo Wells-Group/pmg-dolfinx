@@ -344,6 +344,7 @@ public:
         compute_geometry<5>(cell_list_d);
       else
         throw std::runtime_error("Unsupported degree");
+      device_synchronize();
     }
   }
 
