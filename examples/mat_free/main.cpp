@@ -32,7 +32,8 @@ int main(int argc, char* argv[])
 {
   po::options_description desc("Allowed options");
   desc.add_options()("help,h", "print usage message")(
-      "ndofs", po::value<std::size_t>()->default_value(343), "number of dofs per rank");
+      "ndofs", po::value<std::size_t>()->default_value(343), "number of dofs per rank")(
+      "matrix_comparison", po::bool_switch()->default_value(false), "Compare result to matrix operator");
 
   po::variables_map vm;
   po::store(po::command_line_parser(argc, argv).options(desc).allow_unregistered().run(), vm);
@@ -44,6 +45,7 @@ int main(int argc, char* argv[])
     return 0;
   }
   const std::size_t ndofs = vm["ndofs"].as<std::size_t>();
+  const bool matrix_comparison = vm["matrix_comparison"].as<bool>();
 
   init_logging(argc, argv);
   MPI_Init(&argc, &argv);
@@ -239,7 +241,7 @@ int main(int argc, char* argv[])
     spdlog::info("Create MatFreeLaplacian");
     acc::MatFreeLaplacian<T> op(order, constants_d_span, dofmap_d_span, xgeom_d_span,
                                 xdofmap_d_span, dphi_d_span, Gweights_d_span, lcells, bcells,
-                                bc_marker_d_span);
+                                bc_marker_d_span, 16384);
 
     la::Vector<T> b(map, 1);
     b.set(1.0);
@@ -251,7 +253,7 @@ int main(int argc, char* argv[])
     u.scatter_fwd_begin();
 
     // Matrix free
-    int nrep = 500;
+    int nrep = 100;
 
     dolfinx::common::Timer m1timer("% Mat-free Matvec");
     for (int i = 0; i < nrep; ++i)
@@ -261,23 +263,26 @@ int main(int argc, char* argv[])
     std::cout << "Norm of u = " << acc::norm(u) << "\n";
     std::cout << "Norm of y = " << acc::norm(y) << "\n";
 
-    // Compare to assembling on CPU and copying matrix to GPU
-    DeviceVector z(map, 1);
-    z.set(T{0.0});
+    if (matrix_comparison)
+    {
+      // Compare to assembling on CPU and copying matrix to GPU
+      DeviceVector z(map, 1);
+      z.set(T{0.0});
 
-    acc::MatrixOperator<T> mat_op(a, {bc});
-    dolfinx::common::Timer mtimer("% CSR Matvec");
-    for (int i = 0; i < nrep; ++i)
-      mat_op(u, z);
-    mtimer.stop();
+      acc::MatrixOperator<T> mat_op(a, {bc});
+      dolfinx::common::Timer mtimer("% CSR Matvec");
+      for (int i = 0; i < nrep; ++i)
+        mat_op(u, z);
+      mtimer.stop();
 
-    std::cout << "Norm of u = " << acc::norm(u) << "\n";
-    std::cout << "Norm of z = " << acc::norm(z) << "\n";
+      std::cout << "Norm of u = " << acc::norm(u) << "\n";
+      std::cout << "Norm of z = " << acc::norm(z) << "\n";
 
-    // Compute error
-    DeviceVector e(map, 1);
-    acc::axpy(e, T{-1.0}, y, z);
-    std::cout << "Norm of error = " << acc::norm(e) << "\n";
+      // Compute error
+      DeviceVector e(map, 1);
+      acc::axpy(e, T{-1.0}, y, z);
+      std::cout << "Norm of error = " << acc::norm(e) << "\n";
+    }
 
     // Display timings
     dolfinx::list_timings(MPI_COMM_WORLD, {dolfinx::TimingType::wall});
