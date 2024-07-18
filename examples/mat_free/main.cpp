@@ -32,7 +32,9 @@ int main(int argc, char* argv[])
 {
   po::options_description desc("Allowed options");
   desc.add_options()("help,h", "print usage message")(
-      "ndofs", po::value<std::size_t>()->default_value(343), "number of dofs per rank");
+      "ndofs", po::value<std::size_t>()->default_value(343), "number of dofs per rank")(
+      "mat_comp", po::bool_switch()->default_value(false), "Compare result to matrix operator")(
+      "batch_size", po::value<std::size_t>()->default_value(0), "The geometry batch size. Set to 0 to precompute");
 
   po::variables_map vm;
   po::store(po::command_line_parser(argc, argv).options(desc).allow_unregistered().run(), vm);
@@ -44,6 +46,8 @@ int main(int argc, char* argv[])
     return 0;
   }
   const std::size_t ndofs = vm["ndofs"].as<std::size_t>();
+  const std::size_t batch_size = vm["batch_size"].as<std::size_t>();
+  const bool matrix_comparison = vm["mat_comp"].as<bool>();
 
   init_logging(argc, argv);
   MPI_Init(&argc, &argv);
@@ -53,7 +57,7 @@ int main(int argc, char* argv[])
     MPI_Comm_rank(comm, &rank);
     MPI_Comm_size(comm, &size);
 
-    const int order = 3;
+    const int order = 4;
     double nx_approx = (std::pow(ndofs * size, 1.0 / 3.0) - 1) / order;
     std::int64_t n0 = static_cast<std::int64_t>(nx_approx);
     std::array<std::int64_t, 3> nx = {n0, n0, n0};
@@ -99,9 +103,10 @@ int main(int argc, char* argv[])
     }
 
     // Quadrature points and weights on hex (3D)
+    std::map<int, int> Qdegree = {{2, 3}, {3, 4}, {4, 6}, {5, 8}};
     auto [Gpoints, Gweights] = basix::quadrature::make_quadrature<T>(
         basix::quadrature::type::gll, basix::cell::type::hexahedron, basix::polyset::type::standard,
-        order + 1);
+        Qdegree[order]);
 
     auto V = std::make_shared<fem::FunctionSpace<T>>(fem::create_functionspace(mesh, *element));
     auto [lcells, bcells] = compute_boundary_cells(V);
@@ -236,8 +241,11 @@ int main(int argc, char* argv[])
 
     // Create matrix free operator
     spdlog::info("Create MatFreeLaplacian");
-    acc::MatFreeLaplacian<T> op(3, constants_d_span, dofmap_d_span, xgeom_d_span, xdofmap_d_span,
-                                dphi_d_span, Gweights_d_span, lcells, bcells, bc_marker_d_span);
+    dolfinx::common::Timer op_create_timer("% Create matfree operator");
+    acc::MatFreeLaplacian<T> op(order, constants_d_span, dofmap_d_span, xgeom_d_span,
+                                xdofmap_d_span, dphi_d_span, Gweights_d_span, lcells, bcells,
+                                bc_marker_d_span, batch_size);
+    op_create_timer.stop();
 
     la::Vector<T> b(map, 1);
     b.set(1.0);
@@ -249,7 +257,7 @@ int main(int argc, char* argv[])
     u.scatter_fwd_begin();
 
     // Matrix free
-    int nrep = 500;
+    int nrep = 1000;
 
     dolfinx::common::Timer m1timer("% Mat-free Matvec");
     for (int i = 0; i < nrep; ++i)
@@ -259,23 +267,26 @@ int main(int argc, char* argv[])
     std::cout << "Norm of u = " << acc::norm(u) << "\n";
     std::cout << "Norm of y = " << acc::norm(y) << "\n";
 
-    // Compare to assembling on CPU and copying matrix to GPU
-    DeviceVector z(map, 1);
-    z.set(T{0.0});
+    if (matrix_comparison)
+    {
+      // Compare to assembling on CPU and copying matrix to GPU
+      DeviceVector z(map, 1);
+      z.set(T{0.0});
 
-    acc::MatrixOperator<T> mat_op(a, {bc});
-    dolfinx::common::Timer mtimer("% CSR Matvec");
-    for (int i = 0; i < nrep; ++i)
-      mat_op(u, z);
-    mtimer.stop();
+      acc::MatrixOperator<T> mat_op(a, {bc});
+      dolfinx::common::Timer mtimer("% CSR Matvec");
+      for (int i = 0; i < nrep; ++i)
+        mat_op(u, z);
+      mtimer.stop();
 
-    std::cout << "Norm of u = " << acc::norm(u) << "\n";
-    std::cout << "Norm of z = " << acc::norm(z) << "\n";
+      std::cout << "Norm of u = " << acc::norm(u) << "\n";
+      std::cout << "Norm of z = " << acc::norm(z) << "\n";
 
-    // Compute error
-    DeviceVector e(map, 1);
-    acc::axpy(e, T{-1.0}, y, z);
-    std::cout << "Norm of error = " << acc::norm(e) << "\n";
+      // Compute error
+      DeviceVector e(map, 1);
+      acc::axpy(e, T{-1.0}, y, z);
+      std::cout << "Norm of error = " << acc::norm(e) << "\n";
+    }
 
     // Display timings
     dolfinx::list_timings(MPI_COMM_WORLD, {dolfinx::TimingType::wall});

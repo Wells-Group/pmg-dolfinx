@@ -11,8 +11,8 @@ using namespace dolfinx;
 namespace dolfinx::acc
 {
 /// Conjugate gradient method
-template <typename Vector, typename Operator, typename Prolongation, typename Restriction,
-          typename Solver, typename CoarseSolver>
+template <typename Vector, typename Operator, typename Solver, typename CoarseSolver,
+          typename Interpolator>
 class MultigridPreconditioner
 {
   /// The value type
@@ -47,9 +47,9 @@ public:
 
   void set_operators(std::vector<std::shared_ptr<Operator>>& operators) { _operators = operators; }
 
-  void set_interpolators(std::vector<std::shared_ptr<Prolongation>>& interpolators)
+  void set_interpolators(std::vector<std::shared_ptr<Interpolator>>& interpolators)
   {
-    _interpolation = interpolators;
+    _matfree_interpolation = interpolators;
   }
 
   // Apply M^{-1}x = y
@@ -89,7 +89,7 @@ public:
       spdlog::info("After initial smooth: rnorm = {}", acc::norm(*_r[i]));
 
       // Restrict residual from level i to level (i - 1)
-      (*_interpolation[i - 1])(*_r[i], *_b[i - 1], true);
+      _matfree_interpolation[i - 1]->reverse_interpolate(*_r[i], *_b[i - 1]);
     }
 
     spdlog::info("Level 0");
@@ -120,8 +120,7 @@ public:
     {
       spdlog::info("Level {}", i + 1);
 
-      // [coarse->fine] Prolong correction
-      (*_interpolation[i])(*_u[i], *_du[i + 1], false);
+      _matfree_interpolation[i]->interpolate(*_u[i], *_du[i + 1]);
 
       spdlog::info("norm(_u[{}]) = {}", i, acc::norm(*_u[i]));
       spdlog::info("norm(_du[{}]) = {}", i + 1, acc::norm(*_du[i + 1]));
@@ -171,9 +170,9 @@ private:
   // Marker for bc
   std::span<const std::int8_t> _bc_marker;
 
-  // Prologation and restriction operatos
+  // Prolongation and restriction operators
   // Size should be nlevels - 1
-  std::vector<std::shared_ptr<Prolongation>> _interpolation;
+  std::vector<std::shared_ptr<Interpolator>> _matfree_interpolation;
 
   // Operators used to compute the residual
   std::vector<std::shared_ptr<Operator>> _operators;

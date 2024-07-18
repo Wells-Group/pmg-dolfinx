@@ -30,6 +30,7 @@ module load rocm
 module load gcc
 source spack/share/spack/setup-env.sh
 spack env activate hypre-rocm
+spack load cmake
 
 # Build an example
 cd pmg-dolfinx/examples/pmg

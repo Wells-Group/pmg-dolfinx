@@ -392,10 +392,11 @@ public:
                    std::span<const std::int32_t> dofmap, std::span<const T> xgeom,
                    std::span<const std::int32_t> geometry_dofmap, std::span<const T> dphi_geometry,
                    std::span<const T> G_weights, const std::vector<int>& lcells,
-                   const std::vector<int>& bcells, std::span<const std::int8_t> bc_marker)
+                   const std::vector<int>& bcells, std::span<const std::int8_t> bc_marker,
+                   std::size_t batch_size = 0)
       : degree(degree), cell_constants(coefficients), cell_dofmap(dofmap), xgeom(xgeom),
         geometry_dofmap(geometry_dofmap), dphi_geometry(dphi_geometry), G_weights(G_weights),
-        bc_marker(bc_marker), lcells(lcells), bcells(bcells)
+        bc_marker(bc_marker), batch_size(batch_size)
   {
     std::map<int, int> Qdegree = {{2, 3}, {3, 4}, {4, 6}, {5, 8}};
 
@@ -416,11 +417,42 @@ public:
     // Basis value gradient evualation table
     dphi_d.resize(table.size() / 2);
     thrust::copy(std::next(table.begin(), table.size() / 2), table.end(), dphi_d.begin());
+
+    lcells_device.resize(lcells.size());
+    thrust::copy(lcells.begin(), lcells.end(), lcells_device.begin());
+    bcells_device.resize(bcells.size());
+    thrust::copy(bcells.begin(), bcells.end(), bcells_device.begin());
+
+    // If we're not batching the geomery, precompute it
+    if (batch_size == 0)
+    {
+      // FIXME Store cells and local/ghost offsets instead to avoid this?
+      spdlog::info("Precomputing geometry");
+      thrust::device_vector<std::int32_t> cells_d(lcells_device.size() + bcells_device.size());
+      thrust::copy(lcells_device.begin(), lcells_device.end(), cells_d.begin());
+      thrust::copy(bcells_device.begin(), bcells_device.end(), cells_d.begin() + lcells_device.size());
+      std::span<std::int32_t> cell_list_d(thrust::raw_pointer_cast(cells_d.data()), cells_d.size());
+
+      // FIXME Tidy
+      if (degree == 1)
+        compute_geometry<1>(cell_list_d);
+      else if (degree == 2)
+        compute_geometry<2>(cell_list_d);
+      else if (degree == 3)
+        compute_geometry<3>(cell_list_d);
+      else if (degree == 4)
+        compute_geometry<4>(cell_list_d);
+      else if (degree == 5)
+        compute_geometry<5>(cell_list_d);
+      else
+        throw std::runtime_error("Unsupported degree");
+      device_synchronize();
+    }
   }
 
   // Compute weighted geometry data on GPU
   template <int P>
-  void compute_geometry()
+  void compute_geometry(std::span<int> cell_list_d)
   {
     G_entity.resize(G_weights.size() * cell_list_d.size() * 6);
     dim3 block_size(G_weights.size());
@@ -432,12 +464,12 @@ public:
     spdlog::debug("dphi_geometry size {}", dphi_geometry.size());
     spdlog::debug("G_weights size {}", G_weights.size());
     spdlog::debug("cell_list_d size {}", cell_list_d.size());
+    spdlog::debug("Calling geometry_computation [{}]", P);
 
     std::size_t shm_size = 24 * sizeof(T); // coordinate size (8x3)
     geometry_computation<T, P><<<grid_size, block_size, shm_size, 0>>>(
         xgeom.data(), thrust::raw_pointer_cast(G_entity.data()), geometry_dofmap.data(),
-        dphi_geometry.data(), G_weights.data(), thrust::raw_pointer_cast(cell_list_d.data()),
-        cell_list_d.size());
+        dphi_geometry.data(), G_weights.data(), cell_list_d.data(), cell_list_d.size());
   }
 
   template <int P, typename Vector>
@@ -447,27 +479,39 @@ public:
 
     in.scatter_fwd_begin();
 
-    if (!lcells.empty())
+    if (!lcells_device.empty())
     {
-      cell_list_d.resize(lcells.size());
-      thrust::copy(lcells.begin(), lcells.end(), cell_list_d.begin());
+      std::size_t i = 0;
+      std::size_t i_batch_size = (batch_size == 0) ? lcells_device.size() : batch_size;
+      while (i < lcells_device.size())
+      {
+        std::size_t i_next = std::min(lcells_device.size(), i + i_batch_size);
+        std::span<int> cell_list_d(thrust::raw_pointer_cast(lcells_device.data()) + i,
+                                   (i_next - i));
+        i = i_next;
 
-      compute_geometry<P>();
-      device_synchronize();
+        if (batch_size > 0)
+        {
+          spdlog::debug("Calling compute_geometry on local cells [{}]", cell_list_d.size());
+          compute_geometry<P>(cell_list_d);
+          device_synchronize();
+        }
 
-      dim3 block_size(P + 1, P + 1, P + 1);
-      int p1cubed = (P + 1) * (P + 1) * (P + 1);
-      dim3 grid_size(cell_list_d.size());
-      std::size_t shm_size = 4 * p1cubed * sizeof(T);
+        dim3 block_size(P + 1, P + 1, P + 1);
+        int p1cubed = (P + 1) * (P + 1) * (P + 1);
+        dim3 grid_size(cell_list_d.size());
+        std::size_t shm_size = 4 * p1cubed * sizeof(T);
 
-      T* x = in.mutable_array().data();
-      T* y = out.mutable_array().data();
-      stiffness_operator<T, P><<<grid_size, block_size, shm_size, 0>>>(
-          x, cell_constants.data(), y, thrust::raw_pointer_cast(G_entity.data()),
-          cell_dofmap.data(), thrust::raw_pointer_cast(dphi_d.data()),
-          thrust::raw_pointer_cast(cell_list_d.data()), cell_list_d.size(), bc_marker.data());
+        spdlog::debug("Calling stiffness_operator on local cells [{}]", cell_list_d.size());
+        T* x = in.mutable_array().data();
+        T* y = out.mutable_array().data();
+        stiffness_operator<T, P><<<grid_size, block_size, shm_size, 0>>>(
+            x, cell_constants.data(), y, thrust::raw_pointer_cast(G_entity.data()),
+            cell_dofmap.data(), thrust::raw_pointer_cast(dphi_d.data()), cell_list_d.data(),
+            cell_list_d.size(), bc_marker.data());
 
-      check_device_last_error();
+        check_device_last_error();
+      }
     }
 
     spdlog::debug("impl_operator done lcells");
@@ -478,21 +522,23 @@ public:
     spdlog::debug("G_entity size {}", G_entity.size());
     spdlog::debug("cell_dofmap size {}", cell_dofmap.size());
     spdlog::debug("dphi_d size {}", dphi_d.size());
-    spdlog::debug("cell_list_d size {}", cell_list_d.size());
     spdlog::debug("bc_marker size {}", bc_marker.size());
 
     in.scatter_fwd_end();
 
     spdlog::debug("impl_operator after scatter");
 
-    if (!bcells.empty())
+    if (!bcells_device.empty())
     {
-      spdlog::debug("impl_operator doing bcells. bcells size = {}", bcells.size());
-      cell_list_d.resize(bcells.size());
-      thrust::copy(bcells.begin(), bcells.end(), cell_list_d.begin());
+      spdlog::debug("impl_operator doing bcells. bcells size = {}", bcells_device.size());
+      std::span<int> cell_list_d(thrust::raw_pointer_cast(bcells_device.data()),
+                                 bcells_device.size());
 
-      compute_geometry<P>();
-      device_synchronize();
+      if (batch_size > 0)
+      {
+        compute_geometry<P>(cell_list_d);
+        device_synchronize();
+      }
 
       dim3 block_size(P + 1, P + 1, P + 1);
       int p1cubed = (P + 1) * (P + 1) * (P + 1);
@@ -504,8 +550,8 @@ public:
 
       stiffness_operator<T, P><<<grid_size, block_size, shm_size, 0>>>(
           x, cell_constants.data(), y, thrust::raw_pointer_cast(G_entity.data()),
-          cell_dofmap.data(), thrust::raw_pointer_cast(dphi_d.data()),
-          thrust::raw_pointer_cast(cell_list_d.data()), cell_list_d.size(), bc_marker.data());
+          cell_dofmap.data(), thrust::raw_pointer_cast(dphi_d.data()), cell_list_d.data(),
+          cell_list_d.size(), bc_marker.data());
 
       check_device_last_error();
     }
@@ -527,6 +573,13 @@ public:
       impl_operator<2>(in, out);
     else if (degree == 3)
       impl_operator<3>(in, out);
+    else if (degree == 4)
+      impl_operator<4>(in, out);
+    else if (degree == 5)
+      impl_operator<5>(in, out);
+    else
+      throw std::runtime_error("Unsupported degree");
+
     spdlog::debug("Mat free operator end");
   }
 
@@ -564,14 +617,14 @@ private:
   thrust::device_vector<T> dphi_d;
 
   // Lists of cells which are local (lcells) and boundary (bcells)
-  std::vector<int> lcells, bcells;
-
-  // On-device list of cells to execute over
-  thrust::device_vector<int> cell_list_d;
+  thrust::device_vector<int> lcells_device, bcells_device;
 
   // On device storage for the inverse diagonal, needed for Jacobi
   // preconditioner (to remove in future)
   thrust::device_vector<T> _diag_inv;
+
+  // Batch size for geometry computation (set to 0 for no batching)
+  std::size_t batch_size;
 };
 
 } // namespace dolfinx::acc

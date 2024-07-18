@@ -166,7 +166,6 @@ public:
 
     // FIXME: should this be mat_add or mat_set?
     fem::interpolation_matrix<T>(V0, V1, _A->mat_set_values());
-    _A->scatter_rev();
 
     // Create HIP/CUDA matrix
     _col_map = std::make_shared<const common::IndexMap>(pattern.column_index_map());
@@ -182,9 +181,13 @@ public:
     spdlog::warn("Max column = {}", *std::max_element(_A->cols().begin(), _A->cols().end()));
 
     T norm = 0.0;
-    for (T v : _A->values())
-      norm += v * v;
-    spdlog::info("A interp norm = {}", std::sqrt(norm));
+    auto v = _A->values();
+    for (int i = 0; i < nnz; ++i)
+      norm += v[i] * v[i];
+
+    double global_norm = 0;
+    MPI_Allreduce(&norm, &global_norm, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+    spdlog::info("A interp norm = {}", std::sqrt(global_norm));
 
     _row_ptr = thrust::device_vector<std::int32_t>(num_rows + 1);
     _off_diag_offset = thrust::device_vector<std::int32_t>(num_rows);
