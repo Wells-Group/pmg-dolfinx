@@ -277,6 +277,108 @@ __global__ void stiffness_operator(const T* x, const T* entity_constants, T* y, 
     atomicAdd(&y[dof], val);
 }
 
+template <typename T, int P>
+__global__ void mat_diagonal(const T* entity_constants, T* y, const T* G_entity,
+                             const std::int32_t* entity_dofmap, const T* dphi, const int* entities,
+                             int n_entities, const std::int8_t* bc_marker)
+{
+  constexpr int nd = P + 1; // Number of dofs per direction in 1D
+  constexpr int nq = nd;    // Number of quadrature points in 1D (must be the same as nd)
+
+  assert(blockDim.x == nd);
+  assert(blockDim.y == nd);
+  assert(blockDim.z == nd);
+
+  constexpr int cube_nd = nd * nd * nd;
+  constexpr int cube_nq = nq * nq * nq;
+  constexpr int square_nd = nd * nd;
+  constexpr int square_nq = nq * nq;
+
+  extern __shared__ T shared_mem[];
+
+  T* scratchx = shared_mem;         // size nq^3
+  T* scratchy = scratchx + cube_nq; // size nq^3
+  T* scratchz = scratchy + cube_nq; // size nq^3
+
+  int tx = threadIdx.x; // 1d dofs x direction
+  int ty = threadIdx.y; // 1d dofs y direction
+  int tz = threadIdx.z; // 1d dofs z direction
+
+  // thread_id represents the dof index in 3D
+  int thread_id = tx * square_nd + ty * nd + tz;
+  // block_id is the cell (or facet) index
+  int block_id = blockIdx.x;
+
+  // Check if the block_id is valid (i.e. within the number of entities)
+  if (block_id >= n_entities)
+    return;
+
+  // Compute val_x, val_y, val_z at quadrature point of this thread
+  // Apply contraction in the x-direction
+  // tx is quadrature point index, ty, tz dof indices
+  int ix = 0;
+  T val_x = dphi[tx * nd + ix];
+
+  // Because phi(nq, nd) is the identity for this choice of quadrature points,
+  // we do not need to apply it in the y and z direction, and val_x is already the value at the
+  // quadrature point of thread (tx, ty, tz). Similarly, below, for val_y and val_z.
+
+  // Apply contraction in the y-direction
+  // ty is quadrature point index, tx, tz dof indices
+  int iy = 1;
+  T val_y = dphi[ty * nd + iy];
+
+  // Apply contraction in the z-direction
+  // tz is quadrature point index, tx, ty dof indices
+  int iz = 2;
+  T val_z = dphi[tz * nd + iz];
+
+  // Apply transform at each quadrature point (thread)
+  int offset = (block_id * nq * nq * nq + thread_id) * 6;
+  T G0 = G_entity[offset + 0];
+  T G1 = G_entity[offset + 1];
+  T G2 = G_entity[offset + 2];
+  T G3 = G_entity[offset + 3];
+  T G4 = G_entity[offset + 4];
+  T G5 = G_entity[offset + 5];
+
+  // DG-0 Coefficient
+  T coeff = entity_constants[block_id];
+
+  // Apply geometry
+  T fw0 = coeff * (G0 * val_x + G1 * val_y + G2 * val_z);
+  T fw1 = coeff * (G1 * val_x + G3 * val_y + G4 * val_z);
+  T fw2 = coeff * (G2 * val_x + G4 * val_y + G5 * val_z);
+
+  // Store values at quadrature points
+  // scratchx, scratchy, scratchz all have dimensions (nq, nq, nq)
+  scratchx[tx * square_nq + ty * nq + tz] = fw0;
+  scratchy[tx * square_nq + ty * nq + tz] = fw1;
+  scratchz[tx * square_nq + ty * nq + tz] = fw2;
+
+  __syncthreads();
+
+  // tx is dof index, ty, tz quadrature point indices
+  val_x = dphi[ix * nd + tx] * scratchx[ix * square_nq + ty * nd + tz];
+
+  // Apply contraction in the y-direction and add y contribution
+  // ty is dof index, tx, tz quadrature point indices
+  val_y = dphi[iy * nd + ty] * scratchy[tx * square_nq + iy * nd + tz];
+
+  // Apply contraction in the z-direction and add z contribution
+  // tz is dof index, tx, ty quadrature point indices
+  val_z = dphi[iz * nd + tz] * scratchz[tx * square_nq + ty * nd + iz];
+
+  // Sum contributions
+  T val = val_x + val_y + val_z;
+
+  int dof = entity_dofmap[entities[block_id] * cube_nd + thread_id];
+  if (bc_marker[dof])
+    y[dof] = T(1.0);
+  else
+    y[dof] = val;
+}
+
 namespace dolfinx::acc
 {
 
