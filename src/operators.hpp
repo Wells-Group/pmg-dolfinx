@@ -189,11 +189,11 @@ public:
     spdlog::info("Hip/CuPlaceArray");
 
 #ifdef USE_HIP
-    int ierr = VecHIPPlaceArray(_x_petsc, x.array().data());
-    ierr = VecHIPPlaceArray(_y_petsc, y.array().data());
+    VecHIPPlaceArray(_x_petsc, x.array().data());
+    VecHIPPlaceArray(_y_petsc, y.array().data());
 #elif USE_CUDA
-    int ierr = VecCUDAPlaceArray(_x_petsc, x.array().data());
-    ierr = VecCUDAPlaceArray(_y_petsc, y.array().data());
+    VecCUDAPlaceArray(_x_petsc, x.array().data());
+    VecCUDAPlaceArray(_y_petsc, y.array().data());
 #endif
 
     int nx, ny;
