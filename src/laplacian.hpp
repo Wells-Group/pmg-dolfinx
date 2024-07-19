@@ -313,26 +313,6 @@ __global__ void mat_diagonal(const T* entity_constants, T* y, const T* G_entity,
   if (block_id >= n_entities)
     return;
 
-  // Compute val_x, val_y, val_z at quadrature point of this thread
-  // Apply contraction in the x-direction
-  // tx is quadrature point index, ty, tz dof indices
-  int ix = 0;
-  T val_x = dphi[tx * nd + ix];
-
-  // Because phi(nq, nd) is the identity for this choice of quadrature points,
-  // we do not need to apply it in the y and z direction, and val_x is already the value at the
-  // quadrature point of thread (tx, ty, tz). Similarly, below, for val_y and val_z.
-
-  // Apply contraction in the y-direction
-  // ty is quadrature point index, tx, tz dof indices
-  int iy = 1;
-  T val_y = dphi[ty * nd + iy];
-
-  // Apply contraction in the z-direction
-  // tz is quadrature point index, tx, ty dof indices
-  int iz = 2;
-  T val_z = dphi[tz * nd + iz];
-
   // Apply transform at each quadrature point (thread)
   int offset = (block_id * nq * nq * nq + thread_id) * 6;
   T G0 = G_entity[offset + 0];
@@ -346,31 +326,49 @@ __global__ void mat_diagonal(const T* entity_constants, T* y, const T* G_entity,
   T coeff = entity_constants[block_id];
 
   // Apply geometry
-  T fw0 = coeff * (G0 * val_x + G1 * val_y + G2 * val_z);
-  T fw1 = coeff * (G1 * val_x + G3 * val_y + G4 * val_z);
-  T fw2 = coeff * (G2 * val_x + G4 * val_y + G5 * val_z);
+  T fw0 = 0;
+  T fw1 = 0;
+  T fw2 = 0;
+
+  for (int ix = 0; ix < nq; ++ix)
+    for (int iy = 0; iy < nq; ++iy)
+      for (int iz = 0; iz < nq; ++iz)
+      {
+        T val_x = dphi[ix + tx * nd];
+        T val_y = dphi[iy + ty * nd];
+        T val_z = dphi[iz + tz * nd];
+        fw0 += (G0 * val_x + G1 * val_y + G2 * val_z);
+        fw1 += (G1 * val_x + G3 * val_y + G4 * val_z);
+        fw2 += (G2 * val_x + G4 * val_y + G5 * val_z);
+      }
 
   // Store values at quadrature points
   // scratchx, scratchy, scratchz all have dimensions (nq, nq, nq)
-  scratchx[tx * square_nq + ty * nq + tz] = fw0;
-  scratchy[tx * square_nq + ty * nq + tz] = fw1;
-  scratchz[tx * square_nq + ty * nq + tz] = fw2;
+  scratchx[tx * square_nq + ty * nq + tz] = coeff * fw0;
+  scratchy[tx * square_nq + ty * nq + tz] = coeff * fw1;
+  scratchz[tx * square_nq + ty * nq + tz] = coeff * fw2;
 
   __syncthreads();
 
-  // tx is dof index, ty, tz quadrature point indices
-  val_x = dphi[ix * nd + tx] * scratchx[ix * square_nq + ty * nd + tz];
+  T val = 0.0;
+  for (int ix = 0; ix < nq; ++ix)
+    for (int iy = 0; iy < nq; ++iy)
+      for (int iz = 0; iz < nq; ++iz)
+      {
+        // tx is dof index, ty, tz quadrature point indices
+        val_x = dphi[ix * nd + tx] * scratchx[ix * square_nq + ty * nd + tz];
 
-  // Apply contraction in the y-direction and add y contribution
-  // ty is dof index, tx, tz quadrature point indices
-  val_y = dphi[iy * nd + ty] * scratchy[tx * square_nq + iy * nd + tz];
+        // Apply contraction in the y-direction and add y contribution
+        // ty is dof index, tx, tz quadrature point indices
+        val_y = dphi[iy * nd + ty] * scratchy[tx * square_nq + iy * nd + tz];
 
-  // Apply contraction in the z-direction and add z contribution
-  // tz is dof index, tx, ty quadrature point indices
-  val_z = dphi[iz * nd + tz] * scratchz[tx * square_nq + ty * nd + iz];
+        // Apply contraction in the z-direction and add z contribution
+        // tz is dof index, tx, ty quadrature point indices
+        val_z = dphi[iz * nd + tz] * scratchz[tx * square_nq + ty * nd + iz];
 
-  // Sum contributions
-  T val = val_x + val_y + val_z;
+        // Sum contributions
+        val += val_x + val_y + val_z;
+      }
 
   int dof = entity_dofmap[entities[block_id] * cube_nd + thread_id];
   if (bc_marker[dof])
